@@ -19,7 +19,8 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
        hotd status [--home DIR]
 
 --home is the engine's HOT_HOME (hot-state/ and logs/ live there; default $HOT_HOME).
---engine-dir is the horizon-server --dir of the engine (default: --home).
+--engine-dir is the horizon-server --dir of the engine (default: --home); mod data packs go
+to the world folder named in its server.toml.
 --allowed-signers defaults to <home>/hot-keys/allowed_signers.";
 
 struct Args {
@@ -94,9 +95,12 @@ fn main() -> ExitCode {
     if let Some(file) = args.allowed_signers {
         cfg.allowed_signers = std::path::absolute(&file).unwrap_or(file);
     }
+    let engine_dir = args.engine_dir.unwrap_or(home);
+    let engine_dir = std::path::absolute(&engine_dir).unwrap_or(engine_dir);
+    cfg.world = hotd::data::world_dir(&engine_dir);
     let engine = HorizonServer {
         program: args.engine,
-        dir: args.engine_dir.unwrap_or(home),
+        dir: engine_dir,
     };
     let mut daemon = match Daemon::open(cfg, engine) {
         Ok(d) => d,

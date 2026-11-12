@@ -24,3 +24,7 @@ pub const BAD_COMMIT: Code = Code::new("HOT-E0206");
 
 /// PL: Pliku stanu `hotd` nie da się odczytać ani zapisać. EN: A `hotd` state file failed.
 pub const STATE_FILE: Code = Code::new("HOT-E0207");
+
+/// PL: Paczki danych moda nie da się przygotować albo silnik jej nie włączył (M3).
+/// EN: A mod's data pack cannot be prepared or the engine did not enable it (M3).
+pub const DATA_PACK_FAILED: Code = Code::new("HOT-E0208");

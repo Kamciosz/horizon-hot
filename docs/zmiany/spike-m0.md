@@ -31,9 +31,12 @@
 - `scripts/server-install.sh`: instalator serwera na Ubuntu jednym poleceniem (D25, kroki 1–8 i 10): sprawdzenie maszyny, użytkownik `horizon` i `/srv/horizon`, Horizon z oficjalnego `install.sh`, `hotd` i `hot-core` budowane ze źródeł, klucz podpisu CI i `allowed_signers`, klucz tylko do odczytu dla prywatnego repo, `hot.yml` z przypiętą wersją horizon-hot, świat, usługi systemd, `ufw`, kopie co noc, autotest. Silnik z `hot-host` budowany dopiero po zgodzie właściciela (`--trust-native-code`). Ponowne uruchomienie robi tylko to, czego brakuje. Kody `HOT-E0101`–`HOT-E0111`.
 - Test katalogu błędów sprawdza też kody w `scripts/`.
 - `hotd`: pole `fetch_error` w `hot-state/hotd.json` (czy repo da się pobrać teraz) i linia „repo teraz niedostępne” w `hotd status`; commit czeka, gdy silnik nie działa, zamiast trafić na listę nieudanych.
+- `hotd`: paczki danych modów (M3, D7). `mods/<id>/data/` trafia do `<świat>/datapacks/hot-<id>/` i wchodzi jednym `reload` bez restartu; usunięcie moda usuwa paczkę. Zły JSON zatrzymuje commit, zanim silnik coś dostanie; paczka niewłączona po `reload` wraca do poprzedniej. Kod `HOT-E0208`.
+- `docs/sprzet.md`: zmierzony czas `reload` na Macu dewelopera.
 - `/hot status` w grze pokazuje też stan `hotd`: commit repo, zastosowany commit, na co czeka i dlaczego ostatni commit nie wszedł.
 
 ### Zmienione
+- `hotd`: zmiana w `mods/<id>/data/` nie jest już odkładana do M3; `Engine::command` zwraca odpowiedź silnika.
 - `hot-core` przełącza gotowe wczytania także przy komendzie konsoli, bo pusty serwer w pauzie nie wywołuje ticku.
 - `AGENTS.md`: zasady pracy na maszynie z grą (bez `prepare` przez agenta, bez zrzutów gry w repo, bez ruszania cudzych instancji), `spikes/` i `docs/spike/` w mapie repo, zmierzona pauza podmiany zamiast „mrugnięcia”; to samo w `docs/ARCHITECTURE.md`. `PLAN.md`, D2: `hot-host` nie używa `hot-diag`; D9 i D16 doprecyzowane.
 - `PLAN.md`, D6, D8, D9, D16, D18 i D24 według ADR 0002: odpowiedź na komendę przez `event.replies`, wersja `hot-slots` przy każdej zmianie puli, `servers.dat` instancji z `acceptTextures`, pamięć na drugi silnik tylko przy teście aktualizacji, każde Nightly jako zmiana dla klienta do testu w M9, zmierzone czasy w tabeli D24; M0.14 odhaczone.

@@ -17,8 +17,6 @@ pub struct Change {
     /// PL: Zmiana wspólna dla wszystkich modów (`Cargo.lock` w korzeniu itp.).
     /// EN: A change shared by every mod (the root `Cargo.lock` and so on).
     pub all_code: bool,
-    /// PL: Mody ze zmienionym `data/` (M3). EN: Mods with a changed `data/` (M3).
-    pub data: BTreeSet<String>,
     /// PL: Mody ze zmienionym `assets/` (M5). EN: Mods with a changed `assets/` (M5).
     pub assets: BTreeSet<String>,
     /// PL: Zmiana w `native/` (podmiana silnika, M8). EN: A change in `native/` (engine swap, M8).
@@ -72,7 +70,9 @@ pub fn classify<S: AsRef<str>>(paths: &[S]) -> Change {
                     continue;
                 }
                 let set = match rest[0] {
-                    "data" => &mut c.data,
+                    // PL: Paczki danych porównuje `data.rs` ze światem, nie z listą zmian.
+                    // EN: `data.rs` compares data packs with the world, not with the change list.
+                    "data" => continue,
                     "assets" => &mut c.assets,
                     // PL: Wszystko inne w katalogu moda (src/, Cargo.toml, mod.toml, build.rs)
                     // wpływa na kod. EN: Everything else in the mod folder affects the code.
@@ -118,12 +118,6 @@ pub fn plan(change: &Change, in_repo: &BTreeSet<String>, active: &BTreeSet<Strin
     let unload = active.difference(in_repo).cloned().collect();
     let mut deferred = Vec::new();
     let list = |s: &BTreeSet<String>| s.iter().cloned().collect::<Vec<_>>().join(", ");
-    if !change.data.is_empty() {
-        deferred.push(format!(
-            "zmiana data/ w: {} — kopiowanie paczek danych dojdzie w M3",
-            list(&change.data)
-        ));
-    }
     if !change.assets.is_empty() {
         deferred.push(format!(
             "zmiana assets/ w: {} — paczka zasobów dojdzie w M5",
@@ -203,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn data_assets_native_and_config_are_deferred() {
+    fn assets_native_and_config_are_deferred_and_data_is_not_code() {
         let c = classify(&[
             "mods/a/data/recipe.json",
             "mods/a/assets/model.json",
@@ -213,7 +207,7 @@ mod tests {
         assert!(c.code.is_empty());
         let p = plan(&c, &set(&["a"]), &set(&["a"]));
         assert!(p.load.is_empty());
-        assert_eq!(p.deferred.len(), 4, "{:?}", p.deferred);
+        assert_eq!(p.deferred.len(), 3, "{:?}", p.deferred);
     }
 
     #[test]

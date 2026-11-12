@@ -25,6 +25,7 @@ use hot_diag::{DiagError, LogConfig, Logger, Redactor};
 use serde_json::{json, Value};
 
 use crate::classify::{classify, code_mods, plan, valid_id};
+use crate::data::{self, Staged};
 use crate::engine::Engine;
 use crate::git::{Mirror, BUILDS_BRANCH};
 use crate::state::{write_atomic, State};
@@ -38,6 +39,9 @@ pub struct Config {
     pub repo: String,
     pub branch: String,
     pub allowed_signers: PathBuf,
+    /// PL: Katalog świata serwera; tu trafiają paczki danych modów (M3).
+    /// EN: The server's world folder; mod data packs go here (M3).
+    pub world: PathBuf,
     /// PL: Ile czekać na potwierdzenie z `hot-core`. EN: How long to wait for `hot-core`.
     pub confirm_timeout: Duration,
     /// PL: Awaria silnika w tym czasie po zastosowaniu = zły commit (D13: 60 s).
@@ -49,7 +53,9 @@ impl Config {
     #[must_use]
     pub fn new(home: PathBuf, repo: &str, branch: &str) -> Self {
         let allowed_signers = home.join("hot-keys").join("allowed_signers");
+        let world = home.join("world");
         Self {
+            world,
             home,
             repo: repo.to_owned(),
             branch: branch.to_owned(),
@@ -187,6 +193,7 @@ impl<E: Engine> Daemon<E> {
         let active: BTreeSet<String> = core.mods.keys().cloned().collect();
         let p = plan(&classify(&changed), &in_repo, &active);
         self.state.deferred = p.deferred;
+        let data_diff = self.data_diff(head, &files)?;
 
         let mut loads = BTreeMap::new();
         if !p.load.is_empty() {
@@ -206,7 +213,7 @@ impl<E: Engine> Daemon<E> {
             }
         }
         self.state.waiting = None;
-        if p.load.is_empty() && p.unload.is_empty() {
+        if p.load.is_empty() && p.unload.is_empty() && data_diff.is_empty() {
             self.mark_applied(head, false);
             return Ok(());
         }
@@ -227,6 +234,25 @@ impl<E: Engine> Daemon<E> {
             self.state.waiting = Some(text);
             return Ok(());
         }
+        // PL: Paczki sprawdzone, zanim silnik dostanie cokolwiek: zły plik nic nie zmienia.
+        // EN: Packs are checked before the engine gets anything: a bad file changes nothing.
+        let staged = if data_diff.is_empty() {
+            None
+        } else {
+            let mirror = &self.mirror;
+            let staged = Staged::prepare(&self.cfg.world, data_diff, |tree, into| {
+                mirror
+                    .extract(tree, into)
+                    .map_err(|e| format!("{}: {}", e.command, e.output))
+            })
+            .map_err(|e| {
+                (
+                    e,
+                    "paczka danych z błędem — szczegóły w hot status".to_owned(),
+                )
+            })?;
+            Some(staged)
+        };
         let started = Instant::now();
         for id in &p.unload {
             self.engine
@@ -238,13 +264,27 @@ impl<E: Engine> Daemon<E> {
                 .command(&format!("hot load {}", path.display()))
                 .map_err(|e| (e, "silnik nie przyjął hot load".to_owned()))?;
         }
-        self.confirm(head, &loads, &p.unload)?;
+        if !loads.is_empty() || !p.unload.is_empty() {
+            self.confirm(head, &loads, &p.unload)?;
+        }
+        let (mut written, mut removed, mut reload_ms) = (Vec::new(), Vec::new(), None);
+        if let Some(staged) = staged {
+            let reload = Instant::now();
+            self.reload_data(head, &staged)?;
+            reload_ms = Some(reload.elapsed().as_millis());
+            written = staged.diff().write.keys().cloned().collect();
+            removed = staged.diff().remove.iter().cloned().collect();
+            staged.finish();
+        }
         self.log.info(
             "hotd applied a commit of the server repository",
             json!({
                 "commit": head,
                 "loaded": loads.keys().collect::<Vec<_>>(),
                 "unloaded": p.unload,
+                "data_written": written,
+                "data_removed": removed,
+                "reload_ms": reload_ms,
                 "ms": started.elapsed().as_millis(),
             }),
         );
@@ -265,6 +305,81 @@ impl<E: Engine> Daemon<E> {
         } else {
             (0, None)
         };
+    }
+
+    /// PL: Które paczki danych zapisać i usunąć, żeby świat pasował do commita.
+    /// EN: Which data packs to write and remove so the world matches the commit.
+    fn data_diff(&self, head: &str, files: &[String]) -> Result<data::Diff, (DiagError, String)> {
+        let mut wanted = BTreeMap::new();
+        for id in data::data_mods(files) {
+            let Some(tree) = self.mirror.tree(head, &format!("mods/{id}/data")) else {
+                let e = DiagError::new(
+                    codes::DATA_PACK_FAILED,
+                    format!("git cannot find mods/{id}/data in commit {}", short(head)),
+                    "Run git fsck in hot-state/repo.git; if it reports damage, move the folder aside and hotd fetches the repository again",
+                )
+                .context("commit", head.to_owned())
+                .state("Nothing changed on the server");
+                return Err((e, format!("git nie widzi mods/{id}/data")));
+            };
+            wanted.insert(id, tree);
+        }
+        Ok(data::diff(&wanted, &data::installed(&self.cfg.world)))
+    }
+
+    /// PL: Wstawia paczki, wysyła jedno `reload` i sprawdza `datapack list`. Gdy silnik nie
+    /// pokazuje zmian, przywraca stare paczki i przeładowuje je jeszcze raz.
+    /// EN: Puts the packs in place, sends one `reload` and checks `datapack list`. When the engine
+    /// does not show the change, restores the old packs and reloads them again.
+    fn reload_data(&mut self, head: &str, staged: &Staged) -> Result<(), (DiagError, String)> {
+        let reason = "silnik nie włączył paczek danych".to_owned();
+        if let Err(e) = staged.swap_in() {
+            staged.restore();
+            return Err((e, "nie da się zapisać paczek danych".to_owned()));
+        }
+        let answer = self
+            .engine
+            .command("reload")
+            .and_then(|_| self.engine.command("datapack list"));
+        let answer = match answer {
+            Ok(a) => a,
+            Err(e) => {
+                staged.restore();
+                return Err((e, reason));
+            }
+        };
+        let enabled = data::enabled_in(&answer);
+        let diff = staged.diff();
+        let missing: Vec<&String> = diff
+            .write
+            .keys()
+            .filter(|id| !enabled.contains(*id))
+            .collect();
+        let still: Vec<&String> = diff
+            .remove
+            .iter()
+            .filter(|id| enabled.contains(*id))
+            .collect();
+        if missing.is_empty() && still.is_empty() {
+            return Ok(());
+        }
+        staged.restore();
+        let _ = self.engine.command("reload");
+        let e = DiagError::new(
+            codes::DATA_PACK_FAILED,
+            format!(
+                "After reload the engine does not show the data packs of commit {}",
+                short(head)
+            ),
+            "Check <world>/datapacks.json: a pack listed under \"disabled\" stays off; remove it from there (or run /datapack enable \"file/hot-<id>\") and push a new commit. The engine answer is in chain",
+        )
+        .expected("datapack list shows every file/hot-<id> pack of the commit as enabled and none of the removed ones")
+        .context("commit", head.to_owned())
+        .context("not_enabled", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+        .context("not_removed", still.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+        .chain_line(answer)
+        .state("The previous data packs are back in place and reloaded; mods switched in this commit stay");
+        Err((e, reason))
     }
 
     /// PL: `build.json` commita: `None`, gdy CI jeszcze nie skończyło.

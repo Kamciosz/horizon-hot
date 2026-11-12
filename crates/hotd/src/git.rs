@@ -130,6 +130,57 @@ impl Mirror {
         Ok(lines(&out))
     }
 
+    /// PL: Hash drzewa `commit:path`; `None`, gdy ścieżki nie ma. Ten sam hash = ta sama zawartość.
+    /// EN: The tree hash of `commit:path`; `None` when the path is absent. Same hash = same content.
+    #[must_use]
+    pub fn tree(&self, commit: &str, path: &str) -> Option<String> {
+        let spec = format!("{commit}:{path}");
+        run_git(
+            Some(&self.dir),
+            &["rev-parse", "--verify", "--quiet", &spec],
+        )
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+    }
+
+    /// PL: Wypakowuje drzewo gita do katalogu (`git archive` + `tar`, oba są na serwerze).
+    /// EN: Unpacks a git tree into a folder (`git archive` + `tar`, both are on the server).
+    ///
+    /// # Errors
+    /// PL: Opis nieudanego polecenia. EN: The failed command and its output.
+    pub fn extract(&self, tree: &str, into: &Path) -> Result<(), GitError> {
+        let archive = into.with_extension("tar");
+        let archive_arg = archive.display().to_string();
+        run_git(
+            Some(&self.dir),
+            &["archive", "--format=tar", "-o", &archive_arg, tree],
+        )?;
+        let command = format!("tar -xf {archive_arg} -C {}", into.display());
+        let out = Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(into)
+            .output();
+        let _ = std::fs::remove_file(&archive);
+        match out {
+            Ok(out) if out.status.success() => Ok(()),
+            Ok(out) => Err(GitError {
+                command,
+                output: format!(
+                    "exit {}: {}",
+                    out.status,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ),
+            }),
+            Err(e) => Err(GitError {
+                command,
+                output: format!("tar cannot be started: {e}"),
+            }),
+        }
+    }
+
     /// PL: Plik z gałęzi `hot-builds`; `None`, gdy go nie ma.
     /// EN: A file from the `hot-builds` branch; `None` when it is absent.
     #[must_use]

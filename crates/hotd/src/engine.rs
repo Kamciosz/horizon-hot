@@ -14,11 +14,12 @@ use crate::codes;
 
 /// PL: Co `hotd` potrzebuje od silnika. EN: What `hotd` needs from the engine.
 pub trait Engine {
-    /// PL: Komenda konsoli, np. `hot load <plik>`. EN: A console command, e.g. `hot load <file>`.
+    /// PL: Komenda konsoli, np. `hot load <plik>`; zwraca odpowiedź silnika.
+    /// EN: A console command, e.g. `hot load <file>`; returns the engine's answer.
     ///
     /// # Errors
     /// PL: `HOT-E0205`. EN: `HOT-E0205`.
-    fn command(&mut self, line: &str) -> Result<(), DiagError>;
+    fn command(&mut self, line: &str) -> Result<String, DiagError>;
 
     /// PL: PID działającego procesu silnika; `None`, gdy silnik nie działa.
     /// EN: The PID of the running engine process; `None` when the engine is not running.
@@ -54,8 +55,8 @@ impl HorizonServer {
 }
 
 impl Engine for HorizonServer {
-    fn command(&mut self, line: &str) -> Result<(), DiagError> {
-        self.run(&["cmd", line]).map(drop).map_err(|output| {
+    fn command(&mut self, line: &str) -> Result<String, DiagError> {
+        self.run(&["cmd", line]).map_err(|output| {
             DiagError::new(
                 codes::APPLY_FAILED,
                 format!("hotd cannot send the console command \"{line}\" to the engine"),

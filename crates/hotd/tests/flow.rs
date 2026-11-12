@@ -62,6 +62,13 @@ struct Fake {
     pid: Rc<Cell<Option<u32>>>,
     /// PL: Id, które „biblioteka” zgłasza zamiast nazwy pliku. EN: An id the library reports.
     declared_id: Rc<RefCell<Option<String>>>,
+    /// PL: Katalog świata i paczki włączone przy ostatnim `reload`.
+    /// EN: The world folder and the packs enabled at the last `reload`.
+    world: PathBuf,
+    packs: Rc<RefCell<Vec<String>>>,
+    /// PL: `reload` bez skutku, jak paczka wyłączona w `datapacks.json`.
+    /// EN: `reload` without effect, like a pack disabled in `datapacks.json`.
+    reload_ignored: Rc<Cell<bool>>,
 }
 
 impl Fake {
@@ -72,6 +79,9 @@ impl Fake {
             mods: Rc::default(),
             pid: Rc::new(Cell::new(Some(100))),
             declared_id: Rc::default(),
+            world: home.join("world"),
+            packs: Rc::default(),
+            reload_ignored: Rc::default(),
         }
     }
 
@@ -96,9 +106,30 @@ impl Fake {
 }
 
 impl Engine for Fake {
-    fn command(&mut self, line: &str) -> Result<(), DiagError> {
+    fn command(&mut self, line: &str) -> Result<String, DiagError> {
         self.commands.borrow_mut().push(line.to_owned());
-        if let Some(path) = line.strip_prefix("hot load ") {
+        if line == "reload" && !self.reload_ignored.get() {
+            // PL: Jak Horizon: każdy katalog z `pack.mcmeta` w `datapacks/`. EN: As Horizon does.
+            let mut found: Vec<String> = fs::read_dir(self.world.join("datapacks"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter(|e| e.path().join("pack.mcmeta").exists())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            found.sort();
+            *self.packs.borrow_mut() = found;
+        } else if line == "datapack list" {
+            let packs = self.packs.borrow();
+            let list: Vec<String> = std::iter::once("[vanilla (built-in)]".to_owned())
+                .chain(packs.iter().map(|p| format!("[file/{p} (world)]")))
+                .collect();
+            return Ok(format!(
+                "There are {} data pack(s) enabled: {}\nThere are no more data packs available",
+                list.len(),
+                list.join(", ")
+            ));
+        } else if let Some(path) = line.strip_prefix("hot load ") {
             let stem = Path::new(path).file_stem().unwrap().to_string_lossy();
             let id = self
                 .declared_id
@@ -112,7 +143,7 @@ impl Engine for Fake {
             self.mods.borrow_mut().retain(|(m, _)| m != id);
         }
         self.write();
-        Ok(())
+        Ok(String::new())
     }
 
     fn pid(&mut self) -> Option<u32> {
@@ -444,4 +475,138 @@ fn commit_waits_while_the_engine_is_not_running() {
     d.step();
     assert!(fake.take_commands()[0].starts_with("hot load "));
     assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
+}
+
+const DATA_V1: (&str, &str) = (
+    "mods/przepisy/data/przepisy/recipe/stol.json",
+    "{\"type\": \"minecraft:crafting_shapeless\", \"v\": 1}\n",
+);
+
+fn pack_file(w: &World) -> PathBuf {
+    w.home
+        .join("world/datapacks/hot-przepisy/data/przepisy/recipe/stol.json")
+}
+
+#[test]
+fn data_only_commit_copies_the_pack_and_reloads_without_ci() {
+    let w = World::new("data");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let sha = w.commit(&[DATA_V1], &[]);
+
+    d.step();
+    assert_eq!(fake.take_commands(), ["reload", "datapack list"]);
+    assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
+    assert_eq!(fs::read_to_string(pack_file(&w)).unwrap(), DATA_V1.1);
+    let mcmeta =
+        fs::read_to_string(w.home.join("world/datapacks/hot-przepisy/pack.mcmeta")).unwrap();
+    assert!(mcmeta.contains("min_format"), "{mcmeta}");
+    assert!(!w.home.join("world/.hot-staging").exists());
+
+    // PL: Commit bez zmian w data/ nie wysyła `reload`. EN: No data change, no `reload`.
+    w.commit(&[("README.md", "x\n")], &[]);
+    d.step();
+    assert!(fake.take_commands().is_empty());
+
+    // PL: Usunięcie moda usuwa paczkę. EN: Removing the mod removes the pack.
+    let gone = w.commit(&[], &["mods/przepisy"]);
+    d.step();
+    assert_eq!(fake.take_commands(), ["reload", "datapack list"]);
+    assert!(!w.home.join("world/datapacks/hot-przepisy").exists());
+    assert_eq!(d.state().applied.as_deref(), Some(gone.as_str()));
+}
+
+#[test]
+fn code_only_commit_sends_no_reload() {
+    let w = World::new("code-no-reload");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let sha = w.commit(&MOD_FILES, &[]);
+    w.publish(&sha, &["licznik"], true, false);
+    d.step();
+    let commands = fake.take_commands();
+    assert!(commands[0].starts_with("hot load "));
+    assert!(!commands.iter().any(|c| c == "reload"), "{commands:?}");
+}
+
+#[test]
+fn malformed_json_rejects_the_commit_and_writes_nothing() {
+    let w = World::new("data-bad");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let v1 = w.commit(&[DATA_V1], &[]);
+    d.step();
+    fake.take_commands();
+
+    let bad = w.commit(&[(DATA_V1.0, "{\"type\": zle")], &[]);
+    d.step();
+    assert!(fake.take_commands().is_empty(), "the engine gets nothing");
+    assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
+    assert!(d.state().failed.iter().any(|(c, _)| *c == bad));
+    assert_eq!(d.state().errors.last().unwrap()["code"], "HOT-E0208");
+    assert_eq!(fs::read_to_string(pack_file(&w)).unwrap(), DATA_V1.1);
+    assert!(w.status_text().contains("paczka danych z błędem"));
+}
+
+#[test]
+fn hot_folder_without_marker_is_not_touched() {
+    let w = World::new("data-foreign");
+    let fake = Fake::new(&w.home);
+    let foreign = w.home.join("world/datapacks/hot-obcy");
+    fs::create_dir_all(&foreign).unwrap();
+    fs::write(foreign.join("pack.mcmeta"), "{}").unwrap();
+    let mut d = w.daemon(fake.clone());
+    w.commit(&[DATA_V1], &[]);
+    d.step();
+    w.commit(&[], &["mods/przepisy"]);
+    d.step();
+    assert!(foreign.join("pack.mcmeta").exists());
+}
+
+#[test]
+fn data_waits_while_the_engine_is_not_running() {
+    let w = World::new("data-engine-down");
+    let fake = Fake::new(&w.home);
+    fake.pid.set(None);
+    let mut d = w.daemon(fake.clone());
+    let sha = w.commit(&[DATA_V1], &[]);
+    d.step();
+    assert!(fake.take_commands().is_empty());
+    assert!(
+        !pack_file(&w).exists(),
+        "nothing written for a stopped engine"
+    );
+    assert!(!d.state().settled(&sha));
+
+    fake.pid.set(Some(100));
+    d.step();
+    assert!(pack_file(&w).exists());
+    assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
+}
+
+#[test]
+fn pack_the_engine_does_not_enable_is_rolled_back() {
+    let w = World::new("data-rollback");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let v1 = w.commit(&[DATA_V1], &[]);
+    d.step();
+    fake.take_commands();
+
+    fake.reload_ignored.set(true);
+    fake.packs.borrow_mut().clear();
+    w.commit(&[(DATA_V1.0, "{\"v\": 2}\n")], &[]);
+    d.step();
+    assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
+    assert_eq!(d.state().errors.last().unwrap()["code"], "HOT-E0208");
+    assert_eq!(
+        fs::read_to_string(pack_file(&w)).unwrap(),
+        DATA_V1.1,
+        "the previous pack is back"
+    );
+    assert_eq!(
+        fake.take_commands(),
+        ["reload", "datapack list", "reload"],
+        "the old pack is reloaded"
+    );
 }
