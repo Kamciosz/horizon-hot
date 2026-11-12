@@ -24,7 +24,7 @@ Przez ok. 1 s świat stoi. Gracz może chodzić i niszczyć bloki, ale po przerw
 | 5 | `hot-proxy` | odtworzenie konfiguracji klienta, połknięcie `Login`, `PlayerLoaded` do silnika | < 20 ms |
 | 6 | `hot-proxy` | `RemoveEntities` do klienta z encjami starego silnika; zamiana id gracza; dalej zwykłe przekazywanie | — |
 
-Razem: 0,96–1,07 s w prototypie. Nowy silnik musi startować dopiero po zatrzymaniu starego. Inaczej nie otworzy świata i wpadnie w pętlę restartów (S12).
+Razem: 0,96–1,07 s w prototypie bez modów. Z pulą slotów start nowego silnika trwa dłużej: 1,16–1,82 s, a z nowym plikiem silnika (zimny cache treści modów) ok. 3,9 s przy pełnej puli (`docs/sloty.md`). Nowy silnik musi startować dopiero po zatrzymaniu starego. Inaczej nie otworzy świata i wpadnie w pętlę restartów (S12).
 
 ## Zasady dla `hot-proxy`
 

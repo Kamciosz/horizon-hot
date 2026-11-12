@@ -1,7 +1,7 @@
 # S8, część 2 — prototyp podmiany silnika przez proxy
 
 - Data: 2026-11-12. Horizon `nightly-2026-11-05-66f3981`, macOS arm64 (Apple M4 Pro), klient i serwery na jednej maszynie.
-- Krok planu: M0.9. Wynik: **potwierdzone**. Gracz zostaje połączony, ekranu ładowania nie ma. Pauza w ostatecznej wersji proxy: 0,96–1,07 s, czyli **na granicy budżetu 1 s**. O budżecie rozstrzygnie pomiar na ThinkCentre (M0.11).
+- Krok planu: M0.9. Wynik: **potwierdzone**. Gracz zostaje połączony, ekranu ładowania nie ma. Pauza w ostatecznej wersji proxy: 0,96–1,07 s, czyli **na granicy budżetu 1 s**. Silniki próby nie miały modów; z pulą slotów pauza rośnie do 1,16–1,82 s (S7, `s7-rozmiar-puli.md`).
 - Część 1 (dlaczego tylko ta droga): `s8-podmiana-analiza-klienta.md`.
 
 ## Co zbudowano
@@ -70,7 +70,7 @@ We wszystkich 15 podmianach:
 
 ## Czego prototyp nie sprawdził (do M8)
 
-- **Mody i paczka zasobów.** Serwery próby nie miały modów ani paczki, więc odtwarzanie `horizon:mod_list` i odpowiedzi na `resource_pack_push` nie zostało sprawdzone. Na produkcji oba są obowiązkowe (D8, D9).
+- **Mody i paczka zasobów.** Serwery próby nie miały modów ani paczki. S7 sprawdziło potem odtwarzanie `horizon:mod_list` przy tej samej puli na A i B (30 podmian, bez błędu). Inna lista modów na B i odpowiedź na `resource_pack_push` nadal są niesprawdzone. Na produkcji oba są obowiązkowe (D8, D9).
 - **Tryb online.** Serwery i proxy działały offline. Na produkcji proxy sprawdza konto Microsoft (online), a silniki działają offline na `127.0.0.1` albo z Velocity forwarding (D10). Bez tego zasada „każdy ma kupioną grę” przestaje działać.
 - **Wielu graczy.** Zamiana dotyczy tylko id własnego gracza. Inni gracze są zwykłymi encjami i wracają z B jak moby. Wpisy listy graczy (`player_info_update`) od B przychodzą ponownie.
 - **Id encji ukryte w środku pakietów:** właściciel w `add_entity.data` (pociski, haczyk wędki), odwołania w `set_entity_data`, `player_look_at`, przyczyna w `damage_event`, `entity_tag_query` i `pick_item_from_entity` od klienta. Przeoczenie psuje wyświetlanie jednej encji, a nie połączenie.
