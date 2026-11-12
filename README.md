@@ -10,6 +10,24 @@ Pracujesz nad projektem (człowiek albo agent AI)? Zacznij od `AGENTS.md`.
 - Rust stable (edycja 2021), `cargo`
 - Do prób z silnikiem: launcher Horizon (`horizon-launcher`) z przygotowaną wersją Nightly
 
+## Instalacja na serwerze (Ubuntu x86_64)
+
+Potrzebne: Ubuntu 22.04 albo 24.04 na x86_64, dostęp `sudo`, repo serwera na GitHubie (wzór: `templates/server-repo/`) i własny, kupiony Minecraft Java u właściciela serwera.
+
+Dopóki `spike/m0` nie jest scalone do `main`, instalator bierze się z tej gałęzi:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/spike/m0/scripts/server-install.sh \
+  | sudo bash -s -- --hot-ref spike/m0 --repo https://github.com/<właściciel>/<repo-serwera> --eula --op <nick>
+```
+
+Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtórki:
+
+1. Pliki gry. Na komputerze z Minecraftem i launcherem Horizon przygotuj wersję 26.3, skopiuj jej folder na serwer (`scp -r`) i uruchom polecenie jeszcze raz z `--resources <folder>`. Pliki gry nie są w tym repo i nikt ich za Ciebie nie pobiera.
+2. Kod natywny. Przeczytaj `crates/hot-host/` i, jeśli mu ufasz, dodaj `--trust-native-code`. Tę zgodę daje tylko właściciel serwera.
+
+Na końcu skrypt pokazuje, co raz dodać w repo serwera: `hot.yml` w `.github/workflows/` i sekret `HOT_SIGNING_KEY`. Błędy idą do `/srv/horizon/logs/install.jsonl`, opisy kodów są w `docs/bledy/`. Ponowne uruchomienie niczego nie psuje.
+
 ## Testy
 ```bash
 git config core.hooksPath .githooks   # raz po klonie
