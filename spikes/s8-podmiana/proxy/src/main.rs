@@ -552,29 +552,6 @@ fn configure(c: &mut Connection, rec: &Recorded) -> R<()> {
     }
 }
 
-fn run_server(args: &Args, dir: &PathBuf, verb: &str) -> R<()> {
-    let t = ms();
-    let out = Command::new(&args.server_bin)
-        .arg("--dir")
-        .arg(dir)
-        .arg(verb)
-        .output()?;
-    log!(
-        "swap: horizon-server {verb} {} -> {} in {:.0} ms",
-        dir.display(),
-        out.status,
-        ms() - t
-    );
-    if !out.status.success() {
-        return Err(format!(
-            "horizon-server {verb} failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        )
-        .into());
-    }
-    Ok(())
-}
-
 fn swap(sh: &Arc<Shared>, args: &Args, active: &mut usize) -> R<()> {
     let (from, to) = (*active, 1 - *active);
     {
@@ -594,7 +571,39 @@ fn swap(sh: &Arc<Shared>, args: &Args, active: &mut usize) -> R<()> {
         };
     }
     log!("swap: engine {from} -> {to} (generation {generation})");
-    run_server(args, &args.backends[from].dir, "stop")?;
+    // `stop` zgłasza koniec co ok. 0,2 s; świat jest wolny, gdy znika proces silnika
+    // (`horizon-client --control-socket <dir>/.horizon/engine.json`).
+    let t = ms();
+    let mut stop = Command::new(&args.server_bin)
+        .arg("--dir")
+        .arg(&args.backends[from].dir)
+        .arg("stop")
+        .spawn()?;
+    let pattern = format!(
+        "control-socket {}/.horizon/engine.json",
+        args.backends[from].dir.display()
+    );
+    let stop_deadline = Instant::now() + Duration::from_secs(30);
+    while Command::new("pgrep")
+        .arg("-f")
+        .arg(&pattern)
+        .output()?
+        .status
+        .success()
+    {
+        if Instant::now() > stop_deadline {
+            return Err("old engine still running 30 s after stop".into());
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    log!("swap: old engine process gone after {:.0} ms", ms() - t);
+    thread::spawn(move || {
+        let status = stop.wait();
+        log!(
+            "swap: horizon-server stop returned {status:?} after {:.0} ms",
+            ms() - t
+        );
+    });
     // `start` zwraca wynik co ok. 0,5 s; proxy loguje się, gdy tylko port przyjmie połączenie.
     let t = ms();
     let mut child = Command::new(&args.server_bin)
