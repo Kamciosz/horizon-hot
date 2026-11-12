@@ -4,7 +4,7 @@ Serwer Horizon (Minecraft Java 26.3 napisany w Rust), który bierze mody z repoz
 
 - Data: 2026-11-12. Wersja 2 zastępuje wersję 1 (ta sama data) po weryfikacji wykonalności w kodzie Horizona.
 - Stan: plan. Repo założone (`f788091`: szablon standardu, CI Rust, pusty `hot-abi`). Budowa rusza na „go”.
-- Oznaczenia: **FAKT** = sprawdzone w kodzie Horizona (rewizja `66f3981`, `~/Library/Application Support/horizon-launcher/native/stage`, ścieżki względem `crates/`) albo próbą; **NIEWIADOMA** = rozstrzyga ją wskazany spike z M0.
+- Oznaczenia: **FAKT** = sprawdzone w kodzie Horizona (rewizja `66f3981`, `~/Library/Application Support/horizon-launcher/native/stage`, ścieżki względem `crates/`) albo próbą; **NIEWIADOMA** = rozstrzyga ją wskazany spike z M0. Wyniki spike'ów i poprawki decyzji: `docs/adr/0002-spike.md`.
 
 ---
 
@@ -30,7 +30,7 @@ Każdy punkt ma obserwację, która by oblała:
 2. Push zmiany w kodzie moda gorącego → nowe zachowanie w ≤ 3 min (z budową w CI), PID silnika ten sam, gracz połączony bez przerwy (W1, W2).
 3. Push zmiany w `data/` → nowy przepis działa, PID ten sam (W2).
 4. Push nowego bloku z puli slotów → blok w grze bez restartu (W2).
-5. Push moda natywnego `.hnmod` → działa po podmianie silnika; nikt nie rozłączony; pauza świata zmierzona i ≤ 1 s; gracz bez ekranu ładowania (W2, wariant A).
+5. Push moda natywnego `.hnmod` → działa po podmianie silnika; nikt nie rozłączony; pauza świata zmierzona i w budżecie z sekcji 8 (dziś 1 s, do decyzji użytkownika); gracz bez ekranu ładowania (W2, wariant A).
 6. Nowe Nightly Horizona → serwer sam przechodzi na nie jak w punkcie 5; wydanie, którego nie da się zbudować → serwer zostaje na starym, `hot status` mówi dlaczego (W4).
 7. Mod z paniką → wyłączony, wraca poprzednia generacja, serwer działa (W5).
 8. Mod z segfaultem → silnik wstaje z ostatnią dobrą generacją bez pętli awarii; gracze przytrzymani przez proxy i wprowadzeni z powrotem (W5).
@@ -79,7 +79,7 @@ Każdy punkt ma obserwację, która by oblała:
 
 ## 4. Decyzje architektoniczne
 
-Każda w formie gotowej do `docs/adr/NNNN-*.md` (kontekst → decyzja → konsekwencje). Numer ADR = numer decyzji + 1 (ADR 0001 to struktura projektu).
+Każda w formie gotowej do `docs/adr/NNNN-*.md` (kontekst → decyzja → konsekwencje). Numery ADR kolejne (0001 to struktura projektu, 0002 wyniki spike'ów), a w tytule ADR numer decyzji (Dn).
 
 ### Warstwa gorąca (bez żadnej pauzy)
 
@@ -105,6 +105,7 @@ Kontekst: R8 — osobne sterty i hooki paniki. Decyzja: struktury `#[repr(C)]`, 
 
 **D6. Funkcje gospodarza v1.**
 Wiadomość do gracza i do wszystkich, `run_command`, odczyt i zapis bloku, danie przedmiotu, dane gracza (nazwa, UUID, pozycja), cząsteczki, log. Tabela `HostVTable` ważna tylko w trakcie wywołania.
+- Wiadomość do gracza w haku `player_command` idzie przez `event.replies`, bo `Host::tell` zwraca tam `false` (FAKT, S3). Poza tym hakiem `hot-host` używa `Host::tell`, a gdy zwróci `false`, wysyła `tellraw` przez `run_command` (działa z `server_tick`, S4). Który wariant działa poza hakiem komendy, pokaże test w M4.1.
 
 **D7. Dane modów jako paczka danych świata + `/reload`.**
 `mods/<id>/data/` → `<świat>/datapacks/hot-<id>/` → `reload` (R13). Bez budowania.
@@ -113,11 +114,12 @@ Wiadomość do gracza i do wszystkich, `run_command`, odczyt i zapis bloku, dani
 - Kontekst: R9, R11, R12. **`hot-host` i `hot-core` nie rejestrują żadnej treści** — inaczej klienci dostaliby rozłączenie z niejasną przyczyną.
 - Pula od pierwszej wersji duża: 4096 bloków (pełna kostka, bez stanów) i 8192 przedmiotów. Zmiana puli zmienia `content_identity` → wymaga nowego pliku u graczy; dlatego pula jest duża i stała. S7: klient z pełną pulą startuje o ok. 1 s wolniej (kryterium spełnione), ale podmiana silnika (D11) wydłuża się do 1,45–1,82 s. **Rozmiar do decyzji użytkownika przed M5.1** (sekcja 8). Liczby: `docs/sloty.md`.
 - Przydział slotów tylko dopisywany, w `hot-state/slots.json` (objęty kopią zapasową); slot nigdy nie wraca do innego moda bez jawnej komendy operatora.
+- Każda zmiana puli to nowa wersja `hot-slots`. Serwer ogłasza też SHA-256 pliku, ale czy inny SHA-256 przy tej samej wersji rozłącza gracza, nie sprawdzono (S2). Nowa wersja przy każdej zmianie czyni to pytanie nieistotnym.
 - Slot daje: nazwę i wygląd (paczka zasobów) + zachowanie (haki D5). Model może mieć dowolny kształt, ale tylko wizualnie: kolizja, światło i twardość zostają z `template` (R9).
 - `hot-slots.hmod` zawiera tylko `data/`, `blockstates/` i `items/`; **bez `models/`, `textures/`, `lang/`** — treść modów leży nad paczką serwera, więc każdy taki plik w `.hmod` zasłoniłby wygląd z `hot-pack` (FAKT, S5: `docs/spike/s5-wyglad-slotu-z-paczki-serwera.md`).
 
 **D9. Wygląd: paczka zasobów serwowana przez `hot-pack` pod stałym adresem, z prawdziwym sha1.**
-`hot-pack` (osobny mały proces, poza hamulcem D16) serwuje `http://<host>:8131/pack.zip`; adres ustawiony raz przy instalacji. Nowa paczka = nowy sha1 → klient pobiera tylko zmienioną (R14, potwierdzone w S5). Na serwerze `require-resource-pack = true`; `hot-play` zgadza się na paczkę naszego serwera z góry (bez tego klient czeka na „Joining world…” na decyzję gracza). Klucz nazwy przedmiotu z puli to `block.hot_slots.item_N` (S7), nie `item.…`; `hot-pack` używa klucza, który pokazuje gra. Nowy wygląd dociera do graczy tylko na dwa sposoby: `hot-proxy` wysyła w grze `ResourcePackPush` ze stałym id (zastępuje poprzednią paczkę) albo gracz wchodzi ponownie. Podmiana silnika wyglądu nie zmienia, bo proxy połyka konfigurację nowego silnika. S6: wysłanie w grze działa bez rozłączenia, ale przez ok. 1,3 s cały ekran zasłania nakładka ładowania (`docs/spike/s6-paczka-w-trakcie-gry.md`). Kiedy wysyłać: decyzja użytkownika (sekcja 8).
+`hot-pack` (osobny mały proces, poza hamulcem D16) serwuje `http://<host>:8131/pack.zip`; adres ustawiony raz przy instalacji. Nowa paczka = nowy sha1 → klient pobiera tylko zmienioną (R14, potwierdzone w S5). Na serwerze `require-resource-pack = true`; `hot-play` zgadza się na paczkę naszego serwera z góry: dopisuje go do `servers.dat` w katalogu gry swojej instancji (obok `saves/`, FAKT z kodu: `multiplayer.rs`, `servers_file`) z `acceptTextures` = `true`. Bez tego klient czeka na „Joining world…” na decyzję gracza i pyta ponownie przy każdej paczce wysłanej w grze (S6). Klucz nazwy przedmiotu z puli to `block.hot_slots.item_N` (S7), nie `item.…`; `hot-pack` używa klucza, który pokazuje gra. Nowy wygląd dociera do graczy tylko na dwa sposoby: `hot-proxy` wysyła w grze `ResourcePackPush` ze stałym id (zastępuje poprzednią paczkę) albo gracz wchodzi ponownie. Podmiana silnika wyglądu nie zmienia, bo proxy połyka konfigurację nowego silnika. S6: wysłanie w grze działa bez rozłączenia, ale przez ok. 1,3 s cały ekran zasłania nakładka ładowania (`docs/spike/s6-paczka-w-trakcie-gry.md`). Kiedy wysyłać: decyzja użytkownika (sekcja 8).
 
 ### Silnik i proxy (wariant A)
 
@@ -158,7 +160,7 @@ Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je 
 - Gra (silnik, `hot-proxy`, `hot-pack`): slice systemd `horizon-game.slice`, `CPUWeight=10000`, `MemoryLow=` (z S10), `AllowedCPUs=` na poziomie procesu.
 - Tło (`hotd`: git, pobieranie, budowa silnika, kopie zapasowe): `horizon-bg.slice`, `CPUWeight=1`, `MemoryMax=`, `IOWeight=1`, `nice 19`, `ionice -c3`, `SCHED_IDLE`.
 - Hamulec MSPT: `hotd` co sekundę czyta `status --json` (R25). p95 > 35 ms → zatrzymuje swoje procesy potomne (`SIGSTOP` na grupie budowy, wstrzymanie kopii); p95 < 25 ms przez 10 s → wznawia. Sam `hotd`, `hot-pack` i hamulec nigdy nie są zatrzymywane. Opóźnienie reakcji 1–5 s (okno 100 ticków, R25).
-- Podmiana silnika (D11) tylko wtedy, gdy wolna pamięć mieści drugi silnik z zapasem ponad `MemoryLow` gry; inaczej czeka.
+- Podmiana silnika (D11) nie potrzebuje pamięci na dwa silniki: stary kończy pracę, zanim wystartuje nowy (S12). Drugi silnik działa równolegle tylko przy teście aktualizacji (D18). Ten test rusza tylko wtedy, gdy wolna pamięć mieści drugi silnik z zapasem ponad `MemoryLow` gry; inaczej czeka. Po zimnym starcie silnik zajmuje ok. 700 MB, po ciepłym 290–540 MB zależnie od puli (S7, RSS na Macu).
 
 ### Aktualizacje i naprawy (W4, W5, W8)
 
@@ -167,7 +169,7 @@ Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je 
 **D18. Aktualizacja Horizona — kanał Nightly.**
 - Kontekst: R23, R26. `hotd` raz na godzinę pyta API GitHuba o nowe Nightly.
 - Kroki: przygotowanie wersji (`horizon-launcher install` + `prepare` z zasobów serwera) → build silnika z `hot-host` (D15) z `--version <nowe Nightly> --ignore-pins`, bo `hot-host` przypina wersję Horizona (`horizon_revision`), a bez tej flagi build zostaje na starej (`docs/aktualizacje.md`, punkt 7) → test: silnik na kopii świata z ostatniej kopii, 10 botów przez 5 minut, mody gorące ładują się, log bez błędów, MSPT nie gorszy o > 20% → podmiana (D11) → obserwacja 10 min → jeśli gorzej, powrót tą samą drogą i wersja oznaczona jako zła.
-- Okno zgodności klientów: tylko gdy zmienia się coś, czego klient potrzebuje (R24 — protokół stały; kanały `horizon:*` się dopisuje; czy `content_identity` jest takie samo na różnych Nightly, to NIEWIADOMA do sprawdzenia w M9: klient na jednym Nightly, serwer na drugim, ta sama pula). Aplikacja gracza aktualizuje Horizona sama przy starcie, więc okno = czas do najbliższego startu; serwer czeka maks. 24 h i ogłasza termin na czacie.
+- Okno zgodności klientów: tylko gdy zmienia się coś, czego klient potrzebuje (R24 — protokół stały; kanały `horizon:*` się dopisuje; nie wiadomo, czy `content_identity` jest takie samo na różnych Nightly, więc decyzja: każde nowe Nightly traktujemy jako zmianę, której klient potrzebuje, dopóki test w M9 tego nie obali: klient na jednym Nightly, serwer na drugim, ta sama pula). Aplikacja gracza aktualizuje Horizona sama przy starcie, więc okno = czas do najbliższego startu; serwer czeka maks. 24 h i ogłasza termin na czacie.
 - Ryzyko: `libloading` może zniknąć z `Cargo.lock` Horizona → build nie przejdzie → serwer zostaje na starej wersji, `hot status` mówi dlaczego. Mało prawdopodobne: 0.8.9 we wszystkich 10 ostatnich wydaniach, ciągnie ją grafika (`wgpu-hal`, `ash`).
 - `hot-host` używa tylko nazwanych haków i `[transfer]`, nie łatek na dowolne funkcje (R23 — duży churn); dlatego aktualizacje rzadko będą się zatrzymywać.
 
@@ -260,10 +262,10 @@ Prywatne repo → klucz tylko do odczytu (deploy key) generowany przez instalato
 |---|---|---|
 | `mods/*/data/` | kopia + `reload` | nic |
 | `mods/*/src/` | artefakt z CI → nowa generacja | nic |
-| `mods/*/assets/`, sloty w puli | nowa paczka (nowy sha1) | nowy wygląd po mrugnięciu (D11) albo bez niego (S6) |
+| `mods/*/assets/`, sloty w puli | nowa paczka (nowy sha1) | nowy wygląd od razu z nakładką ładowania ok. 1,3 s albo przy następnym wejściu (D9, decyzja użytkownika) |
 | nowy / usunięty mod gorący | `init` / `deactivate` | nic |
 | `hot-core` | przeładowanie | nic |
-| `native/*.hnmod`, nowe Nightly, `hot-host` | build w tle + podmiana silnika (D11) | mrugnięcie świata ≤ 1 s |
+| `native/*.hnmod`, nowe Nightly, `hot-host` | build w tle + podmiana silnika (D11) | świat stoi bez ekranu ładowania: ok. 2,2 s przy puli 1024/2048, ok. 3,9 s przy 4096/8192 (Mac, S7) |
 | nowe bloki w `.hnmod`, zmiana puli | jak wyżej + nowe pliki u gracza | aplikacja pobiera pliki, gracz wchodzi ponownie |
 
 **D25. Instalacja serwera jednym poleceniem (Ubuntu na ThinkCentre, `sudo` jest).**
@@ -309,7 +311,7 @@ Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie dz
 - [ ] M0.11 S10: ThinkCentre: model, CPU, RAM, wersja Ubuntu, architektura; pomiar pustego serwera i 10 botów. Sprawdzenie: `docs/sprzet.md` z wartościami `AllowedCPUs`, `MemoryLow`, `MemoryMax`.
 - [x] M0.12 S11: ostatnie 10 Nightly — co zmieniło `content_identity`, kanały `horizon:*`, API haków, `Cargo.lock` (`libloading`). Sprawdzenie: `docs/aktualizacje.md`. Wynik: używane haki i pliki bez zmian od 11-03; D18 potrzebuje `--ignore-pins`.
 - [x] M0.13 S12: `horizon-server` ze światem poza swoim katalogiem i na porcie 25566. Sprawdzenie: dwa supervisory naprzemiennie na tym samym świecie.
-- [ ] M0.14 Wyniki S1–S12 jako `docs/adr/0002-spike.md`; korekta D1–D29, jeśli trzeba. Sprawdzenie: każda NIEWIADOMA w planie zamieniona na FAKT albo nową decyzję.
+- [x] M0.14 Wyniki S1–S12 jako `docs/adr/0002-spike.md`; korekta D1–D29, jeśli trzeba. Sprawdzenie: każda NIEWIADOMA w planie zamieniona na FAKT albo nową decyzję. Wynik: poprawione D6, D8, D9, D16, D18, D24; w planie nie ma już NIEWIADOMEJ poza definicją; S9 i S10 czekają na ThinkCentre (M0.10, M0.11).
 
 ### M0b — Diagnostyka (przed każdym innym kodem, D27–D29)
 - [ ] M0.15 `AGENTS.md` z opisem projektu, słownikiem i zasadami (D29); uzupełniany w każdym kolejnym kroku. Sprawdzenie końcowe w M12.
@@ -368,7 +370,7 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 ### M8 — `hot-proxy` i podmiana silnika (D10–D12)
 - [ ] M8.1 Proxy przezroczyste: logowanie online, szyfrowanie, kompresja, forwarding. Sprawdzenie: gra przez proxy; ping i MSPT bez istotnej różnicy.
 - [ ] M8.2 Mapowanie id encji i trzymanie keep-alive. Sprawdzenie: 50 sztucznych przełączeń na ten sam silnik bez rozłączenia (10 botów + prawdziwy klient).
-- [ ] M8.3 Podmiana na nowy silnik według D11, z powrotem przy błędzie. Sprawdzenie: dodanie `.hnmod` w trakcie gry → mod działa, nikt nie rozłączony, brak ekranu ładowania (zrzuty co 100 ms), pauza ≤ 1 s; celowo zepsuty silnik → gracze zostają na starym.
+- [ ] M8.3 Podmiana na nowy silnik według D11, z powrotem przy błędzie. Sprawdzenie: dodanie `.hnmod` w trakcie gry → mod działa, nikt nie rozłączony, brak ekranu ładowania (zrzuty co 100 ms), pauza w budżecie z sekcji 8; celowo zepsuty silnik → gracze zostają na starym.
 - [ ] M8.4 Wznowienie po awarii silnika z przytrzymaniem graczy (D13). Sprawdzenie: `kill -9` silnika → gracze połączeni, wracają do gry po starcie.
 - [ ] M8.5 Odzyskanie pamięci generacji przez podmianę (D4). Sprawdzenie: po 200 przeładowaniach RSS spada do poziomu startowego bez restartu.
 
@@ -426,6 +428,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Zewnętrzne powiadomienia (Discord, mail).
 
 ## 8. Stan prac
+
+**2026-11-12 — M0.14 zrobione:** wyniki S1–S12 w `docs/adr/0002-spike.md` (tabela prób, otwarte punkty z krokiem, który je rozstrzygnie). Poprawki: D6 (`event.replies` w haku komendy, poza nim `tell` albo `tellraw`), D8 (nowa wersja `hot-slots` przy każdej zmianie puli), D9 (`servers.dat` instancji z `acceptTextures`), D16 (silniki nie działają naraz, pamięć na drugi tylko przy teście D18), D18 (każde Nightly traktowane jako zmiana dla klienta do testu w M9), D24 (zmierzone czasy zamiast „mrugnięcia ≤ 1 s”). Etap M0 kończą M0.10 i M0.11 na ThinkCentre. Następny krok: M0b (M0.15).
 
 **2026-11-12 — M0.12 (S11) zrobione:** 6 Nightly (wszystkie istniejące) i 4 ostatnie wydania stabilne. Haki i funkcje `Host`, których używa `hot-host`, oraz pliki `content_identity`, `mod_list`, `mod_net` i numery pakietów są takie same od 11-03 do najnowszego Nightly; `libloading` 0.8.9 wszędzie; kanały `horizon:*` tylko się dopisuje. Poprawka D18: `hot-host` przypina wersję Horizona, więc build aktualizacji musi mieć `--ignore-pins`. Od 11-07 cache treści modów ma osobny katalog na zestaw modów (wniosek S7 bez zmian). Szczegóły: `docs/aktualizacje.md`.
 
