@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hot-abi", "crates/hot-core", "crates/hot-diag", "crates/hot-sdk", "crates/hotd", "examples/licznik"]
+members = ["crates/hot-abi", "crates/hot-core", "crates/hot-diag", "crates/hot-sdk", "crates/hotd", "examples/licznik", "examples/sklep", "examples/teleport-blok"]
 
 [workspace.package]
 version = "0.1.0"

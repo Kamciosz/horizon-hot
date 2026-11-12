@@ -4,6 +4,6 @@
 //! accidental change.
 
 #[test]
-fn abi_major_is_one() {
-    assert_eq!(hot_abi::ABI_MAJOR, 1);
+fn abi_major_is_two() {
+    assert_eq!(hot_abi::ABI_MAJOR, 2);
 }

@@ -1,6 +1,6 @@
 # Architektura
 
-Gdzie co leży i dlaczego. Stan: zbudowane są `hot-abi`, `hot-diag`, `hot-sdk`, `hot-core`, `hot-host` i przykład `examples/licznik`; reszta opisuje docelowy kształt i powstaje krok po kroku. Składnik jeszcze nieistniejący ma dopisek „planowany”.
+Gdzie co leży i dlaczego. Stan: zbudowane są `hot-abi`, `hot-diag`, `hot-sdk`, `hot-core`, `hot-host` i przykłady `examples/licznik`, `examples/sklep`, `examples/teleport-blok`; reszta opisuje docelowy kształt i powstaje krok po kroku. Składnik jeszcze nieistniejący ma dopisek „planowany”.
 
 ## Składniki
 

@@ -23,7 +23,7 @@ use core::ffi::c_void;
 ///
 /// EN: Major ABI version. The host rejects a mod that reports a different value.
 /// Any backwards-incompatible change in this crate bumps this number.
-pub const ABI_MAJOR: u32 = 1;
+pub const ABI_MAJOR: u32 = 2;
 
 /// PL: Nazwa eksportu, który zwraca `*const ModVTable`. EN: Export name returning `*const ModVTable`.
 pub const ENTRY_SYMBOL: &[u8] = b"hot_mod_entry\0";
@@ -154,11 +154,17 @@ pub mod kind {
     pub const PLACE_BLOCK: u32 = 11;
     /// PL: Zniszczenie bloku (`pos`, `block`). EN: A block destroyed.
     pub const DESTROY_BLOCK: u32 = 12;
-    /// PL: Losowy tick bloku (`pos`, `block`, `text` = wymiar). EN: A random block tick.
+    /// PL: Zarezerwowane na losowy tick bloku; `hot-host` go nie wysyła (M5, D5).
+    /// EN: Reserved for a random block tick; `hot-host` does not send it (M5, D5).
     pub const RANDOM_TICK: u32 = 13;
     /// PL: Dane serwera wczytane lub przeładowane (`number` = 1 przy `reload`).
     /// EN: Server data loaded or reloaded (`number` = 1 on `reload`).
     pub const DATA_LOADED: u32 = 14;
+    /// PL: Tick gracza z podstawionym graczem (`player`, `name`). Idzie tylko z `hot-host` do
+    /// `hot-core`, który wykonuje w nim odłożone komendy modów (D6a); mody go nie dostają.
+    /// EN: A player's tick with the player swapped in (`player`, `name`). Only `hot-host` sends it
+    /// to `hot-core`, which runs the mods' deferred commands there (D6a); mods never get it.
+    pub const PLAYER_TICK: u32 = 15;
 }
 
 /// PL: Zdarzenie. Pola, których rodzaj nie używa, są puste. Napisy pożyczone na czas wywołania.
@@ -264,6 +270,35 @@ pub struct HostApi {
         out: extern "C" fn(user: *mut c_void, path: Str),
         user: *mut c_void,
     ),
+    /// PL: Stawia blok (`minecraft:stone`, ze stanem jak w `setblock`) w wymiarze bieżącego
+    /// zdarzenia. Bez aktualizacji sąsiadów: woda nie popłynie, redstone nie zareaguje.
+    /// `false`: nic się nie zmieniło, zła nazwa albo nie wolno tutaj.
+    /// EN: Sets a block (`minecraft:stone`, with a state as `setblock` takes it) in the current
+    /// event's dimension. No neighbour updates: water won't flow, redstone won't react.
+    /// `false`: nothing changed, a bad name, or not allowed here.
+    pub set_block: extern "C" fn(ctx: *mut c_void, pos: &[i32; 3], block: Str) -> bool,
+    /// PL: Daje graczowi `count` przedmiotów `item`; zwraca, ile weszło do ekwipunku (reszty nie
+    /// upuszcza). 0 dla nieznanego przedmiotu albo gracza, którego nie ma.
+    /// EN: Gives a player `count` of `item`; returns how many fit (the rest is not dropped).
+    /// 0 for an unknown item or a player who is not here.
+    pub give: extern "C" fn(ctx: *mut c_void, player: &Uuid, item: Str, count: u32) -> u32,
+    /// PL: Cząsteczki vanilla (`minecraft:flame`) w wymiarze bieżącego zdarzenia; `count` 0 = jedna
+    /// w kierunku `spread`. `false`: nieznana nazwa, cząsteczka bloku albo nie wolno tutaj.
+    /// EN: Vanilla particles (`minecraft:flame`) in the current event's dimension; `count` 0 = one
+    /// moving along `spread`. `false`: an unknown name, a block particle, or not allowed here.
+    pub particles: extern "C" fn(
+        ctx: *mut c_void,
+        name: Str,
+        at: &[f64; 3],
+        spread: &[f64; 3],
+        speed: f64,
+        count: i32,
+    ) -> bool,
+    /// PL: Komenda jak `run_command`, ale wykonana na początku następnego ticku serwera; działa też
+    /// w hakach gracza, gdzie `run_command` zwraca `false` (S4). Kolejkę trzyma `hot-core`.
+    /// EN: A command as with `run_command`, but run at the start of the next server tick; works in
+    /// player hooks too, where `run_command` returns `false` (S4). `hot-core` keeps the queue.
+    pub run_later: extern "C" fn(ctx: *mut c_void, line: Str),
 }
 
 /// PL: Tabela eksportowana przez mod (`hot_mod_entry`). `instance` to wskaźnik moda, którego
@@ -278,6 +313,11 @@ pub struct ModVTable {
     pub id: Str,
     /// PL: Wersja moda. EN: The mod's version.
     pub version: Str,
+    /// PL: Komendy najwyższego poziomu moda, rozdzielone spacjami (np. `sklep`; pusty: brak).
+    /// `hot-core` wykonuje je w ticku gracza, gdzie silnik widzi gracza (D6a).
+    /// EN: The mod's top-level commands, space-separated (e.g. `sklep`; empty: none). `hot-core`
+    /// runs them in the player's tick, where the engine sees the player (D6a).
+    pub commands: Str,
     /// PL: Start generacji ze stanem poprzedniej (pusty przy pierwszym starcie). Null = błąd.
     /// EN: Starts a generation with the previous one's state (empty on first start). Null = error.
     pub init: extern "C" fn(host: &HostApi, prev_state: Str) -> *mut c_void,

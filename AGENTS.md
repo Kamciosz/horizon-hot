@@ -44,6 +44,8 @@ crates/hot-core/   gospodarz modów gorących: hot load, generacje, powrót po p
 crates/hot-host/   mod natywny w silniku: ładuje hot-core, przekazuje haki; poza workspace
                    (build: crates/hot-host/build-bundle.sh + horizon-launcher native-build)
 examples/licznik/  przykładowy mod gorący: licznik ticków, stan przez przeładowanie
+examples/sklep/    przykład: komenda /sklep, monety, give, tell poza komendą
+examples/teleport-blok/  przykład: klik w magnetyt, set_block, particles, run_later
 crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; data/ → paczki danych świata; hotd status
 scripts/           server-install.sh (instalator serwera na Ubuntu, D25); hot-build.sh i
                    hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)

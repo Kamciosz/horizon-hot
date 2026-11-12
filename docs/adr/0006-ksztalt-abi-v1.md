@@ -28,3 +28,10 @@ D3–D6 w `PLAN.md` opisują granicę między gospodarzem a modem: stabilne C AB
 - Układ struktur pilnuje `crates/hot-abi/tests/layout.rs`. Zmiana rozmiaru albo przesunięcia pola to nowe `ABI_MAJOR` i przebudowa wszystkich modów.
 - Nowy hak silnika wymaga stałej w `hot_abi::kind`, wariantu w `hot_sdk::Event` i tłumaczenia w `hot-host`, ale nie nowej wersji ABI.
 - `init` nowej generacji wydłuża tick, w którym następuje przełączenie. Pomiar MSPT przy przeładowaniach to sprawdzenie M1.
+
+## Zmiana 2026-11-12: ABI 2 (M4)
+
+- `HostApi` dostał `set_block`, `give`, `particles` i `run_later` na końcu tabeli (104 bajty, `run_later` na przesunięciu 96).
+- `ModVTable` dostał pole `commands` po `version` (88 bajtów): komendy najwyższego poziomu moda, rozdzielone spacjami. `hot-core` wykonuje je w ticku gracza, bo w haku komendy silnik gracza nie widzi (D6a w `PLAN.md`).
+- `kind::PLAYER_TICK` idzie tylko z `hot-host` do `hot-core`; mody go nie dostają.
+- Mody zbudowane dla ABI 1 są odrzucane z `HOT-E0402`; trzeba je przebudować z nowym `hot-sdk`. Stare makro `hot_mod!(Typ, id = …, version = …)` działa dalej i daje pustą listę komend.

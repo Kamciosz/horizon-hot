@@ -71,6 +71,31 @@ impl HotMod for Gadula {
 hot_sdk::hot_mod!(Gadula, id = "gadula", version = "1");
 "#;
 
+const KOLEJKA: &str = r#"
+use hot_sdk::{Event, Flow, Host, HotMod};
+struct Kolejka;
+impl HotMod for Kolejka {
+    fn init(_host: &mut Host<'_>, _state: &[u8]) -> Self {
+        Kolejka
+    }
+    fn on_event(&mut self, host: &mut Host<'_>, event: &Event<'_>) -> Flow {
+        match event {
+            Event::Chat { player, text, .. } => {
+                host.run_later(&format!("say {text}"));
+                host.tell(*player, "Masz \"cytat\"");
+                Flow::Continue
+            }
+            Event::Command { command, .. } if command.starts_with("kolejka") => {
+                host.reply(&format!("ok {command}"));
+                Flow::Cancel
+            }
+            _ => Flow::Continue,
+        }
+    }
+}
+hot_sdk::hot_mod!(Kolejka, id = "kolejka", version = "1", commands = "kolejka");
+"#;
+
 const BAD_ABI: &str = r#"
 use hot_abi::{Buf, HostApi, ModVTable, Str};
 extern "C" fn init(_: &HostApi, _: Str) -> *mut std::ffi::c_void { std::ptr::null_mut() }
@@ -78,7 +103,7 @@ extern "C" fn on_event(_: *mut std::ffi::c_void, _: &HostApi, _: &hot_abi::Event
 extern "C" fn deactivate(_: *mut std::ffi::c_void, _: &HostApi) -> Buf { Buf::EMPTY }
 extern "C" fn free_buf(_: Buf) {}
 static TABLE: ModVTable = ModVTable {
-    abi: 99, id: Str::from_str("stary"), version: Str::from_str("0"),
+    abi: 99, id: Str::from_str("stary"), version: Str::from_str("0"), commands: Str::from_str(""),
     init, on_event, deactivate, free_buf,
 };
 #[no_mangle]
@@ -118,6 +143,7 @@ fn build_mods() -> Result<PathBuf, Box<dyn Error>> {
             "hot-sdk",
         ),
         ("gadula", GADULA.to_owned(), "hot-sdk"),
+        ("kolejka", KOLEJKA.to_owned(), "hot-sdk"),
         ("zle_abi", BAD_ABI.to_owned(), "hot-abi"),
     ];
     let mut members = Vec::new();
@@ -169,6 +195,8 @@ struct Fake {
     home: String,
     logs: Vec<(u32, String)>,
     replies: Vec<String>,
+    /// PL: Komendy, które dostał silnik. EN: Commands the engine got.
+    commands: Vec<String>,
 }
 
 fn fake<'a>(ctx: *mut c_void) -> &'a mut Fake {
@@ -185,21 +213,56 @@ fn text(s: Str) -> String {
 extern "C" fn f_log(ctx: *mut c_void, level: u32, message: Str) {
     fake(ctx).logs.push((level, text(message)));
 }
+/// PL: Jak silnik poza hakiem komendy (D6): `tell` odmawia. EN: As the engine outside the command
+/// hook (D6): `tell` refuses.
 extern "C" fn f_tell(_: *mut c_void, _: &Uuid, _: Str) -> bool {
-    true
+    false
 }
 extern "C" fn f_broadcast(_: *mut c_void, _: Str) {}
 extern "C" fn f_reply(ctx: *mut c_void, message: Str) {
     fake(ctx).replies.push(text(message));
 }
-extern "C" fn f_run_command(_: *mut c_void, _: Str) -> bool {
+extern "C" fn f_run_command(ctx: *mut c_void, line: Str) -> bool {
+    fake(ctx).commands.push(text(line));
     true
 }
 extern "C" fn f_players(
     _: *mut c_void,
-    _: extern "C" fn(*mut c_void, &PlayerInfo),
-    _: *mut c_void,
+    each: extern "C" fn(*mut c_void, &PlayerInfo),
+    user: *mut c_void,
 ) {
+    let gracz = PlayerInfo {
+        uuid: [7; 16],
+        name: Str::from_str("Gracz"),
+        dimension: Str::from_str("minecraft:overworld"),
+        position: [0.0; 3],
+        permission: 0,
+        game_mode: 0,
+    };
+    each(user, &gracz);
+}
+extern "C" fn f_set_block(_: *mut c_void, _: &[i32; 3], _: Str) -> bool {
+    true
+}
+extern "C" fn f_give(_: *mut c_void, _: &Uuid, _: Str, count: u32) -> u32 {
+    count
+}
+extern "C" fn f_particles(
+    _: *mut c_void,
+    _: Str,
+    _: &[f64; 3],
+    _: &[f64; 3],
+    _: f64,
+    _: i32,
+) -> bool {
+    true
+}
+/// PL: Gospodarz nie powinien dostać `run_later`: kolejkę trzyma `hot-core`.
+/// EN: The host should never get `run_later`: `hot-core` keeps the queue.
+extern "C" fn f_run_later(ctx: *mut c_void, line: Str) {
+    fake(ctx)
+        .commands
+        .push(format!("HOST GOT run_later {}", text(line)));
 }
 extern "C" fn f_block(
     _: *mut c_void,
@@ -267,6 +330,10 @@ impl Server {
             players: f_players,
             block: f_block,
             data_dir: f_data_dir,
+            set_block: f_set_block,
+            give: f_give,
+            particles: f_particles,
+            run_later: f_run_later,
         }
     }
 
@@ -298,6 +365,14 @@ impl Server {
         e.text = Str::from_str(message);
         self.send(&e);
         std::mem::take(&mut self.fake.replies)
+    }
+
+    fn player_event(&mut self, kind: u32, player: u8, text: &str) -> u32 {
+        let mut e = Event::new(kind);
+        e.player = [player; 16];
+        e.name = Str::from_str("Gracz");
+        e.text = Str::from_str(text);
+        self.send(&e)
     }
 
     /// PL: `hot load` i ticki, aż `status.json` pokaże warunek. EN: `hot load`, then tick until.
@@ -473,6 +548,28 @@ fn first_generation_panic_turns_the_mod_off() -> TestResult {
 }
 
 #[test]
+fn unload_keeps_the_state_for_the_next_load() -> TestResult {
+    let home = Server::home("unload-load");
+    let mut s = Server::start(&home)?;
+    s.load_and_wait(&mod_file("licznik_v1")?, |st| {
+        generation(st, "licznik") == Some(1)
+    })?;
+    for _ in 0..5 {
+        s.tick();
+    }
+    let before = count_of(&s.console("licznik ile").1, "v1").ok_or("no v1 count")?;
+    s.console("hot unload licznik");
+    s.load_and_wait(&mod_file("licznik_v2")?, |st| {
+        generation(st, "licznik") == Some(1)
+    })?;
+    let after = count_of(&s.console("licznik ile").1, "v2").ok_or("no v2 count")?;
+    assert!(after >= before, "the state came back: {before} -> {after}");
+    assert!(!home.join("hot-state/saved/licznik.bin").exists());
+    s.stop();
+    Ok(())
+}
+
+#[test]
 fn wrong_abi_version_is_refused() -> TestResult {
     let home = Server::home("abi");
     let mut s = Server::start(&home)?;
@@ -516,6 +613,79 @@ fn mod_messages_reach_the_log_with_mod_id_and_data_dir_works() -> TestResult {
         .logs
         .iter()
         .any(|(_, m)| m == "[gadula] database file is missing"));
+    s.stop();
+    Ok(())
+}
+
+#[test]
+fn commands_from_player_events_run_on_the_next_tick() -> TestResult {
+    let home = Server::home("kolejka");
+    let mut s = Server::start(&home)?;
+    s.load_and_wait(&mod_file("kolejka")?, |st| {
+        generation(st, "kolejka") == Some(1)
+    })?;
+    s.fake.commands.clear();
+    s.chat("hej");
+    assert!(s.fake.commands.is_empty(), "{:?}", s.fake.commands);
+    s.tick();
+    assert_eq!(
+        s.fake.commands,
+        [
+            "say hej".to_owned(),
+            r#"tellraw Gracz {"text":"Masz \"cytat\""}"#.to_owned()
+        ]
+    );
+    s.tick();
+    assert_eq!(s.fake.commands.len(), 2, "the queue runs once");
+    s.stop();
+    Ok(())
+}
+
+#[test]
+fn declared_commands_wait_for_the_players_tick() -> TestResult {
+    let home = Server::home("odlozone");
+    let mut s = Server::start(&home)?;
+    s.load_and_wait(&mod_file("kolejka")?, |st| {
+        generation(st, "kolejka") == Some(1)
+    })?;
+    s.fake.commands.clear();
+    s.fake.replies.clear();
+    let flow = s.player_event(kind::PLAYER_COMMAND, 7, "kolejka raz");
+    assert_eq!(
+        flow,
+        flow::CANCEL,
+        "a declared command is cancelled at once"
+    );
+    assert_eq!(
+        s.player_event(kind::PLAYER_COMMAND, 7, "inna"),
+        flow::CONTINUE,
+        "an undeclared command goes on to the engine"
+    );
+    s.player_event(kind::PLAYER_TICK, 8, "");
+    s.tick();
+    assert!(s.fake.commands.is_empty(), "{:?}", s.fake.commands);
+    assert!(s.fake.replies.is_empty(), "{:?}", s.fake.replies);
+
+    s.player_event(kind::PLAYER_TICK, 7, "");
+    s.player_event(kind::PLAYER_TICK, 7, "");
+    s.tick();
+    assert_eq!(
+        s.fake.commands,
+        [r#"tellraw Gracz {"text":"ok kolejka raz"}"#.to_owned()],
+        "the mod runs once, in the player's tick, and its reply goes through tell"
+    );
+    assert!(s.fake.replies.is_empty(), "{:?}", s.fake.replies);
+
+    s.fake.commands.clear();
+    s.player_event(kind::PLAYER_COMMAND, 7, "kolejka dwa");
+    s.player_event(kind::PLAYER_LEFT, 7, "");
+    s.player_event(kind::PLAYER_TICK, 7, "");
+    s.tick();
+    assert!(
+        s.fake.commands.is_empty(),
+        "leaving drops the queue: {:?}",
+        s.fake.commands
+    );
     s.stop();
     Ok(())
 }

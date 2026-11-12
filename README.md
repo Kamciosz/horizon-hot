@@ -27,7 +27,7 @@ crates/hot-core/  — gospodarz modów gorących w silniku (hot load, generacje)
 crates/hot-host/  — mod natywny w silniku, który ładuje hot-core
 crates/hotd/      — demon serwera: repo serwera → podpisane mody z CI → hot load
 scripts/          — instalator serwera (server-install.sh), budowa i publikacja modów w CI repo serwera
-examples/licznik/ — przykładowy mod gorący
+examples/licznik/, examples/sklep/, examples/teleport-blok/ — przykładowe mody gorące
 docs/             — architektura, decyzje (ADR), standard kodu, katalog błędów
 PLAN.md           — plan budowy (roboczy; po zakończeniu treść przechodzi do docs/)
 ```

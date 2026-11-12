@@ -1,0 +1,20 @@
+[package]
+name = "sklep"
+description = "Przykładowy mod gorący: sklep za monety zarabiane w grze (komenda /sklep)"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+# PL: `cdylib` to plik, który ładuje `hot load`; `rlib` dla testów jednostkowych.
+# EN: The `cdylib` is the file `hot load` loads; the `rlib` is for the unit tests.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hot-sdk = { path = "../../crates/hot-sdk" }
+
+[lints]
+workspace = true

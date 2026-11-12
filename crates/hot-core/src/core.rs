@@ -6,19 +6,20 @@
 //! the previous generation after a panic (D4), a 6000-tick probation before a generation counts as
 //! good (D13), the `hot` console command. Everything except file loading runs on the server thread.
 
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
-use hot_abi::{flow, kind, Buf, HostApi, Str};
+use hot_abi::{flow, kind, Buf, Event, HostApi, Str, Uuid};
 use hot_diag::{DiagError, LogConfig, Logger, Redactor};
 use hot_sdk::{Flow, Host, HotMod};
 use serde_json::{json, Value};
 
 use crate::loader::{self, Gen, Outcome};
 use crate::store::{self, ModRecord, ModsFile, Paths};
-use crate::wrap::ModCall;
+use crate::wrap::{Later, ModCall};
 use crate::{codes, VERSION};
 
 /// PL: Generacja jest dobra po 5 minutach bez paniki (D13): 5 × 60 × 20 TPS.
@@ -27,6 +28,16 @@ pub const GOOD_AFTER_TICKS: u64 = 6000;
 
 /// PL: Ile ostatnich błędów trzyma `status.json`. EN: How many recent errors `status.json` keeps.
 const RECENT_ERRORS: usize = 10;
+
+/// PL: Najwięcej odłożonych komend jednego gracza (D6a). EN: The most deferred commands per player.
+pub const DEFERRED_MAX: usize = 16;
+
+/// PL: Komenda gracza czekająca na jego tick (D6a). EN: A player command waiting for their tick.
+struct Deferred {
+    player: Uuid,
+    name: String,
+    command: String,
+}
 
 struct Active {
     gen: Gen,
@@ -53,6 +64,13 @@ pub struct Core {
     pending: Vec<PathBuf>,
     errors: Vec<Value>,
     tick: u64,
+    /// PL: Komendy modów na następny tick (`run_later`, zapasowy `tell`). EN: Next-tick commands.
+    later: RefCell<Vec<Later>>,
+    /// PL: Komendy zadeklarowane przez mody, czekające na tick gracza (D6a).
+    /// EN: Commands the mods declared, waiting for the player's tick (D6a).
+    deferred: Vec<Deferred>,
+    /// PL: Gracz odłożonej komendy w trakcie jej wykonania. EN: The deferred command's player.
+    reply_to: Option<Uuid>,
 }
 
 impl HotMod for Core {
@@ -80,6 +98,9 @@ impl HotMod for Core {
             pending: Vec::new(),
             errors: Vec::new(),
             tick: 0,
+            later: RefCell::new(Vec::new()),
+            deferred: Vec::new(),
+            reply_to: None,
         };
         core.restore(host.raw());
         core
@@ -103,6 +124,16 @@ impl HotMod for Core {
         if event.kind == kind::SERVER_TICK {
             self.tick = event.number;
             self.apply_loaded(api);
+            self.run_later(api);
+        }
+        match event.kind {
+            kind::PLAYER_TICK => {
+                self.run_deferred(api, event.player);
+                return Flow::Continue;
+            }
+            kind::PLAYER_COMMAND if self.defer(api, event) => return Flow::Cancel,
+            kind::PLAYER_LEFT => self.deferred.retain(|d| d.player != event.player),
+            _ => {}
         }
         let flow = self.dispatch(api, event);
         if event.kind == kind::SERVER_TICK {
@@ -294,10 +325,98 @@ impl Core {
             data_dir: &data_dir,
             log: &self.log,
             panic: None,
+            later: &self.later,
+            reply_to: self.reply_to,
         };
         let api = call.api();
         let result = f(&api);
         (result, call.panic)
+    }
+
+    /// PL: Komendy odłożone przez mody w poprzednim ticku. Odmowa silnika trafia do logu z id moda.
+    /// EN: Commands the mods put off in the previous tick. An engine refusal is logged with the mod.
+    fn run_later(&mut self, outer: &HostApi) {
+        let queued = self.later.take();
+        for later in queued {
+            if !(outer.run_command)(outer.ctx, Str::from_str(&later.line)) {
+                self.log.warn(
+                    &format!(
+                        "The engine refused a command hot mod \"{}\" queued for the next tick. Fix: run the same command in the server console to see why",
+                        later.id
+                    ),
+                    json!({ "mod": later.id, "command": later.line }),
+                );
+            }
+        }
+    }
+
+    // ---------- PL: odłożone komendy graczy (D6a) / EN: deferred player commands (D6a) ----------
+
+    /// PL: Indeks moda, który deklaruje pierwszy wyraz komendy. EN: The mod declaring the command.
+    fn owner(&self, command: &str) -> Option<usize> {
+        let word = command.split_whitespace().next()?;
+        self.mods
+            .iter()
+            .position(|m| m.gen.commands.iter().any(|c| c == word))
+    }
+
+    /// PL: Komenda gracza zadeklarowana przez mod trafia do kolejki na jego tick; zwraca, czy
+    /// została odłożona. W haku komendy silnik nie widzi gracza (D6a), więc mod nie dostaje jej tu.
+    /// EN: A player command a mod declared is queued for the player's tick; returns whether it was
+    /// deferred. In the command hook the engine does not see the player (D6a), so the mod does not
+    /// get it here.
+    fn defer(&mut self, outer: &HostApi, event: &Event) -> bool {
+        // SAFETY: napisy zdarzenia ważne w wywołaniu. EN: the event's strings are valid for the call.
+        let command = unsafe { event.text.as_str() }.unwrap_or("").to_owned();
+        if self.owner(&command).is_none() {
+            return false;
+        }
+        let waiting = self
+            .deferred
+            .iter()
+            .filter(|d| d.player == event.player)
+            .count();
+        if waiting >= DEFERRED_MAX {
+            (outer.reply)(
+                outer.ctx,
+                Str::from_str("Za dużo komend naraz; poczekaj chwilę i spróbuj ponownie."),
+            );
+            return true;
+        }
+        self.deferred.push(Deferred {
+            player: event.player,
+            // SAFETY: jak wyżej. EN: as above.
+            name: unsafe { event.name.as_str() }.unwrap_or("").to_owned(),
+            command,
+        });
+        true
+    }
+
+    /// PL: Odłożone komendy gracza, w jego ticku. Właściciela szuka się teraz, bo mod mógł zostać
+    /// przeładowany albo usunięty. EN: The player's deferred commands, in their tick. The owner is
+    /// looked up now, as the mod may have been reloaded or removed meanwhile.
+    fn run_deferred(&mut self, outer: &HostApi, player: Uuid) {
+        if !self.deferred.iter().any(|d| d.player == player) {
+            return;
+        }
+        let (mine, rest): (Vec<Deferred>, Vec<Deferred>) = std::mem::take(&mut self.deferred)
+            .into_iter()
+            .partition(|d| d.player == player);
+        self.deferred = rest;
+        for d in mine {
+            let Some(i) = self.owner(&d.command) else {
+                let line = format!("Komendy /{} nie obsługuje już żaden mod.", d.command);
+                (outer.tell)(outer.ctx, &player, Str::from_str(&line));
+                continue;
+            };
+            let mut event = Event::new(kind::PLAYER_COMMAND);
+            event.player = player;
+            event.name = Str::from_str(&d.name);
+            event.text = Str::from_str(&d.command);
+            self.reply_to = Some(player);
+            self.call_one(outer, i, &event);
+            self.reply_to = None;
+        }
     }
 
     fn init_gen(
@@ -479,22 +598,30 @@ impl Core {
     /// EN: A new generation replaces the old one (or a new mod). The old state passes over.
     fn switch(&mut self, outer: &HostApi, gen: Gen) {
         let Some(i) = self.mods.iter().position(|m| m.gen.id == gen.id) else {
-            if let Some(instance) = self.init_gen(outer, &gen, 1, &[]) {
-                self.log.info(
-                    &format!("Hot mod \"{}\" {} is active as generation 1", gen.id, gen.version),
-                    json!({ "mod": gen.id, "generation": 1, "file": gen.file.display().to_string(), "source": gen.source.display().to_string() }),
-                );
-                self.mods.push(Active {
-                    gen,
-                    generation: 1,
-                    instance,
-                    previous: None,
-                    good: None,
-                    snapshot: Vec::new(),
-                    ok_ticks: 0,
-                });
-                self.write_mods(false);
-            }
+            // PL: Stan zostawiony przez `hot unload` albo wyłączenie po panice. Gdy start się nie
+            // uda, wraca do `saved/`. EN: The state left by `hot unload` or a turn-off after a
+            // panic. If the start fails, it goes back to `saved/`.
+            let state = store::take_saved(&self.paths, &gen.id);
+            let Some(instance) = self.init_gen(outer, &gen, 1, &state) else {
+                if let Err(e) = store::write_atomic(&self.paths.saved(&gen.id), &state) {
+                    self.error(&e);
+                }
+                return;
+            };
+            self.log.info(
+                &format!("Hot mod \"{}\" {} is active as generation 1", gen.id, gen.version),
+                json!({ "mod": gen.id, "generation": 1, "file": gen.file.display().to_string(), "source": gen.source.display().to_string(), "state_bytes": state.len() }),
+            );
+            self.mods.push(Active {
+                gen,
+                generation: 1,
+                instance,
+                previous: None,
+                good: None,
+                snapshot: state,
+                ok_ticks: 0,
+            });
+            self.write_mods(false);
             return;
         };
         let state = self.deactivate(outer, i);

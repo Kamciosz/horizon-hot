@@ -23,6 +23,8 @@ pub struct Gen {
     pub vtable: &'static ModVTable,
     pub id: String,
     pub version: String,
+    /// PL: Komendy najwyższego poziomu moda (D6a). EN: The mod's top-level commands (D6a).
+    pub commands: Vec<String>,
     /// PL: Kopia w `hot-state/gen/`, z której wczytano bibliotekę. EN: The copy that was loaded.
     pub file: PathBuf,
     /// PL: Plik wskazany w `hot load` (artefakt CI). EN: The file named in `hot load`.
@@ -140,6 +142,12 @@ pub fn open(file: &Path, source: &Path) -> Result<Gen, DiagError> {
     let id = unsafe { vtable.id.as_str() }.unwrap_or("").to_owned();
     // SAFETY: jak wyżej. EN: as above.
     let version = unsafe { vtable.version.as_str() }.unwrap_or("").to_owned();
+    // SAFETY: jak wyżej. EN: as above.
+    let commands = unsafe { vtable.commands.as_str() }
+        .unwrap_or("")
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
     if !valid_id(&id) {
         return Err(DiagError::new(
             codes::MOD_LOAD_FAILED,
@@ -154,6 +162,7 @@ pub fn open(file: &Path, source: &Path) -> Result<Gen, DiagError> {
         vtable,
         id,
         version,
+        commands,
         file: file.to_path_buf(),
         source: source.to_path_buf(),
     })

@@ -13,8 +13,8 @@ fn sizes_and_alignment_are_stable() {
     assert_eq!((size_of::<Buf>(), align_of::<Buf>()), (24, 8));
     assert_eq!((size_of::<Event>(), align_of::<Event>()), (120, 8));
     assert_eq!((size_of::<PlayerInfo>(), align_of::<PlayerInfo>()), (80, 8));
-    assert_eq!((size_of::<HostApi>(), align_of::<HostApi>()), (72, 8));
-    assert_eq!((size_of::<ModVTable>(), align_of::<ModVTable>()), (72, 8));
+    assert_eq!((size_of::<HostApi>(), align_of::<HostApi>()), (104, 8));
+    assert_eq!((size_of::<ModVTable>(), align_of::<ModVTable>()), (88, 8));
 }
 
 #[test]
@@ -23,5 +23,7 @@ fn field_offsets_are_stable() {
     assert_eq!(offset_of!(Event, name), 24);
     assert_eq!(offset_of!(Event, number), 112);
     assert_eq!(offset_of!(HostApi, data_dir), 64);
-    assert_eq!(offset_of!(ModVTable, free_buf), 64);
+    assert_eq!(offset_of!(HostApi, run_later), 96);
+    assert_eq!(offset_of!(ModVTable, commands), 40);
+    assert_eq!(offset_of!(ModVTable, free_buf), 80);
 }

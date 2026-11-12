@@ -27,11 +27,12 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use horizon_client::mod_api::{
-    DestroyBlockEvent, Flow, Hooks, Host, LeftClickBlockEvent, NativeCommand, PerformCommandEvent,
+    DestroyBlockEvent, Flow, Hooks, Host, ItemStack, LeftClickBlockEvent, NativeBlockEdit,
+    NativeBlockRun, NativeCommand, ParticleOptions, ParticleType, PerformCommandEvent,
     PerformConsoleCommandEvent, PlaceBlockEvent, PlayerChatEvent, PlayerCommandEvent,
-    PlayerLoggedInEvent, PlayerLoggedOutEvent, RegisterCommandsEvent, RightClickBlockEvent,
-    ServerAboutToStartEvent, ServerDataLoadedEvent, ServerStoppingEvent, ServerTickEvent,
-    ServerTickPhase, Text, UseItemEvent, UseItemOnEvent,
+    PlayerLoggedInEvent, PlayerLoggedOutEvent, PlayerTickEvent, RegisterCommandsEvent,
+    RightClickBlockEvent, ServerAboutToStartEvent, ServerDataLoadedEvent, ServerStoppingEvent,
+    ServerTickEvent, ServerTickPhase, Text, UseItemEvent, UseItemOnEvent,
 };
 use hot_abi::{
     flow, kind, level, Buf, EntryFn, Event, HostApi, ModVTable, PlayerInfo, Str, Uuid, ABI_MAJOR,
@@ -401,6 +402,21 @@ impl Hooks for HotHost {
         self.send(&mut call, &e);
     }
 
+    fn player_tick(&self, host: &mut dyn Host, _event: &mut PlayerTickEvent) {
+        // PL: Tu silnik podstawia gracza, więc `hot-core` wykonuje w tym haku komendy, które mody
+        // zadeklarowały (D6a). Przy pustej kolejce `hot-core` od razu wraca.
+        // EN: The engine swaps the player in here, so `hot-core` runs the commands mods declared
+        // in this hook (D6a). With an empty queue `hot-core` returns at once.
+        let Some(p) = host.acting_player() else {
+            return;
+        };
+        let mut e = Event::new(kind::PLAYER_TICK);
+        e.player = p.uuid.to_be_bytes();
+        e.name = Str::from_str(&p.name);
+        let mut call = Call::new(Some(host), &self.home);
+        self.send(&mut call, &e);
+    }
+
     fn player_chat(&self, event: &mut PlayerChatEvent<'_>) -> Flow {
         let mut e = Event::new(kind::PLAYER_CHAT);
         e.player = event.player.to_be_bytes();
@@ -511,6 +527,10 @@ impl<'a> Call<'a> {
             players,
             block,
             data_dir,
+            set_block,
+            give,
+            particles,
+            run_later,
         }
     }
 
@@ -586,7 +606,15 @@ extern "C" fn players(
     let Some(h) = c.host.as_deref() else {
         return;
     };
-    for p in h.server_players() {
+    // PL: Gracz podstawiony w haku (np. klik, tick gracza) może nie być na liście serwera.
+    // EN: The player swapped into a hook (a click, the player's tick) may be missing from the list.
+    let mut list = h.server_players();
+    if let Some(me) = h.acting_player() {
+        if list.iter().all(|p| p.uuid != me.uuid) {
+            list.push(me);
+        }
+    }
+    for p in list {
         let info = PlayerInfo {
             uuid: p.uuid.to_be_bytes(),
             name: Str::from_str(&p.name),
@@ -619,4 +647,99 @@ extern "C" fn data_dir(ctx: *mut c_void, out: extern "C" fn(*mut c_void, Str), u
     let c = unsafe { call(ctx) };
     let path = c.home.display().to_string();
     out(user, Str::from_str(&path));
+}
+
+/// PL: Jeden blok przez `edit_blocks` (jedyna droga po nazwie): bez aktualizacji sąsiadów, chunk
+/// idzie do graczy w całości. `false` także wtedy, gdy blok już taki był.
+/// EN: One block through `edit_blocks` (the only path by name): no neighbour updates, the chunk
+/// goes to the players whole. `false` also when the block was already that.
+extern "C" fn set_block(ctx: *mut c_void, pos: &[i32; 3], block: Str) -> bool {
+    // SAFETY: opis `call`. EN: see `call`.
+    let c = unsafe { call(ctx) };
+    let Some(h) = c.host.as_deref_mut() else {
+        return false;
+    };
+    let name = text(block);
+    let edit = NativeBlockEdit {
+        palette: vec![name.clone()],
+        filters: Vec::new(),
+        runs: vec![NativeBlockRun {
+            x: pos[0],
+            z: pos[2],
+            y: pos[1],
+            height: 1,
+            surface: None,
+            block: 0,
+            only: None,
+        }],
+    };
+    let dimension = h.dimension();
+    match h.edit_blocks(dimension, &edit) {
+        Ok(changed) => changed > 0,
+        Err(why) => {
+            log::warn!(target: LOG, "set_block {name} at {pos:?} in {dimension} refused: {why}");
+            false
+        }
+    }
+}
+
+/// PL: Przedmioty po jednym stosie przez `give_stack`; zwraca, ile weszło.
+/// EN: Items one stack at a time through `give_stack`; returns how many fit.
+extern "C" fn give(ctx: *mut c_void, player: &Uuid, item: Str, count: u32) -> u32 {
+    // SAFETY: opis `call`. EN: see `call`.
+    let c = unsafe { call(ctx) };
+    let Some(h) = c.host.as_deref_mut() else {
+        return 0;
+    };
+    let item = text(item);
+    let Some(max) = h.max_stack_size(&item) else {
+        return 0;
+    };
+    let uuid = u128::from_be_bytes(*player);
+    let mut given = 0;
+    while given < count {
+        let n = (count - given).min(max.max(1));
+        let left = h
+            .give_stack(uuid, ItemStack::new(&item, n))
+            .map_or(0, |s| s.count);
+        given += n.saturating_sub(left);
+        if left > 0 {
+            break;
+        }
+    }
+    given
+}
+
+extern "C" fn particles(
+    ctx: *mut c_void,
+    name: Str,
+    at: &[f64; 3],
+    spread: &[f64; 3],
+    speed: f64,
+    count: i32,
+) -> bool {
+    // SAFETY: opis `call`. EN: see `call`.
+    let c = unsafe { call(ctx) };
+    let Some(h) = c.host.as_deref_mut() else {
+        return false;
+    };
+    let Some(ty) = ParticleType::from_name(&text(name)) else {
+        return false;
+    };
+    h.send_particles(
+        &ParticleOptions::simple(ty),
+        None,
+        *at,
+        *spread,
+        speed,
+        count,
+    )
+}
+
+/// PL: Kolejkę na następny tick trzyma `hot-core`; on tej funkcji gospodarza nie woła. Gdyby
+/// zawołał, komenda idzie od razu.
+/// EN: `hot-core` keeps the next-tick queue and never calls this host function. If it did, the
+/// command runs at once.
+extern "C" fn run_later(ctx: *mut c_void, line: Str) {
+    run_command(ctx, line);
 }

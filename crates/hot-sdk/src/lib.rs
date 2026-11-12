@@ -363,6 +363,49 @@ impl<'call> Host<'call> {
         (self.api.data_dir)(self.api.ctx, write_string, (&raw mut out).cast());
         PathBuf::from(out)
     }
+
+    /// PL: Stawia blok (`minecraft:stone`, `minecraft:oak_stairs[facing=east]`) w wymiarze
+    /// bieżącego zdarzenia. Sąsiedzi nie dostają aktualizacji (woda nie popłynie). `false`: nic
+    /// się nie zmieniło, zła nazwa albo nie wolno tutaj.
+    /// EN: Sets a block in the current event's dimension. Neighbours get no update (water won't
+    /// flow). `false`: nothing changed, a bad name, or not allowed here.
+    pub fn set_block(&mut self, pos: [i32; 3], block: &str) -> bool {
+        (self.api.set_block)(self.api.ctx, &pos, Str::from_str(block))
+    }
+
+    /// PL: Daje graczowi `count` sztuk `item`; zwraca, ile weszło (reszty nie upuszcza).
+    /// EN: Gives a player `count` of `item`; returns how many fit (the rest is not dropped).
+    pub fn give(&mut self, player: PlayerId, item: &str, count: u32) -> u32 {
+        (self.api.give)(self.api.ctx, &player.0, Str::from_str(item), count)
+    }
+
+    /// PL: Cząsteczki vanilla (`minecraft:flame`) w `at`, rozrzucone o `spread`.
+    /// EN: Vanilla particles (`minecraft:flame`) at `at`, spread by `spread`.
+    pub fn particles(
+        &mut self,
+        name: &str,
+        at: [f64; 3],
+        spread: [f64; 3],
+        speed: f64,
+        count: i32,
+    ) -> bool {
+        (self.api.particles)(
+            self.api.ctx,
+            Str::from_str(name),
+            &at,
+            &spread,
+            speed,
+            count,
+        )
+    }
+
+    /// PL: Komenda (bez ukośnika) na początku następnego ticku serwera. Do zdarzeń gracza, gdzie
+    /// [`Host::run_command`] zwraca `false`, np. `tp <gracz> x y z` po kliknięciu bloku.
+    /// EN: A command (no slash) at the start of the next server tick. For player events, where
+    /// [`Host::run_command`] returns `false`, e.g. `tp <player> x y z` after a block click.
+    pub fn run_later(&mut self, line: &str) {
+        (self.api.run_later)(self.api.ctx, Str::from_str(line));
+    }
 }
 
 extern "C" fn write_string(user: *mut c_void, text: Str) {
@@ -506,10 +549,21 @@ pub mod __rt {
 }
 
 /// PL: Eksportuje mod: `hot_mod!(Typ, id = "nazwa", version = "0.1.0")`. Jedno wywołanie na crate.
-/// EN: Exports a mod: `hot_mod!(Type, id = "name", version = "0.1.0")`. One call per crate.
+/// Mod z własnymi komendami gracza dopisuje `commands = "sklep"` (kilka: rozdzielone spacjami).
+/// Takie komendy dochodzą w ticku gracza, gdzie `players`, `tell` i `give` widzą gracza, a `reply`
+/// idzie do niego przez `tell` (D6a). Komenda zadeklarowana należy do moda: `Flow::Continue` nie
+/// oddaje jej silnikowi.
+/// EN: Exports a mod: `hot_mod!(Type, id = "name", version = "0.1.0")`. One call per crate. A mod
+/// with its own player commands adds `commands = "sklep"` (several: space-separated). Those arrive
+/// in the player's tick, where `players`, `tell` and `give` see the player, and `reply` goes to
+/// them through `tell` (D6a). A declared command belongs to the mod: `Flow::Continue` does not hand
+/// it back to the engine.
 #[macro_export]
 macro_rules! hot_mod {
     ($ty:ty, id = $id:expr, version = $version:expr) => {
+        $crate::hot_mod!($ty, id = $id, version = $version, commands = "");
+    };
+    ($ty:ty, id = $id:expr, version = $version:expr, commands = $commands:expr) => {
         /// PL: Tabela moda dla gospodarza. EN: The mod's table for the host.
         #[no_mangle]
         pub extern "C" fn hot_mod_entry() -> *const $crate::hot_abi::ModVTable {
@@ -517,6 +571,7 @@ macro_rules! hot_mod {
                 abi: $crate::hot_abi::ABI_MAJOR,
                 id: $crate::hot_abi::Str::from_str($id),
                 version: $crate::hot_abi::Str::from_str($version),
+                commands: $crate::hot_abi::Str::from_str($commands),
                 init: $crate::__rt::init::<$ty>,
                 on_event: $crate::__rt::on_event::<$ty>,
                 deactivate: $crate::__rt::deactivate::<$ty>,

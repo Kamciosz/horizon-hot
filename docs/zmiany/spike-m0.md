@@ -36,7 +36,14 @@
 - `docs/sprzet.md`: zmierzony czas `reload` na Macu dewelopera.
 - `/hot status` w grze pokazuje też stan `hotd`: commit repo, zastosowany commit, na co czeka i dlaczego ostatni commit nie wszedł.
 
+- ABI 2 (M4): funkcje gospodarza `set_block`, `give` (zwraca, ile weszło), `particles` i `run_later` (komenda wykonana na początku następnego ticku). `tell` odrzucony przez silnik idzie w następnym ticku jako `tellraw`.
+- Komendy gracza z podstawionym graczem (D6a): mod deklaruje je w `hot_mod!(…, commands = "…")`, a `hot-core` wykonuje je w ticku gracza, bo w haku komendy silnik gracza nie widzi. Odpowiedź moda dochodzi wtedy przez `tell`.
+- `examples/sklep` (monety za czas gry, `/sklep kup`, `hot sklep daj`) i `examples/teleport-blok` (magnetyt przenosi gracza do celu).
+
 ### Zmienione
+- `tick_block` i `random_tick` przeniesione do M5: bez slotów hak na każdym bloku kosztowałby wywołanie przez ABI bez korzyści (D5).
+- `hot load` moda, który nie jest aktywny, bierze stan zostawiony przez `hot unload` albo wyłączenie po panice w `hot-state/saved/`.
+- `players()` w `hot-host` zawiera gracza podstawionego w haku, nawet gdy silnik nie ma go na liście.
 - `hotd`: zmiana w `mods/<id>/data/` nie jest już odkładana do M3; `Engine::command` zwraca odpowiedź silnika.
 - `hot-core` przełącza gotowe wczytania także przy komendzie konsoli, bo pusty serwer w pauzie nie wywołuje ticku.
 - `AGENTS.md`: zasady pracy na maszynie z grą (bez `prepare` przez agenta, bez zrzutów gry w repo, bez ruszania cudzych instancji), `spikes/` i `docs/spike/` w mapie repo, zmierzona pauza podmiany zamiast „mrugnięcia”; to samo w `docs/ARCHITECTURE.md`. `PLAN.md`, D2: `hot-host` nie używa `hot-diag`; D9 i D16 doprecyzowane.
