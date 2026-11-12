@@ -1,5 +1,5 @@
 # Rust
-/target
+/target/
 
 # Systemy i edytory
 .DS_Store

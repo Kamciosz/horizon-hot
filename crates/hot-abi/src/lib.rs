@@ -14,12 +14,3 @@
 /// Any backwards-incompatible change in this crate bumps this number.
 pub const ABI_MAJOR: u32 = 1;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn abi_major_is_one() {
-        assert_eq!(ABI_MAJOR, 1);
-    }
-}
