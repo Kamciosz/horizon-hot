@@ -1,0 +1,8 @@
+id = "hot_slots"
+name = "Hot Slots (spike)"
+version = "0.1.0"
+description = "Spike S2/S5 horizon-hot: one empty slot block whose look comes from the server's resource pack."
+authors = ["Szymon Sosnowski"]
+api = "0.2"
+side = "both"
+capabilities = ["registries"]

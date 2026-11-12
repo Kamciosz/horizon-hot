@@ -1,0 +1,1 @@
+{ "parent": "minecraft:block/cube_column", "textures": { "end": "hot_slots:block/slot_0_top", "side": "hot_slots:block/slot_0" } }

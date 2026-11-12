@@ -113,10 +113,11 @@ Wiadomość do gracza i do wszystkich, `run_command`, odczyt i zapis bloku, dani
 - Kontekst: R9, R11, R12. **`hot-host` i `hot-core` nie rejestrują żadnej treści** — inaczej klienci dostaliby rozłączenie z niejasną przyczyną.
 - Pula od pierwszej wersji duża: 4096 bloków (pełna kostka, bez stanów) i 8192 przedmiotów. Rozmiar sprawdzany w M5 (start, pamięć klienta). Zmiana puli zmienia `content_identity` → wymaga nowego pliku u graczy; dlatego pula jest duża i stała.
 - Przydział slotów tylko dopisywany, w `hot-state/slots.json` (objęty kopią zapasową); slot nigdy nie wraca do innego moda bez jawnej komendy operatora.
-- Slot daje: nazwę i wygląd (paczka zasobów) + zachowanie (haki D5). Nie daje innego kształtu, światła ani twardości (R9).
+- Slot daje: nazwę i wygląd (paczka zasobów) + zachowanie (haki D5). Model może mieć dowolny kształt, ale tylko wizualnie: kolizja, światło i twardość zostają z `template` (R9).
+- `hot-slots.hmod` zawiera tylko `data/`, `blockstates/` i `items/`; **bez `models/`, `textures/`, `lang/`** — treść modów leży nad paczką serwera, więc każdy taki plik w `.hmod` zasłoniłby wygląd z `hot-pack` (FAKT, S5: `docs/spike/s5-wyglad-slotu-z-paczki-serwera.md`).
 
 **D9. Wygląd: paczka zasobów serwowana przez `hot-pack` pod stałym adresem, z prawdziwym sha1.**
-`hot-pack` (osobny mały proces, poza hamulcem D16) serwuje `http://<host>:8131/pack.zip`; adres ustawiony raz przy instalacji. Nowa paczka = nowy sha1 → klient pobiera tylko zmienioną (R14). Nowy wygląd dociera do graczy przy podmianie przez proxy (D11) — ten sam mechanizm co silnik — albo przy następnym wejściu. NIEWIADOMA S6: czy proxy może samo wysłać `ResourcePackPush` w trakcie gry (klient to obsługuje, R14) — wtedy wygląd zmienia się bez żadnego mrugnięcia.
+`hot-pack` (osobny mały proces, poza hamulcem D16) serwuje `http://<host>:8131/pack.zip`; adres ustawiony raz przy instalacji. Nowa paczka = nowy sha1 → klient pobiera tylko zmienioną (R14, potwierdzone w S5). Na serwerze `require-resource-pack = true`; `hot-play` zgadza się na paczkę naszego serwera z góry (bez tego klient czeka na „Joining world…” na decyzję gracza). Nowy wygląd dociera do graczy przy podmianie przez proxy (D11) — ten sam mechanizm co silnik — albo przy następnym wejściu. NIEWIADOMA S6: czy proxy może samo wysłać `ResourcePackPush` w trakcie gry (klient to obsługuje, R14) — wtedy wygląd zmienia się bez żadnego mrugnięcia.
 
 ### Silnik i proxy (wariant A)
 
@@ -297,10 +298,10 @@ Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie dz
 ### M0 — Spike'i (rozstrzygają niewiadome)
 - [x] M0.1 Repo: `repo-init --stack rust`, `verify-init`, CI Rust (`fmt`, `clippy -D warnings`, `test`). Sprawdzenie: hook odrzucił commit „test”; `cargo test` zielone (`f788091`).
 - [x] M0.2 S1: `hot-abi` jako crate ścieżkowy (`[[crate]]`) w bundlu `hot-host`. Sprawdzenie: `native-build --server-output` przechodzi. Gdy nie: `xtask` kopiuje moduł do bundla.
-- [ ] M0.3 S2: serwer dedykowany ładuje testowy `.hmod` (R11) i klient bez niego dostaje rozłączenie, a z nim wchodzi. Sprawdzenie: `setblock` bloku z moda + oba wejścia klienta.
-- [ ] M0.4 S3: `/sklep` przez anulowany `player_command` bez „Unknown command”. Sprawdzenie: odpowiedź na czacie klienta.
-- [ ] M0.5 S4: `Host::run_command` z `server_tick`. Sprawdzenie: `say` w logu.
-- [ ] M0.6 S5: blok z puli z modelem z paczki serwera (sha1 ustawiony). Sprawdzenie: zrzut ekranu z poprawnym modelem.
+- [x] M0.3 S2: serwer dedykowany ładuje testowy `.hmod` (R11) i klient bez niego dostaje rozłączenie, a z nim wchodzi. Sprawdzenie: `setblock` bloku z moda + oba wejścia klienta.
+- [x] M0.4 S3: `/sklep` przez anulowany `player_command` bez „Unknown command”. Sprawdzenie: odpowiedź na czacie klienta.
+- [x] M0.5 S4: `Host::run_command` z `server_tick`. Sprawdzenie: `say` w logu.
+- [x] M0.6 S5: blok z puli z modelem z paczki serwera (sha1 ustawiony). Sprawdzenie: zrzut ekranu z poprawnym modelem.
 - [ ] M0.7 S6: proxy-prototyp wysyła `ResourcePackPush` w trakcie gry. Sprawdzenie: zmiana tekstury bez mrugnięcia. Wynik opcjonalny (D9).
 - [ ] M0.8 S7: rozmiar puli 4096/8192: czas startu klienta i serwera, RAM. Sprawdzenie: liczby w `docs/sloty.md`; start klienta wolniejszy o < 2 s, inaczej mniejsza pula.
 - [ ] M0.9 S8: prototyp podmiany wariantu A: proxy + dwa silniki na jednym świecie, „usuń encje / zapomnij chunki”, mapowanie id gracza; pomiar pauzy; czy da się rozgrzać nowy silnik przed zwolnieniem świata; ile czasu klient czeka bez pakietów, zanim się rozłączy. Sprawdzenie: prawdziwy klient zostaje połączony, bez ekranu ładowania, pauza zmierzona (`docs/podmiana.md`). **Blokuje D11 i D13.** Jeśli pauza > 1 s — decyzja użytkownika przed M8.
@@ -425,6 +426,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Zewnętrzne powiadomienia (Discord, mail).
 
 ## 8. Stan prac
+
+**2026-11-12 — M0.3–M0.6 (S2–S5) zrobione:** pula slotów w `.hmod` działa, klient bez niej dostaje „Missing: hot_slots 0.1.0”; `/sklep` przez `Flow::Cancel` bez „Unknown command”, odpowiedź tylko przez `event.replies` (`Host::tell` w tym haku = `false`); `run_command` z `server_tick` działa; wygląd, model i nazwa slotu z paczki serwera działają tylko wtedy, gdy `.hmod` nie ma `models/`, `textures/`, `lang/` (D8 poprawione). Szczegóły: `docs/spike/s2-…` – `s5-…`. Dalej: M0.13, M0.9, M0.8, M0.7, M0.12, M0.14, M0b. M0.10 i M0.11 czekają na ThinkCentre.
 
 **2026-11-12 — M0.2 (S1) zrobione:** `hot-abi` jako `[[crate]]` w paczce trait moda buduje się z silnikiem serwera; log `hot_abi::ABI_MAJOR = 1`. Szczegóły: `docs/spike/s1-hot-abi-w-silniku.md`. Dalej: M0.3–M0.6.
 

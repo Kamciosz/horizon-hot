@@ -1,0 +1,10 @@
+# Spike S3/S4 (horizon-hot M0.4, M0.5): /sklep przez anulowany player_command, run_command z server_tick.
+[mod]
+id = "spike_hot_s2"
+version = "0.1.0"
+
+[compatibility]
+horizon_revision = "66f3981f522b24c250b21523a70080965b940424"
+
+[api]
+path = "api"
