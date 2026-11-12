@@ -38,7 +38,7 @@ Właściciel: Szymon Sosnowski. Serwer stoi na współdzielonym ThinkCentre z Ub
 
 ```
 crates/hot-abi/    granica C ABI (stabilna, wersjonowana ABI_MAJOR)
-crates/hot-diag/   logi JSONL, kody błędów, hot report        (planowany)
+crates/hot-diag/   logi JSONL, kody błędów, panika w logu, szkielet hot report
 crates/hot-sdk/    makro hot_mod!, bezpieczne opakowania       (planowany)
 crates/hot-core/   gospodarz modów gorących                    (planowany)
 crates/hotd/       demon w tle                                 (planowany)
@@ -46,7 +46,7 @@ crates/hot-proxy/  proxy                                       (planowany)
 crates/hot-pack/   paczka zasobów                              (planowany)
 crates/hot-play/   aplikacja gracza                            (planowany)
 bundle/hot-host/   mod natywny dla silnika                     (planowany)
-docs/bledy/        katalog kodów błędów HOT-EXXXX              (planowany)
+docs/bledy/        katalog kodów błędów HOT-EXXXX (test: crates/hot-diag/tests/catalog.rs)
 docs/adr/          decyzje (jedna decyzja = jeden plik)
 docs/zmiany/       wpisy do changelogu z pull requestów
 docs/STANDARD_KODU.md  komentarze, błędy i logi, testy — obowiązuje w każdym pliku
@@ -96,7 +96,9 @@ Do czego nie jest potrzebny silnik: `cargo test` w tym repo działa bez Horizona
 ## 7. Logi i błędy (D27, D28)
 
 - Loguj **tylko przez `hot-diag`**. Każdy błąd ma kod `HOT-EXXXX`, pola `what`, `expected`, `context`, `cause`, `fix`, `doc`, `source`, `chain`, `state` — tak, żeby model bez wiedzy o projekcie naprawił błąd z samego wpisu.
-- Nowy błąd = nowy kod + plik `docs/bledy/HOT-EXXXX.md` (znaczenie, przyczyny, diagnostyka, naprawa, pliki kodu). CI sprawdza zgodność.
+- Nowy błąd = stała `const X: Code = Code::new("HOT-EXXXX")` w module `codes` składnika + plik `docs/bledy/HOT-EXXXX.md` (sekcje jak w `docs/bledy/README.md`). Test `crates/hot-diag/tests/catalog.rs` sprawdza obie strony: kod w `crates/` bez pliku i plik bez kodu dają czerwone CI. Uwaga: skaner widzi też kody w komentarzach, więc w przykładach używaj tylko istniejących kodów.
+- Wpis: `DiagError::new(code, what, fix)` (bez tych trzech pól kod się nie kompiluje), potem `.context()`, `.caused_by()`, `.state()`; zapis: `Logger::error`. Panika: `install_panic_hook` zaraz po otwarciu loggera.
+- Raport do ręcznej diagnozy (do czasu `hotd`): `cargo run -p hot-diag -- report --logs <katalog logów> [--secret-file <plik>]... [--out raport.md]`.
 - Zakazane: `unwrap()`/`expect()` poza testami, komunikaty bez kontekstu („failed”), połykanie błędów.
 - Debugujesz zgłoszenie? Zacznij od `hot report` (serwer) albo raportu z „Napraw” (gracz): mają opis systemu, wersje, błędy z wpisami z katalogu i logi.
 

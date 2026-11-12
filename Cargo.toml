@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hot-abi"]
+members = ["crates/hot-abi", "crates/hot-diag"]
 
 [workspace.package]
 version = "0.1.0"
@@ -8,6 +8,11 @@ edition = "2021"
 license = "MIT"
 authors = ["Szymon Sosnowski"]
 repository = "https://github.com/Kamciosz/horizon-hot"
+
+# PL: Wersje zależności w jednym miejscu. Nowa zależność wymaga ADR (docs/adr/).
+# EN: Dependency versions in one place. A new dependency needs an ADR (docs/adr/).
+[workspace.dependencies]
+serde_json = "1.0.151"
 
 # PL: Błąd ma trafić do logu z kontekstem (docs/STANDARD_KODU.md), a nie zakończyć proces paniką bez opisu.
 # EN: An error must reach the log with context (docs/STANDARD_KODU.md), not end the process with a bare panic.

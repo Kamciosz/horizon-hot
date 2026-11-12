@@ -8,6 +8,7 @@ Cel: osoba albo model bez wiedzy o projekcie naprawia błąd z samego wpisu w lo
 
 | Zakres | Obszar |
 |---|---|
+| `E00xx` | sama diagnostyka (`hot-diag`): zapis logu, panika |
 | `E01xx` | instalacja serwera |
 | `E02xx` | git i CI repo serwera |
 | `E03xx` | budowa silnika |

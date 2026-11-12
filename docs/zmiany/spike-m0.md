@@ -11,6 +11,8 @@
 - S6: proxy wysyła paczkę zasobów w trakcie gry (`--pack-file` w `spikes/s8-podmiana/proxy/`), pomiar przeładowania i zrzuty nakładki (`docs/spike/s6-paczka-w-trakcie-gry.md`).
 - S11: przegląd 10 ostatnich wydań Horizona: API haków, `content_identity`, kanały `horizon:*`, protokół, `libloading`, cache treści modów, przypięcie modów natywnych do wersji (`docs/aktualizacje.md`).
 - `docs/adr/0002-spike.md`: wyniki prób S1–S12, poprawki decyzji i otwarte punkty z krokiem, który je rozstrzygnie.
+- `crates/hot-diag`: błąd z polami D27, zapis JSONL z rotacją, maskowanie sekretów, panika w logu, szkielet `hot report` (`hot-diag report`). Zależność `serde_json` (`docs/adr/0003-serde-json-w-hot-diag.md`).
+- `docs/bledy/HOT-E0001.md`, `HOT-E0002.md` i zakres `E00xx`; test zgodności kodów z katalogiem w CI.
 - Kod prób w `spikes/` (poza workspace, budowany launcherem Horizona albo `cargo horizon-mod`).
 
 ### Zmienione

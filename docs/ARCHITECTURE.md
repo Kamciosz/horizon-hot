@@ -7,7 +7,7 @@ Gdzie co leży i dlaczego. Stan: zbudowany jest tylko `hot-abi`; reszta opisuje 
 | Składnik | Gdzie działa | Odpowiada za | Rozmawia z |
 |---|---|---|---|
 | `hot-abi` | biblioteka | stabilna granica C ABI między gospodarzem a modami | — |
-| `hot-diag` (planowany) | biblioteka + CLI | logi JSONL z kodami błędów, `hot report` | wszyscy |
+| `hot-diag` | biblioteka + CLI | logi JSONL z kodami błędów, panika w logu, `hot report` (szkielet: `hot-diag report`) | wszyscy oprócz `hot-host` |
 | `hot-sdk` (planowany) | biblioteka dla autorów modów | makro `hot_mod!`, bezpieczne opakowania ABI, `catch_unwind` | `hot-abi` |
 | `hot-host` (planowany) | w silniku (mod natywny `.hnmod`) | ładuje `hot-core`, przekazuje mu haki Horizona | silnik, `hot-core` |
 | `hot-core` (planowany) | w silniku (`cdylib`) | ładuje generacje modów gorących, sloty, komenda `/hot` | `hot-host`, mody |

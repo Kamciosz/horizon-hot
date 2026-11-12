@@ -215,7 +215,7 @@ Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je 
 
 - Zakaz: komunikatów bez kontekstu („failed”, „error: invalid data”), `unwrap()` poza testami, połykania błędów. Clippy `unwrap_used`, `expect_used` jako błąd.
 - Katalog błędów `docs/bledy/HOT-EXXXX.md`: znaczenie, typowe przyczyny, komendy diagnostyczne, naprawy, pliki kodu. Test w CI: każdy kod użyty w kodzie ma wpis i odwrotnie; każdy wpis ma wszystkie sekcje.
-- Kategorie kodów: `E01xx` instalacja, `E02xx` git i CI, `E03xx` budowa silnika, `E04xx` mody gorące, `E05xx` dane i paczka zasobów, `E06xx` proxy i podmiana silnika, `E07xx` aktualizacje, `E08xx` sprzęt i hamulec, `E09xx` aplikacja gracza, `E10xx` świat i kopie.
+- Kategorie kodów: `E00xx` sama diagnostyka (`hot-diag`), `E01xx` instalacja, `E02xx` git i CI, `E03xx` budowa silnika, `E04xx` mody gorące, `E05xx` dane i paczka zasobów, `E06xx` proxy i podmiana silnika, `E07xx` aktualizacje, `E08xx` sprzęt i hamulec, `E09xx` aplikacja gracza, `E10xx` świat i kopie.
 - Rotacja: `/srv/horizon/logs/<składnik>.jsonl`, 50 MB × 5 plików; u gracza w katalogu danych aplikacji.
 
 **D28. `hot report` — samowystarczalny pakiet dla obcego modelu.**
@@ -315,9 +315,9 @@ Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie dz
 
 ### M0b — Diagnostyka (przed każdym innym kodem, D27–D29)
 - [x] M0.15 `AGENTS.md` z opisem projektu, słownikiem i zasadami (D29); uzupełniany w każdym kolejnym kroku. Sprawdzenie końcowe w M12. Wynik: `AGENTS.md` z mapą repo, zasadami pracy na maszynie z grą i odesłaniem do wyników M0.
-- [ ] M0.16 `hot-diag`: typ błędu z polami D27, zapis JSONL, rotacja, maskowanie sekretów, przechwytywanie paniki z backtrace. Sprawdzenie: testy jednostkowe — wpis bez `code`, `what` lub `fix` nie kompiluje się (builder z wymaganymi polami); znany sekret w kontekście zamaskowany.
-- [ ] M0.17 Katalog `docs/bledy/` + test zgodności kodów w CI. Sprawdzenie: kod bez wpisu → CI czerwone.
-- [ ] M0.18 Szkielet `hot report`. Sprawdzenie: raport ze sztucznego błędu zawiera wszystkie 5 części D28 i < 200 KB.
+- [x] M0.16 `hot-diag`: typ błędu z polami D27, zapis JSONL, rotacja, maskowanie sekretów, przechwytywanie paniki z backtrace. Sprawdzenie: testy jednostkowe — wpis bez `code`, `what` lub `fix` nie kompiluje się (builder z wymaganymi polami); znany sekret w kontekście zamaskowany. Wynik: `crates/hot-diag`, zależność `serde_json` (ADR 0003), własne kody `E00xx`.
+- [x] M0.17 Katalog `docs/bledy/` + test zgodności kodów w CI. Sprawdzenie: kod bez wpisu → CI czerwone. Wynik: `crates/hot-diag/tests/catalog.rs`; obserwacja: przykład `HOT-E0401` w komentarzu dał czerwony test.
+- [x] M0.18 Szkielet `hot report`. Sprawdzenie: raport ze sztucznego błędu zawiera wszystkie 5 części D28 i < 200 KB. Wynik: `hot-diag report`; test z logiem 5 MB, sekretem i adresem IP gracza.
 
 Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a sprawdzenie kroku obejmuje wywołanie co najmniej jednego błędu i obejrzenie wpisu w logu.
 
@@ -428,6 +428,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Zewnętrzne powiadomienia (Discord, mail).
 
 ## 8. Stan prac
+
+**2026-11-12 — M0b (M0.15–M0.18) zrobione:** `AGENTS.md` uzupełniony o zasady pracy z grą. `crates/hot-diag`: `DiagError::new(code, what, fix)` (brak pola = błąd kompilacji, testy `compile_fail` z kodem E0061), zapis JSONL z rotacją, maskowanie znanych sekretów w każdym polu, panika jako `HOT-E0002` z backtrace, katalog błędów wklejany do programu przy budowie. Test katalogu w CI w obie strony. `hot-diag report`: pięć części D28, < 200 KB, sekrety i adresy IPv4 graczy zamaskowane. Testy maskowania sprawdzone mutacją (wyłączone maskowanie → testy czerwone). Etap M0 czeka tylko na ThinkCentre (M0.10, M0.11). Następny krok: M1.
 
 **2026-11-12 — M0.14 zrobione:** wyniki S1–S12 w `docs/adr/0002-spike.md` (tabela prób, otwarte punkty z krokiem, który je rozstrzygnie). Poprawki: D6 (`event.replies` w haku komendy, poza nim `tell` albo `tellraw`), D8 (nowa wersja `hot-slots` przy każdej zmianie puli), D9 (`servers.dat` instancji z `acceptTextures`), D16 (silniki nie działają naraz, pamięć na drugi tylko przy teście D18), D18 (każde Nightly traktowane jako zmiana dla klienta do testu w M9), D24 (zmierzone czasy zamiast „mrugnięcia ≤ 1 s”). Etap M0 kończą M0.10 i M0.11 na ThinkCentre. Następny krok: M0b (M0.15).
 
