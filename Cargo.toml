@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hot-abi", "crates/hot-diag"]
+members = ["crates/hot-abi", "crates/hot-diag", "crates/hot-sdk"]
 
 [workspace.package]
 version = "0.1.0"
