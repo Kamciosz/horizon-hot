@@ -686,6 +686,23 @@ fn declared_commands_wait_for_the_players_tick() -> TestResult {
         "leaving drops the queue: {:?}",
         s.fake.commands
     );
+
+    // PL: Komenda bez deklaracji obsłużona w haku: jedno ostrzeżenie z poprawką.
+    // EN: An undeclared command handled in the hook: one warning with the fix.
+    assert_eq!(
+        s.player_event(kind::PLAYER_COMMAND, 7, "kolejkax"),
+        flow::CANCEL
+    );
+    s.player_event(kind::PLAYER_COMMAND, 7, "kolejkax");
+    let warned = log_entries(&home)
+        .iter()
+        .filter(|e| {
+            e["what"]
+                .as_str()
+                .is_some_and(|w| w.contains(r#"commands = "kolejkax""#))
+        })
+        .count();
+    assert_eq!(warned, 1, "one warning per mod and command");
     s.stop();
     Ok(())
 }

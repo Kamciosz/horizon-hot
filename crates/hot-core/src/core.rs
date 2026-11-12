@@ -7,6 +7,7 @@
 //! good (D13), the `hot` console command. Everything except file loading runs on the server thread.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -71,6 +72,10 @@ pub struct Core {
     deferred: Vec<Deferred>,
     /// PL: Gracz odłożonej komendy w trakcie jej wykonania. EN: The deferred command's player.
     reply_to: Option<Uuid>,
+    /// PL: Mod, który ostatnio przerwał zdarzenie (`Cancel`). EN: The mod that last cancelled.
+    cancelled_by: Option<String>,
+    /// PL: Pary (mod, komenda), o których już ostrzegano. EN: (mod, command) pairs already warned.
+    warned: BTreeSet<(String, String)>,
 }
 
 impl HotMod for Core {
@@ -101,6 +106,8 @@ impl HotMod for Core {
             later: RefCell::new(Vec::new()),
             deferred: Vec::new(),
             reply_to: None,
+            cancelled_by: None,
+            warned: BTreeSet::new(),
         };
         core.restore(host.raw());
         core
@@ -136,6 +143,9 @@ impl HotMod for Core {
             _ => {}
         }
         let flow = self.dispatch(api, event);
+        if event.kind == kind::PLAYER_COMMAND && flow == Flow::Cancel {
+            self.warn_undeclared(event);
+        }
         if event.kind == kind::SERVER_TICK {
             self.count_tick();
         }
@@ -392,6 +402,45 @@ impl Core {
         true
     }
 
+    /// PL: Mod obsłużył komendę gracza w haku komendy, gdzie silnik nie widzi gracza (D6a). Jedno
+    /// ostrzeżenie na parę (mod, komenda), bo blokada komendy silnika też jest poprawna.
+    /// EN: A mod handled a player command in the command hook, where the engine does not see the
+    /// player (D6a). One warning per (mod, command) pair, as blocking an engine command is valid.
+    fn warn_undeclared(&mut self, event: &Event) {
+        let Some(id) = self.cancelled_by.take() else {
+            return;
+        };
+        // SAFETY: napis zdarzenia ważny w wywołaniu. EN: the event's string is valid for the call.
+        let line = unsafe { event.text.as_str() }.unwrap_or("");
+        let word = line.split_whitespace().next().unwrap_or("").to_owned();
+        if !self.warned.insert((id.clone(), word.clone())) {
+            return;
+        }
+        self.log.warn(
+            &format!(
+                "Hot mod \"{id}\" answered the player command /{word} in the command hook, where the engine does not see the player: players() leaves them out and tell() and give() do not reach them. Fix: if the mod needs the player, declare the command with hot_mod!(..., commands = \"{word}\") so it runs in the player's tick"
+            ),
+            json!({ "mod": id, "command": word }),
+        );
+    }
+
+    /// PL: Ostrzeżenie, gdy nowy mod deklaruje komendę innego aktywnego moda; wygrywa ten, który
+    /// był wcześniej na liście. EN: A warning when a new mod declares another active mod's
+    /// command; the one listed earlier wins.
+    fn warn_shared_commands(&self, gen: &Gen) {
+        for m in self.mods.iter().filter(|m| m.gen.id != gen.id) {
+            for c in gen.commands.iter().filter(|c| m.gen.commands.contains(c)) {
+                self.log.warn(
+                    &format!(
+                        "Hot mods \"{}\" and \"{}\" both declare the command /{c}; \"{}\" gets it. Fix: remove /{c} from commands = \"...\" in one of them",
+                        m.gen.id, gen.id, m.gen.id
+                    ),
+                    json!({ "command": c, "owner": m.gen.id, "ignored": gen.id }),
+                );
+            }
+        }
+    }
+
     /// PL: Odłożone komendy gracza, w jego ticku. Właściciela szuka się teraz, bo mod mógł zostać
     /// przeładowany albo usunięty. EN: The player's deferred commands, in their tick. The owner is
     /// looked up now, as the mod may have been reloaded or removed meanwhile.
@@ -463,6 +512,7 @@ impl Core {
         while i < self.mods.len() {
             let (result, stayed) = self.call_one(outer, i, event);
             if result == flow::CANCEL {
+                self.cancelled_by = self.mods.get(i).map(|m| m.gen.id.clone());
                 return Flow::Cancel;
             }
             if stayed {
@@ -597,6 +647,7 @@ impl Core {
     /// PL: Nowa generacja na miejsce starej (albo nowy mod). Stan starej przechodzi do nowej.
     /// EN: A new generation replaces the old one (or a new mod). The old state passes over.
     fn switch(&mut self, outer: &HostApi, gen: Gen) {
+        self.warn_shared_commands(&gen);
         let Some(i) = self.mods.iter().position(|m| m.gen.id == gen.id) else {
             // PL: Stan zostawiony przez `hot unload` albo wyłączenie po panice. Gdy start się nie
             // uda, wraca do `saved/`. EN: The state left by `hot unload` or a turn-off after a

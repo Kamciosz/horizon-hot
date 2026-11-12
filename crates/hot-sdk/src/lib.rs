@@ -552,12 +552,14 @@ pub mod __rt {
 /// Mod z własnymi komendami gracza dopisuje `commands = "sklep"` (kilka: rozdzielone spacjami).
 /// Takie komendy dochodzą w ticku gracza, gdzie `players`, `tell` i `give` widzą gracza, a `reply`
 /// idzie do niego przez `tell` (D6a). Komenda zadeklarowana należy do moda: `Flow::Continue` nie
-/// oddaje jej silnikowi.
+/// oddaje jej silnikowi. Silnik nie sprawdza uprawnień do takiej komendy, więc komendę tylko dla
+/// operatorów mod blokuje sam (`Player::permission`).
 /// EN: Exports a mod: `hot_mod!(Type, id = "name", version = "0.1.0")`. One call per crate. A mod
 /// with its own player commands adds `commands = "sklep"` (several: space-separated). Those arrive
 /// in the player's tick, where `players`, `tell` and `give` see the player, and `reply` goes to
 /// them through `tell` (D6a). A declared command belongs to the mod: `Flow::Continue` does not hand
-/// it back to the engine.
+/// it back to the engine. The engine checks no permission for such a command, so a mod guards an
+/// operator-only command itself (`Player::permission`).
 #[macro_export]
 macro_rules! hot_mod {
     ($ty:ty, id = $id:expr, version = $version:expr) => {

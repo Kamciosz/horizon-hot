@@ -39,8 +39,11 @@
 - ABI 2 (M4): funkcje gospodarza `set_block`, `give` (zwraca, ile weszło), `particles` i `run_later` (komenda wykonana na początku następnego ticku). `tell` odrzucony przez silnik idzie w następnym ticku jako `tellraw`.
 - Komendy gracza z podstawionym graczem (D6a): mod deklaruje je w `hot_mod!(…, commands = "…")`, a `hot-core` wykonuje je w ticku gracza, bo w haku komendy silnik gracza nie widzi. Odpowiedź moda dochodzi wtedy przez `tell`.
 - `examples/sklep` (monety za czas gry, `/sklep kup`, `hot sklep daj`) i `examples/teleport-blok` (magnetyt przenosi gracza do celu).
+- Ostrzeżenia `hot-core` w logu: mod odpowiada na komendę gracza bez deklaracji w `commands` (raz na mod i komendę) oraz dwa mody deklarują tę samą komendę. Każde z poprawką dla agenta.
+- `templates/server-repo/README.md` i dokumentacja `hot_mod!`: serwer nie sprawdza uprawnień do komend modów, mod robi to sam po `permission`.
 
 ### Zmienione
+- CI uruchamia się też po pushu na gałęzie `spike/**`, nie tylko na `main` i w PR-ach.
 - `tick_block` i `random_tick` przeniesione do M5: bez slotów hak na każdym bloku kosztowałby wywołanie przez ABI bez korzyści (D5).
 - `hot load` moda, który nie jest aktywny, bierze stan zostawiony przez `hot unload` albo wyłączenie po panice w `hot-state/saved/`.
 - `players()` w `hot-host` zawiera gracza podstawionego w haku, nawet gdy silnik nie ma go na liście.

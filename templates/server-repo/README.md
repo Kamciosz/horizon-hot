@@ -11,6 +11,13 @@ mods/<id>/data/<przestrzeń nazw>/…   paczka danych: przepisy, łupy, tagi, fu
 
 `<id>`: małe litery, cyfry, `_` i `-`, do 64 znaków. Usunięcie katalogu `mods/<id>/` wyłącza mod i usuwa jego paczkę danych.
 
+## Komendy modów z kodem
+
+- Komendę gracza mod deklaruje w `hot_mod!(..., commands = "sklep")`. Wtedy działa w ticku gracza: `players()`, `tell` i `give` widzą gracza.
+- Komenda bez deklaracji dochodzi tam, gdzie silnik gracza nie widzi; `hot-core` raz zapisze wtedy w logu ostrzeżenie z poprawką.
+- Serwer nie sprawdza uprawnień do komend modów. Komendę tylko dla operatorów mod blokuje sam, po polu `permission` gracza.
+- Dwa mody z tą samą komendą: dostaje ją ten, który był na serwerze wcześniej, a w logu jest ostrzeżenie.
+
 ## Paczka danych (`data/`)
 
 - Pliki idą w `mods/<id>/data/<przestrzeń nazw>/…`, tak jak w `data/` zwykłej paczki danych, np. `mods/sklep/data/sklep/recipe/lada.json`.
