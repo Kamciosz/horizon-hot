@@ -36,7 +36,8 @@ impl HotMod for Licznik {{
     fn on_event(&mut self, host: &mut Host<'_>, event: &Event<'_>) -> Flow {{
         match event {{
             Event::ServerTick {{ .. }} => {{ {on_tick} self.ticks += 1; Flow::Continue }}
-            Event::Chat {{ text, .. }} if *text == "ile" => {{
+            Event::Chat {{ text, .. }} | Event::ConsoleCommand {{ command: text }}
+                if *text == "ile" || *text == "licznik ile" => {{
                 host.reply(&format!("{tag}:{{}}", self.ticks));
                 Flow::Cancel
             }}
@@ -612,6 +613,14 @@ fn console_commands_list_and_pass_through() -> TestResult {
         replies.iter().any(|r| r.contains("Nie ma pliku")),
         "{replies:?}"
     );
+    let (flow, replies) = s.console("hot licznik ile");
+    assert_eq!(flow, flow::CANCEL);
+    assert!(replies.iter().any(|r| r.starts_with("v1:")), "{replies:?}");
+    let (_, replies) = s.console("hot licznik cokolwiek");
+    assert!(
+        replies.iter().any(|r| r.contains("nie obsłużył")),
+        "{replies:?}"
+    );
     let (_, replies) = s.console("hot unload licznik");
     assert!(
         replies.iter().any(|r| r.contains("wyłączony")),
@@ -638,6 +647,30 @@ fn fifty_reloads_in_a_row_keep_the_counter() -> TestResult {
             "counter went back at reload {n}: {last} -> {now}"
         );
         last = now;
+    }
+    s.stop();
+    Ok(())
+}
+
+#[test]
+fn a_paused_server_switches_on_a_console_command() -> TestResult {
+    // PL: Pusty serwer stoi w pauzie bez ticków; `hot status` z konsoli domyka wczytanie.
+    // EN: An empty server is paused with no ticks; `hot status` on the console completes a load.
+    let home = Server::home("paused");
+    let mut s = Server::start(&home)?;
+    let (flow, _) = s.console(&format!("hot load {}", mod_file("licznik_v1")?.display()));
+    assert_eq!(flow, flow::CANCEL);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let (_, replies) = s.console("hot status");
+        if replies.iter().any(|r| r.contains("licznik v1")) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no switch without ticks: {replies:?}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
     }
     s.stop();
     Ok(())

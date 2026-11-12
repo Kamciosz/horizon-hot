@@ -41,11 +41,13 @@ crates/hot-abi/    granica C ABI (stabilna, wersjonowana ABI_MAJOR)
 crates/hot-diag/   logi JSONL, kody błędów, panika w logu, szkielet hot report
 crates/hot-sdk/    makro hot_mod!, Host<'call>, panika z miejscem w logu
 crates/hot-core/   gospodarz modów gorących: hot load, generacje, powrót po panice
+crates/hot-host/   mod natywny w silniku: ładuje hot-core, przekazuje haki; poza workspace
+                   (build: crates/hot-host/build-bundle.sh + horizon-launcher native-build)
+examples/licznik/  przykładowy mod gorący: licznik ticków, stan przez przeładowanie
 crates/hotd/       demon w tle                                 (planowany)
 crates/hot-proxy/  proxy                                       (planowany)
 crates/hot-pack/   paczka zasobów                              (planowany)
 crates/hot-play/   aplikacja gracza                            (planowany)
-bundle/hot-host/   mod natywny dla silnika                     (planowany)
 docs/bledy/        katalog kodów błędów HOT-EXXXX (test: crates/hot-diag/tests/catalog.rs)
 docs/adr/          decyzje (jedna decyzja = jeden plik)
 docs/zmiany/       wpisy do changelogu z pull requestów
@@ -71,6 +73,9 @@ PLAN.md            plan budowy (tymczasowy; po zakończeniu treść jest w docs/
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace          # oczekiwane: wszystkie „ok”
+# hot-host nie jest w workspace (buduje się tylko w silniku); format: rustfmt --edition 2021 --check crates/hot-host/api/src/lib.rs
+crates/hot-host/build-bundle.sh <katalog> && horizon-launcher native-build <katalog> \
+  --server-output <wyjście> --version nightly-2026-11-05-66f3981 --trust-native-code   # ok. 2 min
 ```
 
 Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktualizowana dokumentacja w tym samym commicie.

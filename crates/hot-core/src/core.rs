@@ -88,10 +88,15 @@ impl HotMod for Core {
     fn on_raw_event(&mut self, host: &mut Host<'_>, event: &hot_abi::Event) -> Flow {
         let api = host.raw();
         if event.kind == kind::CONSOLE_COMMAND {
+            // PL: Serwer bez graczy stoi w pauzie i nie woła ticku, ale komendy konsoli działają;
+            // przełączenie tutaj też jest między tickami, więc `hot status` domyka wczytanie.
+            // EN: An empty server is paused and fires no tick, but console commands still run;
+            // switching here is also between ticks, so `hot status` completes a load.
+            self.apply_loaded(api);
             // SAFETY: napis ważny w wywołaniu. EN: the string is valid for the call.
             let line = unsafe { event.text.as_str() }.unwrap_or("").to_owned();
             if let Some(args) = hot_args(&line) {
-                self.command(api, args);
+                self.command(api, args, event);
                 return Flow::Cancel;
             }
         }
@@ -337,24 +342,33 @@ impl Core {
     fn dispatch(&mut self, outer: &HostApi, event: &hot_abi::Event) -> Flow {
         let mut i = 0;
         while i < self.mods.len() {
-            let (gen, generation, instance) = {
-                let m = &self.mods[i];
-                (m.gen.clone(), m.generation, m.instance)
-            };
-            let (result, panic) = self.with_call(outer, &gen, generation, |api| {
-                (gen.vtable.on_event)(instance, api, event)
-            });
-            match result {
-                flow::CANCEL => return Flow::Cancel,
-                flow::PANICKED => {
-                    if self.fall_back(outer, i, event.kind, panic) {
-                        i += 1;
-                    }
-                }
-                _ => i += 1,
+            let (result, stayed) = self.call_one(outer, i, event);
+            if result == flow::CANCEL {
+                return Flow::Cancel;
+            }
+            if stayed {
+                i += 1;
             }
         }
         Flow::Continue
+    }
+
+    /// PL: Zdarzenie dla jednego moda. Zwraca wynik moda i to, czy mod nadal jest na liście
+    /// (po panice może zniknąć). EN: An event for one mod. Returns the mod's result and whether
+    /// the mod is still listed (it may be gone after a panic).
+    fn call_one(&mut self, outer: &HostApi, i: usize, event: &hot_abi::Event) -> (u32, bool) {
+        let (gen, generation, instance) = {
+            let m = &self.mods[i];
+            (m.gen.clone(), m.generation, m.instance)
+        };
+        let (result, panic) = self.with_call(outer, &gen, generation, |api| {
+            (gen.vtable.on_event)(instance, api, event)
+        });
+        if result == flow::PANICKED {
+            let stayed = self.fall_back(outer, i, event.kind, panic);
+            return (result, stayed);
+        }
+        (result, true)
     }
 
     /// PL: Po panice w `on_event`: poprzednia generacja dostaje stan sprzed bieżącej. Gdy jej nie
@@ -516,7 +530,9 @@ impl Core {
 
     // ---------- PL: komenda `hot` / EN: the `hot` command ----------
 
-    fn command(&mut self, api: &HostApi, args: &str) {
+    /// PL: `hot …` z konsoli albo od operatora; `from` to zdarzenie z komendą (gracz, jeśli był).
+    /// EN: `hot …` from the console or an op; `from` is the command event (with its player, if any).
+    fn command(&mut self, api: &HostApi, args: &str, from: &hot_abi::Event) {
         let (verb, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
         let rest = rest.trim();
         let mut out: Vec<String> = Vec::new();
@@ -575,8 +591,25 @@ impl Core {
                     ));
                 }
             }
+            _ if self.mods.iter().any(|m| m.gen.id == verb) => {
+                // PL: `hot <mod> …` trafia tylko do tego moda jako komenda konsoli `<mod> …` (D5).
+                // EN: `hot <mod> …` goes only to that mod as the console command `<mod> …` (D5).
+                let i = self.mods.iter().position(|m| m.gen.id == verb).unwrap_or(0);
+                let mut event = *from;
+                event.text = Str::from_str(args);
+                match self.call_one(api, i, &event).0 {
+                    flow::CANCEL => {}
+                    flow::PANICKED => out.push(format!(
+                        "Mod {verb} spanikował przy tej komendzie; szczegóły w logs/hot-core.jsonl (HOT-E0403)."
+                    )),
+                    _ => out.push(format!("Mod {verb} nie obsłużył komendy „{args}”.")),
+                }
+            }
             _ => {
-                out.push("Użycie: hot load <plik> | hot unload <mod> | hot list".to_owned());
+                out.push(
+                    "Użycie: hot load <plik> | hot unload <mod> | hot list | hot <mod> [argumenty]"
+                        .to_owned(),
+                );
             }
         }
         let mut host = Host::new(api);

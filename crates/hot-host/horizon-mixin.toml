@@ -1,0 +1,17 @@
+# PL: `hot-host` (D2, M1.3): mod natywny Horizona, który ładuje `hot-core` i przekazuje mu haki.
+# Paczkę do budowy składa `build-bundle.sh` (dokłada kopię `crates/hot-abi` jako `hot_abi`).
+# EN: `hot-host` (D2, M1.3): a Horizon native mod that loads `hot-core` and forwards hooks to it.
+# `build-bundle.sh` assembles the bundle for the build (adds a copy of `crates/hot-abi` as `hot_abi`).
+[mod]
+id = "hot_host"
+version = "0.1.0"
+
+[compatibility]
+horizon_revision = "66f3981f522b24c250b21523a70080965b940424"
+
+[api]
+path = "api"
+
+[[crate]]
+id = "hot_abi"
+path = "hot_abi"

@@ -1,6 +1,6 @@
 # Architektura
 
-Gdzie co leży i dlaczego. Stan: zbudowany jest tylko `hot-abi`; reszta opisuje docelowy kształt i powstaje krok po kroku. Składnik jeszcze nieistniejący ma dopisek „planowany”.
+Gdzie co leży i dlaczego. Stan: zbudowane są `hot-abi`, `hot-diag`, `hot-sdk`, `hot-core`, `hot-host` i przykład `examples/licznik`; reszta opisuje docelowy kształt i powstaje krok po kroku. Składnik jeszcze nieistniejący ma dopisek „planowany”.
 
 ## Składniki
 
@@ -9,7 +9,7 @@ Gdzie co leży i dlaczego. Stan: zbudowany jest tylko `hot-abi`; reszta opisuje 
 | `hot-abi` | biblioteka | stabilna granica C ABI między gospodarzem a modami | — |
 | `hot-diag` | biblioteka + CLI | logi JSONL z kodami błędów, panika w logu, `hot report` (szkielet: `hot-diag report`) | wszyscy oprócz `hot-host` |
 | `hot-sdk` | biblioteka dla autorów modów | makro `hot_mod!`, bezpieczne opakowania ABI, `catch_unwind` | `hot-abi` |
-| `hot-host` (planowany) | w silniku (mod natywny `.hnmod`) | ładuje `hot-core`, przekazuje mu haki Horizona | silnik, `hot-core` |
+| `hot-host` | w silniku (mod natywny wkompilowany przez `native-build`) | ładuje `hot-core` przy starcie serwera, przekazuje mu haki Horizona, podmienia rdzeń (`hot core load`) | silnik, `hot-core` |
 | `hot-core` | w silniku (`cdylib`) | ładuje generacje modów gorących (`hot load`), stan między generacjami, powrót po panice, `hot-state/status.json`; sloty w M4 | `hot-host`, mody, `hotd` (przez pliki i konsolę) |
 | `hotd` (planowany) | usługa systemd, tło | repo serwera, artefakty CI, aktualizacje, kopie, hamulec MSPT | GitHub, `horizon-server`, `hot-core` |
 | `hot-proxy` (planowany) | usługa systemd, port 25565 | logowanie graczy, trzymanie połączeń przy podmianie i awarii silnika | gracze, silniki |

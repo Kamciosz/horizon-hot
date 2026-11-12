@@ -1,0 +1,16 @@
+# PL: Buduje się tylko wewnątrz workspace Horizona (launcher `native-build`), nie w naszym.
+# Zależności z rejestru wyłącznie z `Cargo.lock` Horizona (S1); `libloading` 0.8.9 tam jest.
+# EN: Builds only inside Horizon's workspace (launcher `native-build`), not ours. Registry
+# dependencies only from Horizon's `Cargo.lock` (S1); `libloading` 0.8.9 is there.
+[package]
+name = "mod-hot-host"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Szymon Sosnowski"]
+
+[dependencies]
+horizon-client = { git = "https://github.com/horizon-rust/horizon", rev = "66f3981f522b24c250b21523a70080965b940424" }
+hot-abi = { path = "../../native-crates/hot_host/hot_abi" }
+libloading = "0.8.9"
+log = "0.4"

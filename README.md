@@ -24,6 +24,8 @@ crates/hot-abi/   — granica C ABI między gospodarzem w silniku a modami gorą
 crates/hot-diag/  — logi JSONL z kodami błędów i hot report
 crates/hot-sdk/   — biblioteka dla autorów modów gorących (hot_mod!)
 crates/hot-core/  — gospodarz modów gorących w silniku (hot load, generacje)
+crates/hot-host/  — mod natywny w silniku, który ładuje hot-core
+examples/licznik/ — przykładowy mod gorący
 docs/             — architektura, decyzje (ADR), standard kodu, katalog błędów
 PLAN.md           — plan budowy (roboczy; po zakończeniu treść przechodzi do docs/)
 ```

@@ -20,7 +20,14 @@
 - `crates/hot-core/tests/reload.rs`: 11 testów na prawdziwych modach `cdylib` z udawanym gospodarzem, w tym 50 przeładowań z rzędu.
 - `hot-diag`: wpisy `info` i `warn` (`Logger::info`, `Logger::warn`).
 
+- `crates/hot-host`: mod natywny, który ładuje `hot-core` przy starcie serwera, przekazuje mu haki Horizona i podmienia rdzeń komendą `hot core load` bez restartu; paczkę składa `build-bundle.sh`.
+- `examples/licznik`: przykładowy mod gorący; licznik ticków przechodzi przez przeładowanie, `licznik panika` pokazuje powrót do poprzedniej generacji.
+- `hot <mod> …` przekazuje komendę konsoli tylko temu modowi.
+- Kody `HOT-E0406` (rdzeń się nie wczytał) i `HOT-E0407` (rdzeń spanikował) w `docs/bledy/`.
+- ADR 0007: logi `hot-host`, komendy modów i pauza pustego serwera.
+
 ### Zmienione
+- `hot-core` przełącza gotowe wczytania także przy komendzie konsoli, bo pusty serwer w pauzie nie wywołuje ticku.
 - `AGENTS.md`: zasady pracy na maszynie z grą (bez `prepare` przez agenta, bez zrzutów gry w repo, bez ruszania cudzych instancji), `spikes/` i `docs/spike/` w mapie repo, zmierzona pauza podmiany zamiast „mrugnięcia”; to samo w `docs/ARCHITECTURE.md`. `PLAN.md`, D2: `hot-host` nie używa `hot-diag`; D9 i D16 doprecyzowane.
 - `PLAN.md`, D6, D8, D9, D16, D18 i D24 według ADR 0002: odpowiedź na komendę przez `event.replies`, wersja `hot-slots` przy każdej zmianie puli, `servers.dat` instancji z `acceptTextures`, pamięć na drugi silnik tylko przy teście aktualizacji, każde Nightly jako zmiana dla klienta do testu w M9, zmierzone czasy w tabeli D24; M0.14 odhaczone.
 - `PLAN.md`, D18: build aktualizacji z `--version <Nightly> --ignore-pins`, bo `hot-host` przypina wersję Horizona; R23 i R24 poprawione; ryzyko i szansa: Horizon sam wprowadza mody bez restartu; M0.12 odhaczone.

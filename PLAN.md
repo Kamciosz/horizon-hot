@@ -87,7 +87,7 @@ Każda w formie gotowej do `docs/adr/NNNN-*.md` (kontekst → decyzja → konsek
 Kontekst: R1, R2, R4. Decyzja: jeden trait mod `hot-host` wkompilowany w silnik; mody gorące to `cdylib` (`.so` na serwerze, `.dylib` na Macu w testach) ładowane przez `libloading`. Konsekwencje: mod gorący robi tylko to, co dają haki D5 i funkcje D6; nowe bloki — przez sloty (D8).
 
 **D2. `hot-host` jest cienkim, stałym loaderem; logika gospodarza to `hot-core`.**
-`hot-host` tylko ładuje `hot-core` (też `cdylib`) i przekazuje mu wszystkie haki. `hot-core` zarządza modami, slotami i komendą `/hot` i przeładowuje się jak mod gorący. Zmiana gospodarza nie wymaga nowego silnika. `hot-host` nie używa `hot-diag`: paczka moda natywnego nie może mieć zależności ścieżkowych, a z rejestru tylko te z `Cargo.lock` Horizona (S1). Jedyny błąd, który `hot-host` zgłasza sam (nie da się wczytać `hot-core`), pisze jedną linią na stderr, czyli do `logs/supervisor.log` silnika (S3); `hotd` przenosi go do swojego logu z kodem błędu. Szczegóły w M1.3.
+`hot-host` tylko ładuje `hot-core` (też `cdylib`) i przekazuje mu wszystkie haki. `hot-core` zarządza modami, slotami i komendą `/hot` i przeładowuje się jak mod gorący. Zmiana gospodarza nie wymaga nowego silnika. `hot-host` nie używa `hot-diag`: paczka moda natywnego nie może mieć zależności ścieżkowych, a z rejestru tylko te z `Cargo.lock` Horizona (S1). Błędy, które `hot-host` zgłasza sam (`HOT-E0406` rdzeń się nie wczytał, `HOT-E0407` rdzeń spanikował), idą przez `log` z celem `horizon_hot` do `logs/latest.log` silnika (ADR 0007). Szczegóły w M1.3.
 
 **D3. Granica to stabilne C ABI (`hot-abi`).**
 Kontekst: R8 — osobne sterty i hooki paniki. Decyzja: struktury `#[repr(C)]`, napisy `(ptr, len)` pożyczane na czas wywołania, każda strona zwalnia własną pamięć; `hot_mod_abi() -> u32`, `hot_mod_entry() -> *const HotModVTable`; inny `ABI_MAJOR` → odmowa. Konsekwencje: mody budują się dowolnym stabilnym Rustem; każdy hak tłumaczymy ręcznie, dlatego lista D5 jest krótka.
@@ -330,9 +330,9 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 ### M1 — Rdzeń przeładowania (`hot-abi`, `hot-sdk`, `hot-host`, `hot-core`)
 - [x] M1.1 `hot-abi`: VTable z wersją, `init`, `deactivate`, `server_tick`, `player_chat`; testy `size_of`/`align_of`.
 - [x] M1.2 `hot-sdk`: makro `hot_mod!`, `HostCtx<'call>`, `catch_unwind` w każdym eksporcie, stan między generacjami.
-- [ ] M1.3 `hot-host`: tylko ładowanie `hot-core` i przekazywanie haków (D2). Paczka składana skryptem: kopia `crates/hot-abi` jako `[[crate]]` (wynik S1, `docs/spike/s1-hot-abi-w-silniku.md`).
+- [x] M1.3 `hot-host`: tylko ładowanie `hot-core` i przekazywanie haków (D2). Paczka składana skryptem: kopia `crates/hot-abi` jako `[[crate]]` (wynik S1, `docs/spike/s1-hot-abi-w-silniku.md`).
 - [x] M1.4 `hot-core`: `hot load <ścieżka>`, ładowanie poza wątkiem serwera, przełączenie na granicy ticku, unikalne nazwy plików, ostatnie dobre generacje (D13).
-- [ ] M1.5 `examples/licznik`: liczy ticki, odpowiada na czacie, stan przechodzi przez przeładowanie.
+- [x] M1.5 `examples/licznik`: liczy ticki, odpowiada na czacie, stan przechodzi przez przeładowanie.
 - Sprawdzenie M1:
   - przeładowanie zmienia odpowiedź, PID silnika ten sam, licznik zachowany;
   - 100 przeładowań przy 10 botach: p95 MSPT rośnie < 2 ms; pamięć rośnie ≤ rozmiar `.so` na generację;
@@ -445,6 +445,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Narzędzia: `horizon-bots` (crate w repo Horizona) do prób z botami, `limactl` lub `docker` do czystego Ubuntu bez logowania.
 
 **2026-11-12 — M1.1, M1.2, M1.4 zrobione (bez silnika):** `hot-abi` (ABI v1), `hot-sdk` (`HotMod`, `hot_mod!`, panika z miejscem w logu) i `hot-core` (`hot load/unload/list`, przełączenie na granicy ticku, powrót po panice, próba 6000 ticków, start po awarii z ostatniej dobrej generacji). 11 testów w `crates/hot-core/tests/reload.rs` na prawdziwych `cdylib`; mutacje „bez przekazania stanu” i „bez powrotu do poprzedniej generacji” je czerwienią. Odstępstwa od D4 i M1.1–M1.2 (jedno `on_event`, `init` w wątku serwera, `Host` zamiast `HostCtx`) w ADR 0006. Dalej: M1.3 `hot-host` i M1.5 `examples/licznik`, potem sprawdzenia M1 w silniku.
+
+**2026-11-12 — M1 zrobione, sprawdzone w silniku na Macu:** `hot-host` (ładuje `hot-core`, przekazuje haki, `hot core load`) i `examples/licznik`. Wyniki: przeładowanie zmienia odpowiedź, licznik ciągły (164 → 186), PID silnika ten sam; 100 przeładowań przy 10 botach — p95 MSPT 13,4 → 13,4 ms (ruchome boty) i 13,8 → 15,1 ms (stojące boty), czyli < 2 ms; pamięć +30 MB na 100 generacji (~300 KB na generację, plik 412 KB); panika w `server_tick` i w komendzie → wraca poprzednia generacja, serwer działa, 0 awarii; podmiana samego `hot-core` → ten sam PID, mody działają, licznik zachowany. Nowe: logi `hot-host` w `latest.log`, `hot <mod> …`, przełączenie także przy komendzie konsoli, bo pusty serwer w pauzie nie tyka (ADR 0007). Na ThinkCentre nie sprawdzone: brak maszyny. Dalej: M2.
 
 **OTWARTE (D28, maskowanie w raporcie):** `hot report` maskuje znane sekrety i adresy IPv4. Nie maskuje jeszcze adresów IPv6 graczy (dojdzie w M8, razem z logami `hot-proxy`) ani ścieżek z katalogiem domowym i nazwą użytkownika w raporcie gracza z „Napraw” (M11; Horizon w `share-log` je usuwa).
 
