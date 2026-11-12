@@ -47,7 +47,7 @@ examples/licznik/  przykładowy mod gorący: licznik ticków, stan przez przeła
 crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; data/ → paczki danych świata; hotd status
 scripts/           server-install.sh (instalator serwera na Ubuntu, D25); hot-build.sh i
                    hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)
-templates/server-repo/  pliki, które instalator kopiuje do repo serwera (hot.yml)
+templates/server-repo/  pliki do repo serwera: hot.yml (kopiuje instalator) i README z układem repo dla autorów modów
 crates/hot-proxy/  proxy                                       (planowany)
 crates/hot-pack/   paczka zasobów                              (planowany)
 crates/hot-play/   aplikacja gracza                            (planowany)

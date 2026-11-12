@@ -24,6 +24,10 @@ pub trait Engine {
     /// PL: PID działającego procesu silnika; `None`, gdy silnik nie działa.
     /// EN: The PID of the running engine process; `None` when the engine is not running.
     fn pid(&mut self) -> Option<u32>;
+
+    /// PL: Plik, do którego silnik pisze ostrzeżenia (`Horizon: …`); czytany po `reload`.
+    /// EN: The file the engine writes its warnings (`Horizon: …`) to; read after `reload`.
+    fn log_file(&self) -> PathBuf;
 }
 
 /// PL: `horizon-server` z katalogiem serwera. EN: `horizon-server` with a server folder.
@@ -78,5 +82,11 @@ impl Engine for HorizonServer {
             return None;
         }
         v["engine_pid"].as_u64().and_then(|p| u32::try_from(p).ok())
+    }
+
+    /// PL: Nadzorca `horizon-server` zapisuje tu wyjście błędów silnika.
+    /// EN: The `horizon-server` supervisor writes the engine's error output here.
+    fn log_file(&self) -> PathBuf {
+        self.dir.join("logs").join("supervisor.log")
     }
 }

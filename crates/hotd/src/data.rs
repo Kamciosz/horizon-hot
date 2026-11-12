@@ -164,6 +164,58 @@ pub fn enabled_in(answer: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// PL: Co silnik napisał w logu przy `reload`: linie, po których tabele świata zostały stare
+/// (porażka), i pliki, które pominął (ostrzeżenie). Teksty z `log::warn!` Horizona
+/// `nightly-2026-11-05`; inne linie są pomijane.
+/// EN: What the engine logged during `reload`: lines after which the world's tables stayed old
+/// (a failure) and files it skipped (a warning). Texts from Horizon's `log::warn!`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ReloadLog {
+    pub failures: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+/// PL: Najwięcej ostrzeżeń zapamiętanych w stanie. EN: Most warnings kept in the state.
+const KEEP_WARNINGS: usize = 20;
+
+#[must_use]
+pub fn read_reload_log(text: &str) -> ReloadLog {
+    let mut log = ReloadLog::default();
+    for line in text.lines().map(str::trim) {
+        let Some(at) = line.find("Horizon: ") else {
+            continue;
+        };
+        let line = &line[at..];
+        if line.contains(" are not applied: ") {
+            log.failures.push(line.to_owned());
+        } else if (line.contains(" not loaded: ")
+            || line.starts_with("Horizon: failed to load function ")
+            || line.starts_with("Horizon: data pack worldgen: "))
+            && !log.warnings.iter().any(|w| w == line)
+            && log.warnings.len() < KEEP_WARNINGS
+        {
+            log.warnings.push(line.to_owned());
+        }
+    }
+    log
+}
+
+/// PL: Długość pliku logu teraz; od niej czytamy po `reload`. EN: The log length now.
+#[must_use]
+pub fn log_offset(file: &Path) -> u64 {
+    fs::metadata(file).map_or(0, |m| m.len())
+}
+
+/// PL: Tekst dopisany do logu od `offset` (od początku, gdy plik zaczęto od nowa).
+/// EN: Text appended to the log since `offset` (from the start when the file was restarted).
+#[must_use]
+pub fn log_since(file: &Path, offset: u64) -> String {
+    let bytes = fs::read(file).unwrap_or_default();
+    let start = usize::try_from(offset).unwrap_or(0);
+    let start = if start > bytes.len() { 0 } else { start };
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
+}
+
 /// PL: Przygotowane paczki i miejsce na stare kopie. EN: Prepared packs and room for old copies.
 pub struct Staged {
     world: PathBuf,
@@ -369,6 +421,20 @@ mod tests {
         assert_eq!(d.write, m(&[("b", "2")]));
         assert_eq!(d.remove, BTreeSet::from(["c".to_owned()]));
         assert!(diff(&m(&[("a", "1")]), &m(&[("a", "1")])).is_empty());
+    }
+
+    #[test]
+    fn reload_log_separates_failures_from_skipped_files() {
+        let text = "[23:02:36] [Server thread/INFO]: System chat: Reloading!\nHorizon: recipe a:zle not loaded: expected value\nHorizon: pack recipe a:zle not shown in the book: expected value\nHorizon: recipe a:zle not loaded: expected value\nHorizon: the world's data packs are not applied: bad loot\nHorizon: slow tick 300 ms\n";
+        let log = read_reload_log(text);
+        assert_eq!(
+            log.failures,
+            ["Horizon: the world's data packs are not applied: bad loot"]
+        );
+        assert_eq!(
+            log.warnings,
+            ["Horizon: recipe a:zle not loaded: expected value"]
+        );
     }
 
     #[test]

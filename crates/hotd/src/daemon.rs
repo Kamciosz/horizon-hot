@@ -333,6 +333,8 @@ impl<E: Engine> Daemon<E> {
     /// does not show the change, restores the old packs and reloads them again.
     fn reload_data(&mut self, head: &str, staged: &Staged) -> Result<(), (DiagError, String)> {
         let reason = "silnik nie włączył paczek danych".to_owned();
+        let log_file = self.engine.log_file();
+        let offset = data::log_offset(&log_file);
         if let Err(e) = staged.swap_in() {
             staged.restore();
             return Err((e, "nie da się zapisać paczek danych".to_owned()));
@@ -349,6 +351,7 @@ impl<E: Engine> Daemon<E> {
             }
         };
         let enabled = data::enabled_in(&answer);
+        let engine_log = data::read_reload_log(&data::log_since(&log_file, offset));
         let diff = staged.diff();
         let missing: Vec<&String> = diff
             .write
@@ -360,25 +363,41 @@ impl<E: Engine> Daemon<E> {
             .iter()
             .filter(|id| enabled.contains(*id))
             .collect();
-        if missing.is_empty() && still.is_empty() {
+        if missing.is_empty() && still.is_empty() && engine_log.failures.is_empty() {
+            if !engine_log.warnings.is_empty() {
+                self.log.warn(
+                    "the engine skipped files of the data packs; fix them in the server repository",
+                    json!({
+                        "commit": head,
+                        "engine_log": engine_log.warnings,
+                        "log_file": log_file.display().to_string(),
+                    }),
+                );
+            }
+            self.state.data_warnings = engine_log.warnings;
             return Ok(());
         }
         staged.restore();
         let _ = self.engine.command("reload");
-        let e = DiagError::new(
+        let mut e = DiagError::new(
             codes::DATA_PACK_FAILED,
             format!(
-                "After reload the engine does not show the data packs of commit {}",
+                "After reload the engine does not use the data packs of commit {}",
                 short(head)
             ),
-            "Check <world>/datapacks.json: a pack listed under \"disabled\" stays off; remove it from there (or run /datapack enable \"file/hot-<id>\") and push a new commit. The engine answer is in chain",
+            "If chain has a line \"... are not applied: ...\", fix the file it names in mods/<id>/data/ and push a new commit. Otherwise check <world>/datapacks.json: a pack listed under \"disabled\" stays off; remove it from there (or run /datapack enable \"file/hot-<id>\") and push a new commit",
         )
-        .expected("datapack list shows every file/hot-<id> pack of the commit as enabled and none of the removed ones")
+        .expected("datapack list shows every file/hot-<id> pack of the commit as enabled, none of the removed ones, and the engine log has no \"are not applied\" line")
         .context("commit", head.to_owned())
         .context("not_enabled", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>())
         .context("not_removed", still.iter().map(|s| s.as_str()).collect::<Vec<_>>())
-        .chain_line(answer)
-        .state("The previous data packs are back in place and reloaded; mods switched in this commit stay");
+        .context("log_file", log_file.display().to_string());
+        for line in engine_log.failures {
+            e = e.chain_line(line);
+        }
+        let e = e.chain_line(answer).state(
+            "The previous data packs are back in place and reloaded; mods switched in this commit stay",
+        );
         Err((e, reason))
     }
 
@@ -546,12 +565,66 @@ impl<E: Engine> Daemon<E> {
         .context("commit", commit.clone())
         .context("pid_before", pid)
         .context("pid_now", now.map_or(Value::Null, Value::from))
-        .state("hotd will not apply this commit again; after a restart hot-core loads the last good generations");
+        .state("hotd will not apply this commit again; after a restart hot-core loads the last good generations and hotd puts back the data packs of the last good commit");
         self.error(&e);
         self.state.mark_bad(&commit);
         self.state.applied = self.state.previous.take();
         self.state.applied_pid = None;
+        self.restore_data();
         self.save();
+    }
+
+    /// PL: Po złym commicie paczki danych wracają do zastosowanego commita (bez commita: żadnych
+    /// naszych paczek), żeby silnik nie wstawał w kółko na paczce, która go położyła.
+    /// EN: After a bad commit the data packs go back to the applied commit (none of ours without
+    /// one), so the engine does not keep restarting on the pack that brought it down.
+    fn restore_data(&mut self) {
+        let target = self.state.applied.clone();
+        let files = match &target {
+            Some(c) => self.mirror.files(c),
+            None => Ok(Vec::new()),
+        };
+        let diff = files
+            .map_err(|e| (e, String::new()))
+            .and_then(|files| self.data_diff(target.as_deref().unwrap_or_default(), &files));
+        let result = diff.and_then(|diff| {
+            if diff.is_empty() {
+                return Ok(None);
+            }
+            let mirror = &self.mirror;
+            let staged = Staged::prepare(&self.cfg.world, diff, |tree, into| {
+                mirror
+                    .extract(tree, into)
+                    .map_err(|e| format!("{}: {}", e.command, e.output))
+            })
+            .and_then(|s| match s.swap_in() {
+                Ok(()) => Ok(s),
+                Err(e) => {
+                    s.restore();
+                    Err(e)
+                }
+            })
+            .map_err(|e| (e, String::new()))?;
+            Ok(Some(staged))
+        });
+        match result {
+            Ok(None) => {}
+            Ok(Some(staged)) => {
+                let restored: Vec<String> = staged.diff().write.keys().cloned().collect();
+                let removed: Vec<String> = staged.diff().remove.iter().cloned().collect();
+                staged.finish();
+                // PL: Silnik, który już wstał, mógł wczytać złe paczki. EN: An engine already up
+                // may have loaded the bad packs.
+                if self.engine.pid().is_some() {
+                    let _ = self.engine.command("reload");
+                }
+                self.log.info(
+                    "hotd put back the data packs of the last good commit",
+                    json!({ "commit": target, "data_written": restored, "data_removed": removed }),
+                );
+            }
+            Err((e, _)) => self.error(&e),
+        }
     }
 
     fn error(&mut self, e: &DiagError) {

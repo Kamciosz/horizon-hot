@@ -18,4 +18,6 @@ Liczby, od których zależą decyzje w `PLAN.md`. Każdy wpis mówi, na jakiej m
 
 Przyczyna wolnych przypadków nie jest ustalona. Obalone: pauza pustego serwera (bez pauzy, `pause-when-empty-seconds = 0`, wynik ten sam) i zimna pamięć podręczna plików gry (odczyt całego `data/` z zasobów tuż przed `reload` nic nie zmienił). Wolne przypadki wystąpiły tylko przy dużym obciążeniu Maca; przy mniejszym tej samej próby nie dało się powtórzyć.
 
+**Z graczem online** (ten sam Mac, klient Horizon na tym samym komputerze, serwer bez pauzy): `hotd` zmierzył `reload` + `datapack list` na 0,25–0,55 s, bez „Can't keep up”.
+
 **ThinkCentre:** nie sprawdzone: brak maszyny. Do zmierzenia tym samym sposobem z graczem na serwerze; jeśli `reload` przekracza 1 s, wrócić do tego wpisu przed M7.

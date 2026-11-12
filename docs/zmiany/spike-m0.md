@@ -31,7 +31,8 @@
 - `scripts/server-install.sh`: instalator serwera na Ubuntu jednym poleceniem (D25, kroki 1–8 i 10): sprawdzenie maszyny, użytkownik `horizon` i `/srv/horizon`, Horizon z oficjalnego `install.sh`, `hotd` i `hot-core` budowane ze źródeł, klucz podpisu CI i `allowed_signers`, klucz tylko do odczytu dla prywatnego repo, `hot.yml` z przypiętą wersją horizon-hot, świat, usługi systemd, `ufw`, kopie co noc, autotest. Silnik z `hot-host` budowany dopiero po zgodzie właściciela (`--trust-native-code`). Ponowne uruchomienie robi tylko to, czego brakuje. Kody `HOT-E0101`–`HOT-E0111`.
 - Test katalogu błędów sprawdza też kody w `scripts/`.
 - `hotd`: pole `fetch_error` w `hot-state/hotd.json` (czy repo da się pobrać teraz) i linia „repo teraz niedostępne” w `hotd status`; commit czeka, gdy silnik nie działa, zamiast trafić na listę nieudanych.
-- `hotd`: paczki danych modów (M3, D7). `mods/<id>/data/` trafia do `<świat>/datapacks/hot-<id>/` i wchodzi jednym `reload` bez restartu; usunięcie moda usuwa paczkę. Zły JSON zatrzymuje commit, zanim silnik coś dostanie; paczka niewłączona po `reload` wraca do poprzedniej. Kod `HOT-E0208`.
+- `hotd`: paczki danych modów (M3, D7). `mods/<id>/data/` trafia do `<świat>/datapacks/hot-<id>/` i wchodzi jednym `reload` bez restartu; usunięcie moda usuwa paczkę. Zły JSON zatrzymuje commit, zanim silnik coś dostanie; paczka niewłączona po `reload` albo z tabelami odrzuconymi przez silnik wraca do poprzedniej; pliki pominięte przez silnik widać w `hotd status`; po złym commicie paczki wracają do ostatniego dobrego. Kod `HOT-E0208`.
+- `templates/server-repo/README.md`: układ repo serwera (mody z kodem, paczki danych).
 - `docs/sprzet.md`: zmierzony czas `reload` na Macu dewelopera.
 - `/hot status` w grze pokazuje też stan `hotd`: commit repo, zastosowany commit, na co czeka i dlaczego ostatni commit nie wszedł.
 

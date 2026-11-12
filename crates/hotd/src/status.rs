@@ -45,6 +45,13 @@ pub fn render(home: &Path) -> String {
             if let Some(w) = d["waiting"].as_str() {
                 let _ = writeln!(out, "  czeka: {w}");
             }
+            for item in d["data_warnings"].as_array().into_iter().flatten() {
+                let _ = writeln!(
+                    out,
+                    "  paczka danych, plik pominięty przez silnik: {}",
+                    item.as_str().unwrap_or("")
+                );
+            }
             for item in d["deferred"].as_array().into_iter().flatten() {
                 let _ = writeln!(out, "  odłożone: {}", item.as_str().unwrap_or(""));
             }

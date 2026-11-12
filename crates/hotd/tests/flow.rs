@@ -118,6 +118,24 @@ impl Engine for Fake {
                 .map(|e| e.file_name().to_string_lossy().into_owned())
                 .collect();
             found.sort();
+            // PL: Znaczniki w treści paczki udają ostrzeżenia Horizona w jego logu.
+            // EN: Markers in pack content fake Horizon's warnings in its log.
+            let mut log = String::new();
+            for pack in &found {
+                let text = read_all(&self.world.join("datapacks").join(pack));
+                if text.contains("ZLY_SCHEMAT") {
+                    log.push_str("Horizon: recipe przepisy:stol not loaded: unknown item\n");
+                }
+                if text.contains("PSUJE_TABELE") {
+                    log.push_str("Horizon: the world's data packs are not applied: bad table\n");
+                }
+            }
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.log_file())
+                .unwrap();
+            std::io::Write::write_all(&mut file, log.as_bytes()).unwrap();
             *self.packs.borrow_mut() = found;
         } else if line == "datapack list" {
             let packs = self.packs.borrow();
@@ -149,6 +167,24 @@ impl Engine for Fake {
     fn pid(&mut self) -> Option<u32> {
         self.pid.get()
     }
+
+    fn log_file(&self) -> PathBuf {
+        self.world.with_file_name("engine.log")
+    }
+}
+
+/// PL: Cała treść plików w katalogu, rekurencyjnie. EN: All file contents in a folder.
+fn read_all(dir: &Path) -> String {
+    let mut out = String::new();
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = e.path();
+        if path.is_dir() {
+            out.push_str(&read_all(&path));
+        } else {
+            out.push_str(&fs::read_to_string(&path).unwrap_or_default());
+        }
+    }
+    out
 }
 
 struct World {
@@ -608,5 +644,72 @@ fn pack_the_engine_does_not_enable_is_rolled_back() {
         fake.take_commands(),
         ["reload", "datapack list", "reload"],
         "the old pack is reloaded"
+    );
+}
+
+#[test]
+fn tables_the_engine_does_not_apply_roll_the_packs_back() {
+    let w = World::new("data-not-applied");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let v1 = w.commit(&[DATA_V1], &[]);
+    d.step();
+    fake.take_commands();
+
+    w.commit(&[(DATA_V1.0, "{\"v\": \"PSUJE_TABELE\"}\n")], &[]);
+    d.step();
+    assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
+    assert_eq!(d.state().errors.last().unwrap()["code"], "HOT-E0208");
+    assert_eq!(fs::read_to_string(pack_file(&w)).unwrap(), DATA_V1.1);
+    let log = fs::read_to_string(w.home.join("logs/hotd.jsonl")).unwrap();
+    assert!(log.contains("are not applied: bad table"), "{log}");
+}
+
+#[test]
+fn skipped_files_are_applied_with_a_warning_in_status() {
+    let w = World::new("data-skipped");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let sha = w.commit(&[(DATA_V1.0, "{\"v\": \"ZLY_SCHEMAT\"}\n")], &[]);
+    d.step();
+    assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
+    assert!(w
+        .status_text()
+        .contains("plik pominięty przez silnik: Horizon: recipe przepisy:stol not loaded"));
+
+    // PL: Poprawka czyści ostrzeżenie. EN: A fix clears the warning.
+    w.commit(&[DATA_V1], &[]);
+    d.step();
+    assert!(d.state().data_warnings.is_empty());
+}
+
+#[test]
+fn bad_commit_puts_back_the_previous_data_packs() {
+    let w = World::new("data-bad-commit");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    w.commit(&[DATA_V1], &[]);
+    d.step();
+    let v2 = w.commit(
+        &[
+            (DATA_V1.0, "{\"v\": 2}\n"),
+            ("mods/nowy/data/n/tags/block/a.json", "{}"),
+        ],
+        &[],
+    );
+    d.step();
+    assert_eq!(d.state().applied.as_deref(), Some(v2.as_str()));
+    assert!(w.home.join("world/datapacks/hot-nowy").exists());
+    fake.take_commands();
+
+    fake.pid.set(Some(200));
+    d.step();
+    assert_eq!(d.state().bad, std::slice::from_ref(&v2));
+    assert_eq!(fs::read_to_string(pack_file(&w)).unwrap(), DATA_V1.1);
+    assert!(!w.home.join("world/datapacks/hot-nowy").exists());
+    assert_eq!(
+        fake.take_commands(),
+        ["reload"],
+        "the restarted engine reloads the good packs"
     );
 }

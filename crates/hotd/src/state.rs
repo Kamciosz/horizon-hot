@@ -45,6 +45,9 @@ pub struct State {
     /// a `errors` to historia. EN: Why the last fetch failed; `None` = it worked. The current
     /// state, while `errors` is the history.
     pub fetch_error: Option<String>,
+    /// PL: Pliki paczek danych, które silnik pominął przy ostatnim `reload` (linie z jego logu).
+    /// EN: Data pack files the engine skipped at the last `reload` (lines from its log).
+    pub data_warnings: Vec<String>,
 }
 
 impl State {
@@ -94,6 +97,7 @@ impl State {
             "bad": self.bad,
             "recent_errors": self.errors,
             "fetch_error": self.fetch_error,
+            "data_warnings": self.data_warnings,
         })
     }
 
@@ -135,6 +139,7 @@ impl State {
             bad: list("bad"),
             errors: v["recent_errors"].as_array().cloned().unwrap_or_default(),
             fetch_error: text("fetch_error"),
+            data_warnings: list("data_warnings"),
         }
     }
 
@@ -200,6 +205,7 @@ mod tests {
             waiting: Some("czekam".into()),
             deferred: vec!["x".into()],
             fetch_error: Some("brak sieci".into()),
+            data_warnings: vec!["Horizon: recipe a:b not loaded: x".into()],
             ..State::default()
         };
         s.fail("c", "nie zbudował się");
