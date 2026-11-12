@@ -228,7 +228,7 @@ impl<E: Engine> Daemon<E> {
             // EN: A look alone needs no engine: `hot-core` reads the slots when it starts.
             if let Some(u) = &pack {
                 let running = self.engine.pid().is_some();
-                self.install_pack(u, running)?;
+                self.install_pack(head, u, running)?;
             }
             self.mark_applied(head, false);
             return Ok(());
@@ -273,7 +273,7 @@ impl<E: Engine> Daemon<E> {
         // PL: Sloty przed `hot load`, żeby nowy mod od razu znał swoje bloki.
         // EN: Slots before `hot load`, so a new mod knows its blocks at once.
         if let Some(u) = &pack {
-            self.install_pack(u, true)?;
+            self.install_pack(head, u, true)?;
         }
         for id in &p.unload {
             self.engine
@@ -388,7 +388,12 @@ impl<E: Engine> Daemon<E> {
 
     /// PL: Zapisuje sloty, potem paczkę; `hot slots` mówi `hot-core`, że przydział się zmienił.
     /// EN: Writes the slots, then the pack; `hot slots` tells `hot-core` the assignment changed.
-    fn install_pack(&mut self, u: &PackUpdate, engine: bool) -> Result<(), (DiagError, String)> {
+    fn install_pack(
+        &mut self,
+        head: &str,
+        u: &PackUpdate,
+        engine: bool,
+    ) -> Result<(), (DiagError, String)> {
         if u.slots_changed {
             u.slots
                 .write(&self.slots_file())
@@ -397,9 +402,20 @@ impl<E: Engine> Daemon<E> {
         pack::install(&self.cfg.home, &u.zip)
             .map_err(|e| (e, "nie zapisano paczki zasobów".to_owned()))?;
         if u.slots_changed && engine {
-            self.engine
+            let reply = self
+                .engine
                 .command("hot slots")
                 .map_err(|e| (e, "silnik nie przyjął hot slots".to_owned()))?;
+            // PL: `hot-core` sprzed M5 odpowiada samą instrukcją; mody nie znałyby swoich bloków.
+            // EN: A `hot-core` older than M5 answers with its usage only; mods would not know their
+            // blocks.
+            if !reply.contains("Bloki modów") {
+                return Err(apply_error(
+                    head,
+                    &format!("hot-core did not confirm hot slots, it answered: {reply}"),
+                    "hot-core nie zna hot slots — zaktualizuj hot-core",
+                ));
+            }
         }
         self.log.info(
             "hotd installed the resource pack; players get it at their next join",
@@ -415,7 +431,7 @@ impl<E: Engine> Daemon<E> {
             .map_err(|e| (e, "git nie odczytał commita".to_owned()))?;
         if let Some(u) = self.pack_update(head, &files)? {
             let running = self.engine.pid().is_some();
-            self.install_pack(&u, running)?;
+            self.install_pack(head, &u, running)?;
         }
         Ok(())
     }

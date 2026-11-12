@@ -157,6 +157,11 @@ impl Engine for Fake {
             let mut mods = self.mods.borrow_mut();
             mods.retain(|(m, _)| *m != id);
             mods.push((id, path.to_owned()));
+        } else if line == "hot slots" {
+            let n = fs::read_to_string(self.status.with_file_name("slots.json"))
+                .map(|t| t.matches("\":").count())
+                .unwrap_or(0);
+            return Ok(format!("Bloki modów: {n} (hot-state/slots.json)."));
         } else if let Some(id) = line.strip_prefix("hot unload ") {
             self.mods.borrow_mut().retain(|(m, _)| m != id);
         }

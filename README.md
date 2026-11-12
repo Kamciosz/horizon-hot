@@ -18,7 +18,7 @@ Dopóki `spike/m0` nie jest scalone do `main`, instalator bierze się z tej gał
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/spike/m0/scripts/server-install.sh \
-  | sudo bash -s -- --hot-ref spike/m0 --repo https://github.com/<właściciel>/<repo-serwera> --eula --op <nick>
+  | sudo bash -s -- --hot-ref spike/m0 --repo https://github.com/<właściciel>/<repo-serwera> --address <IP-serwera> --eula --op <nick>
 ```
 
 Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtórki:
@@ -26,7 +26,11 @@ Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtó
 1. Pliki gry. Na komputerze z Minecraftem i launcherem Horizon przygotuj wersję 26.3, skopiuj jej folder na serwer (`scp -r`) i uruchom polecenie jeszcze raz z `--resources <folder>`. Pliki gry nie są w tym repo i nikt ich za Ciebie nie pobiera.
 2. Kod natywny. Przeczytaj `crates/hot-host/` i, jeśli mu ufasz, dodaj `--trust-native-code`. Tę zgodę daje tylko właściciel serwera.
 
+`--address` to adres, który gracze wpisują w grze. Z niego gra pobiera paczkę zasobów z wyglądem bloków modów (port 8131).
+
 Na końcu skrypt pokazuje, co raz dodać w repo serwera: `hot.yml` w `.github/workflows/` i sekret `HOT_SIGNING_KEY`. Błędy idą do `/srv/horizon/logs/install.jsonl`, opisy kodów są w `docs/bledy/`. Ponowne uruchomienie niczego nie psuje.
+
+Każdy gracz raz: pobiera `http://<IP-serwera>:8131/hot_slots.hmod` do folderu `horizon-mods/` swojej instancji Horizona, dopisuje `mod.hot_slots:true` do `horizon-mods.txt` obok i przy wejściu przyjmuje paczkę zasobów serwera. Bez tego pliku serwer go nie wpuści („Your mods don't match”). Później zrobi to aplikacja gracza.
 
 ## Testy
 ```bash

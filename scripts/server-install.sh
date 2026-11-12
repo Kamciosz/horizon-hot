@@ -38,6 +38,7 @@ TRUST_NATIVE=0
 EULA=0
 PORT=25565
 PACK_PORT=8131
+ADDRESS=
 OP=
 TEST_NO_HORIZON=0
 
@@ -50,6 +51,8 @@ USAGE="Użycie: server-install.sh --repo URL --eula [opcje]
   --launcher PATH         horizon-launcher dla Linuxa x86-64 (domyślnie z PATH)
   --op NAME               pierwszy operator; włącza whitelistę z tym graczem
   --port N                port gry (domyślnie 25565)
+  --address HOST          adres, pod którym gracze widzą serwer (IP albo nazwa); z niego
+                          gra pobiera paczkę zasobów: http://HOST:8131/pack.zip
   --hot-ref REF           wersja horizon-hot: gałąź, tag albo commit (domyślnie main)
   --hot-source URL        skąd pobrać horizon-hot (domyślnie GitHub)
   --horizon-version TAG   Nightly Horizona (domyślnie $HORIZON_VERSION)
@@ -130,6 +133,7 @@ while [ $# -gt 0 ]; do
     --launcher) LAUNCHER=${2:?"--launcher potrzebuje ścieżki"}; shift 2 ;;
     --op) OP=${2:?"--op potrzebuje nazwy gracza"}; shift 2 ;;
     --port) PORT=${2:?"--port potrzebuje numeru"}; shift 2 ;;
+    --address) ADDRESS=${2:?"--address potrzebuje adresu serwera"}; shift 2 ;;
     --hot-ref) HOT_REF=${2:?"--hot-ref potrzebuje gałęzi, tagu albo commita"}; shift 2 ;;
     --hot-source) HOT_SOURCE=${2:?"--hot-source potrzebuje adresu"}; shift 2 ;;
     --horizon-version) HORIZON_VERSION=${2:?"--horizon-version potrzebuje tagu"}; shift 2 ;;
@@ -150,7 +154,7 @@ RERUN="curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/$HOT_RE
 port_owner() { ss -Hltnp "sport = :$1" 2>/dev/null | head -n 1; }
 
 preflight() {
-  step 1/11 "Sprawdzenie maszyny"
+  step 1/12 "Sprawdzenie maszyny"
   [ "$(id -u)" = 0 ] || { say "Uruchom przez sudo: … | sudo bash -s -- …" >&2; exit 2; }
   local id="" ver="" arch mem_gb disk_gb
   # shellcheck disable=SC1091
@@ -195,7 +199,7 @@ preflight() {
 # --- PL: Krok 2: użytkownik i katalogi. EN: Step 2: user and folders. -----------------------
 
 user_and_dirs() {
-  step 2/11 "Użytkownik horizon i katalogi w $ROOT"
+  step 2/12 "Użytkownik horizon i katalogi w $ROOT"
   if ! id horizon >/dev/null 2>&1; then
     OUTPUT=$(useradd --system --home-dir "$ROOT" --create-home --shell /usr/sbin/nologin horizon 2>&1) \
       || fail HOT-E0103 "The system user horizon cannot be created" "useradd succeeds" "see chain" \
@@ -213,7 +217,7 @@ user_and_dirs() {
 # --- PL: Krok 3: pakiety. EN: Step 3: packages. --------------------------------------------
 
 packages() {
-  step 3/11 "Pakiety systemowe"
+  step 3/12 "Pakiety systemowe"
   local want="git curl ca-certificates openssh-client build-essential ufw tar" missing="" p
   for p in $want; do
     dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || missing+=" $p"
@@ -231,7 +235,7 @@ packages() {
 # --- PL: Krok 4: Horizon. EN: Step 4: Horizon. ---------------------------------------------
 
 horizon() {
-  step 4/11 "Horizon $HORIZON_VERSION"
+  step 4/12 "Horizon $HORIZON_VERSION"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
   if [ "$(readlink "$HZ/current" 2>/dev/null)" = "$HZ/releases/$HORIZON_VERSION" ] && [ -x "$BIN/horizon-server" ]; then
     say "Już jest."; return
@@ -250,7 +254,7 @@ horizon() {
 # --- PL: Krok 5: horizon-hot ze źródeł. EN: Step 5: horizon-hot from source. -----------------
 
 hot_build() {
-  step 5/11 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag"
+  step 5/12 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag"
   if [ ! -x "$ROOT/.cargo/bin/rustup" ]; then
     say "Instaluję Rusta dla użytkownika horizon (rustup)…"
     OUTPUT=$(curl -fsSL https://sh.rustup.rs -o "$ROOT/tmp/rustup.sh" 2>&1 && chown horizon:horizon "$ROOT/tmp/rustup.sh" \
@@ -297,7 +301,7 @@ hot_build() {
 ssh_repo() { case "$REPO" in git@*|ssh://*) return 0 ;; *) return 1 ;; esac; }
 
 keys() {
-  step 6/11 "Klucze i pliki do repo serwera"
+  step 6/12 "Klucze i pliki do repo serwera"
   if [ ! -f "$KEYS/hot-ci" ]; then
     ssh-keygen -q -t ed25519 -N '' -C hot-ci -f "$KEYS/hot-ci"
     say "Nowy klucz podpisu CI: $KEYS/hot-ci."
@@ -332,7 +336,7 @@ resources_present() {
 }
 
 world() {
-  step 7/11 "Pliki gry i świat"
+  step 7/12 "Pliki gry i świat"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięte (--test-no-horizon)."; return; fi
   if ! resources_present; then
     if [ -z "$RESOURCES" ]; then
@@ -368,10 +372,82 @@ world() {
       "the server runs with its old backup settings" "dir=$SRV"
 }
 
-# --- PL: Krok 8: usługi systemd. EN: Step 8: systemd units. ----------------------------------
+# --- PL: Krok 8: pula slotów i paczka zasobów. EN: Step 8: slot pool and resource pack. ----
+
+# PL: Pula slotów (`hot_slots.hmod`) dla serwera i graczy oraz adres paczki w `server.toml`.
+#     Plik buduje `cargo horizon-mod` z tej samej wersji Horizona co serwer; build jest powtarzalny,
+#     więc gracz może zbudować go sam albo pobrać z `serve-pack`. Opis: docs/sloty.md.
+# EN: The slot pool (`hot_slots.hmod`) for the server and players, and the pack address in
+#     `server.toml`. `cargo horizon-mod` from the server's Horizon version builds it; the build is
+#     reproducible, so a player can build it or download it from `serve-pack`. See docs/sloty.md.
+# PL: Ustawia `resource-pack` i `require-resource-pack` w `[properties]`; reszta pliku bez zmian.
+# EN: Sets `resource-pack` and `require-resource-pack` in `[properties]`; the rest stays as it is.
+set_pack_url() {
+  local file=$1 url=$2 tmp
+  tmp=$(mktemp)
+  awk -v url="$url" '
+    function add() { if (!done) { print "resource-pack = \"" url "\""; print "require-resource-pack = true"; done = 1 } }
+    /^\[/ { if (inprops) add(); inprops = ($0 == "[properties]") }
+    inprops && /^(resource-pack|require-resource-pack)[ =]/ { next }
+    { print }
+    inprops && $0 == "[properties]" { add() }
+    END { if (!done) { print ""; print "[properties]"; add() } }
+  ' "$file" > "$tmp" && cat "$tmp" > "$file"
+  local rc=$?
+  rm -f "$tmp"
+  return $rc
+}
+
+slots_pack() {
+  step 8/12 "Pula slotów i paczka zasobów"
+  local rev=${HORIZON_VERSION##*-} pool=$SRV/horizon-mods/hot_slots.hmod src=$ROOT/tmp/hot-slots
+  if [ "$(cat "$ROOT/cargo-horizon-mod-version" 2>/dev/null)" != "$rev" ] || [ ! -x "$ROOT/.cargo/bin/cargo-horizon-mod" ]; then
+    say "Instaluję cargo-horizon-mod (Horizon $rev)…"
+    OUTPUT=$(as_horizon cargo install -q --locked --force --git https://github.com/horizon-rust/horizon --rev "$rev" cargo-horizon-mod 2>&1) \
+      || fail HOT-E0112 "cargo-horizon-mod cannot be installed for the horizon user" "cargo install ends in $ROOT/.cargo/bin" \
+        "see chain: no network to github.com or a compile error" "Check the network, then rerun the installer" \
+        "the server runs without the slot pool" "rev=$rev"
+    printf '%s\n' "$rev" > "$ROOT/cargo-horizon-mod-version"
+  fi
+  if [ "$HOT_REBUILT" = 1 ] || [ ! -f "$pool" ]; then
+    rm -rf "$src"
+    OUTPUT=$(as_horizon "$BIN/hotd" slots-source "$src" 2>&1 && cd "$src" && as_horizon cargo horizon-mod build 2>&1) \
+      || fail HOT-E0112 "The slot pool hot_slots.hmod cannot be built" "cargo horizon-mod build writes target/horizon-mod/hot_slots.hmod" \
+        "see chain" "Fix what chain says, then rerun the installer" "the server keeps its previous pool, if any" "src=$src"
+    mkdir -p "$SRV/horizon-mods" "$SRV/hot-state/pack"
+    if ! cmp -s "$src/target/horizon-mod/hot_slots.hmod" "$pool"; then
+      install -o horizon -g horizon -m 0644 "$src/target/horizon-mod/hot_slots.hmod" "$pool"
+      SLOTS_CHANGED=1
+    fi
+    install -o horizon -g horizon -m 0644 "$pool" "$SRV/hot-state/pack/hot_slots.hmod"
+  fi
+  touch "$SRV/horizon-mods.txt"
+  grep -qx 'mod.hot_slots:true' "$SRV/horizon-mods.txt" || { printf 'mod.hot_slots:true\n' >> "$SRV/horizon-mods.txt"; SLOTS_CHANGED=1; }
+  chown -R horizon:horizon "$SRV/horizon-mods" "$SRV/horizon-mods.txt" "$SRV/hot-state"
+  if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pula zbudowana; server.toml pominięty (--test-no-horizon)."; return; fi
+  if [ -z "$ADDRESS" ]; then
+    wait_for_operator HOT-E0112 "The address players use to reach the server is not known" \
+      "the installer runs with --address HOST" "the game downloads the resource pack from that address; the installer does not guess it" \
+      "Rerun with --address and the IP or name players type to join (this machine says: $(hostname -I 2>/dev/null | awk '{ print $1 }'))" \
+      "everything before the resource pack is installed" "pack_port=$PACK_PORT"
+  fi
+  # PL: Bez resource-pack-sha1: klient pobiera paczkę przy każdym wejściu, więc nowy wygląd nie
+  #     wymaga restartu silnika (docs/sloty.md). EN: No sha1: the client downloads the pack at
+  #     every join, so a new look needs no engine restart.
+  local url="http://$ADDRESS:$PACK_PORT/pack.zip" before
+  before=$(cksum < "$SRV/server.toml")
+  OUTPUT=$(set_pack_url "$SRV/server.toml" "$url" 2>&1) \
+    || fail HOT-E0112 "server.toml cannot be updated with the resource pack address" "[properties] has resource-pack and require-resource-pack" \
+      "see chain" "Add the two lines under [properties] in $SRV/server.toml by hand (docs/sloty.md), then rerun" \
+      "the server runs without the resource pack" "url=$url"
+  [ "$(cksum < "$SRV/server.toml")" = "$before" ] || SLOTS_CHANGED=1
+  say "Pula $(sed -n 's/^version = "\(.*\)"/\1/p' "$src/horizon-mod.toml" 2>/dev/null || true) w $pool; paczka: $url"
+}
+
+# --- PL: Krok 9: usługi systemd. EN: Step 9: systemd units. ----------------------------------
 
 units() {
-  step 8/11 "Usługi systemd"
+  step 9/12 "Usługi systemd"
   local changed=0 git_ssh=""
   ssh_repo && git_ssh="Environment=\"GIT_SSH_COMMAND=ssh -i $ROOT/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new\""
   write_if_changed /etc/systemd/system/horizon-hot-server.service "[Unit]
@@ -407,6 +483,21 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target" && changed=1
+  write_if_changed /etc/systemd/system/horizon-hot-pack.service "[Unit]
+Description=horizon-hot: resource pack and slot pool for players (hotd serve-pack)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=horizon
+Group=horizon
+Environment=HOT_HOME=$SRV
+ExecStart=$BIN/hotd serve-pack --home $SRV --port $PACK_PORT
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target" && changed=1
   write_if_changed /etc/systemd/system/horizon-hot-backup.service "[Unit]
 Description=horizon-hot: copy of hot-state and hot-keys (worlds: horizon-server [backups])
 
@@ -428,9 +519,12 @@ WantedBy=timers.target" && changed=1
   [ "$changed" = 1 ] && systemctl daemon-reload
   OUTPUT=$( {
     systemctl enable -q --now horizon-hot-backup.timer
+    systemctl enable -q horizon-hot-pack
+    if [ "$changed" = 1 ] || [ "$HOT_REBUILT" = 1 ]; then systemctl restart horizon-hot-pack; else systemctl start horizon-hot-pack; fi
     if [ "$TEST_NO_HORIZON" = 0 ]; then
       systemctl enable -q horizon-hot-server
-      if [ "$changed" = 1 ]; then systemctl restart horizon-hot-server; else systemctl start horizon-hot-server; fi
+      # PL: Pula i adres paczki silnik czyta tylko przy starcie. EN: The engine reads the pool and pack address only at start.
+      if [ "$changed" = 1 ] || [ "$SLOTS_CHANGED" = 1 ]; then systemctl restart horizon-hot-server; else systemctl start horizon-hot-server; fi
     fi
     # PL: hotd rusza dopiero przy silniku z hot-host; bez niego commity z modami byłyby
     #     oznaczane jako nieudane. EN: hotd starts only with a hot-host engine.
@@ -442,14 +536,14 @@ WantedBy=timers.target" && changed=1
   } 2>&1) || fail HOT-E0109 "systemd cannot start the horizon-hot services" "systemctl enable --now succeeds" \
     "see chain; journalctl -u horizon-hot-server -n 50 shows why a unit stopped" \
     "Run journalctl -u horizon-hot-server -u horizon-hot-hotd -n 80, fix the cause, then rerun the installer" \
-    "the unit files are in /etc/systemd/system" "units=horizon-hot-server,horizon-hot-hotd,horizon-hot-backup"
-  say "Włączone: horizon-hot-backup.timer$([ "$TEST_NO_HORIZON" = 0 ] && printf ', horizon-hot-server')$( (engine_has_hot_host || [ "$TEST_NO_HORIZON" = 1 ]) && printf ', horizon-hot-hotd')."
+    "the unit files are in /etc/systemd/system" "units=horizon-hot-server,horizon-hot-hotd,horizon-hot-pack,horizon-hot-backup"
+  say "Włączone: horizon-hot-backup.timer, horizon-hot-pack$([ "$TEST_NO_HORIZON" = 0 ] && printf ', horizon-hot-server')$( (engine_has_hot_host || [ "$TEST_NO_HORIZON" = 1 ]) && printf ', horizon-hot-hotd')."
 }
 
-# --- PL: Krok 9: zapora. EN: Step 9: firewall. ----------------------------------------------
+# --- PL: Krok 10: zapora. EN: Step 10: firewall. ----------------------------------------------
 
 firewall() {
-  step 9/11 "Zapora (ufw)"
+  step 10/12 "Zapora (ufw)"
   local p
   # PL: Najpierw SSH na każdym porcie, na którym słucha sshd, żeby nie odciąć operatora.
   # EN: SSH first, on every port sshd listens on, so the operator is never locked out.
@@ -482,7 +576,7 @@ engine_has_hot_host() {
 }
 
 engine() {
-  step 11/11 "Silnik z hot-host"
+  step 12/12 "Silnik z hot-host"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
   local out=$ENGINES/${HOT_SHA:0:12}-$HORIZON_VERSION
   if grep -q "^path = \"$out/horizon-engine\"" "$SRV/server.toml" 2>/dev/null && [ -x "$out/horizon-engine" ]; then
@@ -596,6 +690,9 @@ summary() {
   if ssh_repo; then
     say "  3. Klucz tylko do odczytu (Settings → Deploy keys, bez zapisu): cat $ROOT/.ssh/deploy.pub"
   fi
+  say ""
+  say "Gracze, raz: pobierz http://$ADDRESS:$PACK_PORT/hot_slots.hmod do folderu horizon-mods/ swojej instancji,"
+  say "  dopisz mod.hot_slots:true do horizon-mods.txt obok, a przy wejściu przyjmij paczkę zasobów serwera."
   say "Stan: sudo -u horizon $BIN/hotd status --home $SRV"
 }
 
@@ -607,17 +704,19 @@ main() {
   hot_build
   keys
   world
+  slots_pack
   units
   firewall
-  autotest 10/11 "Autotest serwera"
+  autotest 11/12 "Autotest serwera"
   engine
   # PL: Po zbudowaniu silnika test jeszcze raz, już z hot-core. EN: Test again, now with hot-core.
-  if engine_has_hot_host; then autotest 11/11 "Autotest z hot-core"; fi
+  if engine_has_hot_host; then autotest 12/12 "Autotest z hot-core"; fi
   summary
 }
 
 HOT_SHA=
 HOT_REBUILT=0
+SLOTS_CHANGED=0
 # PL: Przy `curl | bash` skrypt płynie przez stdin; polecenia w środku nie mogą go czytać.
 # EN: With `curl | bash` the script comes through stdin; commands inside must not read it.
 main </dev/null

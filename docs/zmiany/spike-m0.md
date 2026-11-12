@@ -43,6 +43,9 @@
 - `templates/server-repo/README.md` i dokumentacja `hot_mod!`: serwer nie sprawdza uprawnień do komend modów, mod robi to sam po `permission`.
 - Bloki modów (M5): plik `mods/<id>/assets/blocks/<nazwa>.png` dostaje slot z puli, a `hotd` zapisuje przydział w `hot-state/slots.json` (tylko dopisywany). Mod z kodem używa nazwy `<id>:<nazwa>`, a `hot-core` tłumaczy ją na `hot_slots:slot_N` i z powrotem; komenda `hot slots` wczytuje przydział ponownie.
 - Paczka zasobów z repo serwera: `hotd` buduje powtarzalny `hot-state/pack/pack.zip` (tekstura, model, nazwa z `lang.json`) bez czekania na CI, a `hotd serve-pack` serwuje go na porcie 8131. `hotd slots-source <katalog>` tworzy źródło `hot-slots.hmod`. Kody `HOT-E0209` (pełna pula) i `HOT-E0210` (zły obraz albo `lang.json`).
+- `hotd` sprawdza odpowiedź na `hot slots`; `hot-core` starszy niż `hotd` to błąd `HOT-E0205`, a nie cisza. `hot status` pokazuje bloki modów i ich sloty.
+- `hotd serve-pack` podaje też `/hot_slots.hmod`, a przed pierwszą paczką paczkę bez bloków.
+- Instalator, krok 8: `cargo-horizon-mod` z wersji Horizona serwera, budowa i instalacja `hot_slots.hmod`, adres paczki w `server.toml` (nowa opcja `--address`), usługa `horizon-hot-pack`; kod `HOT-E0112`.
 
 ### Zmienione
 - CI uruchamia się też po pushu na gałęzie `spike/**`, nie tylko na `main` i w PR-ach.

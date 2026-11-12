@@ -30,7 +30,7 @@ hotd slots-source /tmp/hot-slots        # wypisuje wersję puli
 cd /tmp/hot-slots && cargo horizon-mod build
 ```
 
-Build jest powtarzalny: to samo źródło daje ten sam SHA-256, więc serwer i gracze budują plik sami. Gotowy plik idzie do `horizon-mods/` serwera i instancji gracza, a w `horizon-mods.txt` obok musi być wiersz `mod.hot_slots:true`.
+Build jest powtarzalny: to samo źródło daje ten sam SHA-256, więc serwer i gracze budują plik sami. Gotowy plik idzie do `horizon-mods/` serwera i instancji gracza, a w `horizon-mods.txt` obok musi być wiersz `mod.hot_slots:true`. Na serwerze robi to instalator (krok 8). Gracz pobiera ten sam plik z `http://<adres serwera>:8131/hot_slots.hmod`.
 
 ## Przydział
 
@@ -43,7 +43,7 @@ Build jest powtarzalny: to samo źródło daje ten sam SHA-256, więc serwer i g
 ## Paczka zasobów
 
 - `hotd` buduje `hot-state/pack/pack.zip` i `pack.sha1` przy każdym commicie, który zmienia wygląd. Paczka ma teksturę, model `cube_all` i nazwę z `mods/<id>/assets/lang.json` (`{"<nazwa>": "…"}`) dla każdego przydzielonego bloku, którego plik jest w repo. Zły obraz albo zły `lang.json` zatrzymuje commit (`HOT-E0210`).
-- `hotd serve-pack` (port 8131) wysyła ją pod `/pack.zip`. W `server.toml`, w `[properties]`: `resource-pack = "http://<adres>:8131/pack.zip"` i `require-resource-pack = true`, **bez** `resource-pack-sha1`. Silnik czyta te pola tylko przy starcie, a klient bez sha1 pobiera paczkę przy każdym wejściu, więc nowy wygląd dochodzi przy następnym wejściu bez restartu silnika.
+- `hotd serve-pack` (port 8131, usługa `horizon-hot-pack`) wysyła ją pod `/pack.zip`, a pulę pod `/hot_slots.hmod`. Zanim `hotd` zbuduje pierwszą paczkę, idzie paczka bez bloków, żeby gracza nie wyrzuciło. W `server.toml`, w `[properties]`: `resource-pack = "http://<adres>:8131/pack.zip"` i `require-resource-pack = true`, **bez** `resource-pack-sha1`. Silnik czyta te pola tylko przy starcie, a klient bez sha1 pobiera paczkę przy każdym wejściu, więc nowy wygląd dochodzi przy następnym wejściu bez restartu silnika.
 
 ## Zasady
 

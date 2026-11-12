@@ -278,16 +278,21 @@ pub fn install(home: &Path, zip: &[u8]) -> Result<String, DiagError> {
     Ok(sha1)
 }
 
-/// PL: Podaje `pack.zip` z katalogu paczki pod `GET /pack.zip`; plik czytany przy każdym żądaniu,
-/// więc nowa paczka idzie od razu. Każde połączenie w osobnym wątku, z limitem czasu.
-/// EN: Serves `pack.zip` from the pack folder at `GET /pack.zip`; the file is read per request, so
-/// a new pack goes out at once. One thread per connection, with a timeout.
+/// PL: Podaje `GET /pack.zip` i `GET /hot_slots.hmod` z katalogu paczki. Pliki czytane przy
+/// każdym żądaniu, więc nowa paczka idzie od razu. Zanim `hotd` zbuduje pierwszą paczkę, idzie
+/// paczka bez bloków: przy `require-resource-pack = true` brak paczki wyrzuciłby gracza. Każde
+/// połączenie w osobnym wątku, z limitem czasu.
+/// EN: Serves `GET /pack.zip` and `GET /hot_slots.hmod` from the pack folder. Files are read per
+/// request, so a new pack goes out at once. Until `hotd` builds the first pack, a pack without
+/// blocks goes out: with `require-resource-pack = true` a missing pack would kick the player. One
+/// thread per connection, with a timeout.
 pub fn serve(listener: &TcpListener, home: &Path, log: &Arc<Logger>) {
-    let file = dir(home).join("pack.zip");
+    let folder = dir(home);
+    let base: Arc<[u8]> = zip(&files(&Slots::default(), &BTreeMap::new())).into();
     for stream in listener.incoming().flatten() {
-        let (file, log) = (file.clone(), Arc::clone(log));
+        let (folder, base, log) = (folder.clone(), Arc::clone(&base), Arc::clone(log));
         std::thread::spawn(move || {
-            if let Err(e) = answer(stream, &file) {
+            if let Err(e) = answer(stream, &folder, &base) {
                 log.warn(
                     "hotd serve-pack could not answer a request",
                     json!({ "error": e.to_string() }),
@@ -297,7 +302,7 @@ pub fn serve(listener: &TcpListener, home: &Path, log: &Arc<Logger>) {
     }
 }
 
-fn answer(mut stream: TcpStream, file: &Path) -> std::io::Result<()> {
+fn answer(mut stream: TcpStream, folder: &Path, base: &[u8]) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(60)))?;
     let mut head = Vec::new();
@@ -314,7 +319,14 @@ fn answer(mut stream: TcpStream, file: &Path) -> std::io::Result<()> {
     let (method, path) = (words.next().unwrap_or(""), words.next().unwrap_or(""));
     let path = path.split('?').next().unwrap_or("");
     let body = match (method, path) {
-        ("GET" | "HEAD", "/pack.zip") => fs::read(file).ok(),
+        ("GET" | "HEAD", "/pack.zip") => Some(
+            fs::read(folder.join("pack.zip"))
+                .map(|b| (b, "application/zip"))
+                .unwrap_or_else(|_| (base.to_vec(), "application/zip")),
+        ),
+        ("GET" | "HEAD", "/hot_slots.hmod") => fs::read(folder.join("hot_slots.hmod"))
+            .ok()
+            .map(|b| (b, "application/octet-stream")),
         _ => None,
     };
     let Some(body) = body else {
@@ -322,9 +334,10 @@ fn answer(mut stream: TcpStream, file: &Path) -> std::io::Result<()> {
             b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         );
     };
+    let (body, kind) = body;
     stream.write_all(
         format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
             body.len()
         )
         .as_bytes(),
@@ -432,10 +445,6 @@ mod tests {
     fn serve_answers_only_the_pack() {
         let home = std::env::temp_dir().join(format!("hotd-serve-{}", std::process::id()));
         let _ = fs::remove_dir_all(&home);
-        let Ok(sha1) = install(&home, b"zawartosc") else {
-            panic!("install failed");
-        };
-        assert_eq!(sha1, sha1_hex(b"zawartosc"));
         let Ok(listener) = TcpListener::bind("127.0.0.1:0") else {
             return;
         };
@@ -453,10 +462,28 @@ mod tests {
             let mut s = TcpStream::connect(addr?).ok()?;
             s.write_all(format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
                 .ok()?;
-            let mut out = String::new();
-            s.read_to_string(&mut out).ok()?;
-            Some(out)
+            let mut out = Vec::new();
+            s.read_to_end(&mut out).ok()?;
+            Some(String::from_utf8_lossy(&out).into_owned())
         };
+        let first = get("/pack.zip").unwrap_or_default();
+        assert!(
+            first.starts_with("HTTP/1.1 200") && first.contains("pack.mcmeta"),
+            "before the first build the pack without blocks goes out: {first}"
+        );
+        assert!(get("/hot_slots.hmod")
+            .unwrap_or_default()
+            .starts_with("HTTP/1.1 404"));
+        let Ok(sha1) = install(&home, b"zawartosc") else {
+            panic!("install failed");
+        };
+        assert_eq!(sha1, sha1_hex(b"zawartosc"));
+        let _ = fs::write(dir(&home).join("hot_slots.hmod"), b"pula");
+        let hmod = get("/hot_slots.hmod").unwrap_or_default();
+        assert!(
+            hmod.starts_with("HTTP/1.1 200") && hmod.ends_with("pula"),
+            "{hmod}"
+        );
         let ok = get("/pack.zip").unwrap_or_default();
         assert!(
             ok.starts_with("HTTP/1.1 200") && ok.ends_with("zawartosc"),
