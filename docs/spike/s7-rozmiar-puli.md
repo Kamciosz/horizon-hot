@@ -18,7 +18,7 @@ Generator `spikes/s7-rozmiar-puli/gen.py` tworzy `hot_slots` z N blokami (`templ
 Pomiary:
 
 1. Start serwera (`srvbench.py`): od `horizon-server start` do otwarcia portu, RSS silnika 10 s później.
-   - **Ciepły** start: cache treści modów (`<serwer>/.horizon-cache/mod-content`) jest aktualny.
+   - **Ciepły** start: cache treści modów (`<serwer>/.horizon-cache/mod-content`) jest aktualny. Od Nightly 2026-11-07 cache ma osobny podkatalog na każdy zestaw modów (`mod-content/<16 znaków hex>/`), ale klucz nadal zawiera plik programu, więc wnioski poniżej się nie zmieniają (`docs/aktualizacje.md`, punkt 6).
    - **Zimny** start: cache usunięty, więc silnik buduje go od nowa.
 2. Start klienta (`clibench.py`): od pojawienia się procesu klienta do ekranu `playing` z chunkami, RSS 15 s później, liczba ostrzeżeń w logu. Klient: instancja `hot-spike` uruchamiana przez MCP `play --server … --offscreen`.
 3. Podmiana silnika (`variant.sh`, `swaps.sh`): proxy z S8, dwa serwery z S12 na wspólnym świecie, ta sama pula na A, B i u klienta, 6 podmian na wariant. Pauza jak w S8: od początku podmiany do `accept_teleportation` od klienta.

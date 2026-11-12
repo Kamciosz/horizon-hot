@@ -68,8 +68,8 @@ Każdy punkt ma obserwację, która by oblała:
 | R20 | Zapis chunka w pamięci (`Chunk::into_nbt`) i zbiór zmienionych chunków istnieją | FAKT, `horizon-world/src/chunk.rs:255`, `game.rs:15895` |
 | R21 | Budowa silnika wymaga przygotowanych zasobów gry; pobieranie plików Mojanga w CI zabronione przez politykę Horizona | FAKT, `launcher/src/native_mods.rs:2113`, `docs/microsoft-account.md:104-108` |
 | R22 | Pierwszy build silnika ok. 12 min, potem przyrostowo | FAKT, `docs/native-mods.md:1967`; próba: 39 s |
-| R23 | Od 2026-10-28 tylko wydania Nightly; ~6 w dwa tygodnie; między nimi 51–4491 commitów; `game.rs` 2391 commitów od 1.11 | FAKT, `gh release list`, `gh api compare` |
-| R24 | `PROTOCOL_VERSION` stały dla 26.3; `content_identity` liczony z rejestrów, nie z wersji Horizona | FAKT, `horizon-protocol/src/lib.rs:31`, `content_identity.rs:56-75` |
+| R23 | Od 2026-10-28 tylko wydania Nightly; ~6 w dwa tygodnie; między nimi 51–6255 commitów; `game.rs` 2391 commitów od 1.11 | FAKT, `gh release list`, `gh api compare`, `docs/aktualizacje.md` |
+| R24 | `PROTOCOL_VERSION` stały dla 26.3 (777 w 10 ostatnich wydaniach); `content_identity` liczony ze stanów bloków, wpisów modów i komponentów NBT modów natywnych, nie z wersji Horizona; plik bez zmian od 11-01 | FAKT, `horizon-protocol/src/lib.rs:31`, `content_identity.rs:56-75`, `docs/aktualizacje.md` |
 | R25 | `status --json`: MSPT `average/p50/p95/p99` z ostatnich 100 ticków, `rss_bytes`, `cpu_percent`; próbka co 1 s | FAKT, `game/dedicated/status.rs:156-160`, `clock.rs:291`, `supervisor.rs:536` |
 | R26 | `horizon-server update` działa tylko dla instalacji z `install.sh` | FAKT, komunikat programu |
 | R27 | Katalog budowy `native/stage` i `build.log` są wspólne dla buildów natywnych | FAKT, próba |
@@ -166,9 +166,9 @@ Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je 
 
 **D18. Aktualizacja Horizona — kanał Nightly.**
 - Kontekst: R23, R26. `hotd` raz na godzinę pyta API GitHuba o nowe Nightly.
-- Kroki: przygotowanie wersji (`horizon-launcher install` + `prepare` z zasobów serwera) → build silnika z `hot-host` (D15) → test: silnik na kopii świata z ostatniej kopii, 10 botów przez 5 minut, mody gorące ładują się, log bez błędów, MSPT nie gorszy o > 20% → podmiana (D11) → obserwacja 10 min → jeśli gorzej, powrót tą samą drogą i wersja oznaczona jako zła.
-- Okno zgodności klientów: tylko gdy zmienia się coś, czego klient potrzebuje (R24 — protokół stały; kanały `horizon:*`). Aplikacja gracza aktualizuje Horizona sama przy starcie, więc okno = czas do najbliższego startu; serwer czeka maks. 24 h i ogłasza termin na czacie.
-- Ryzyko: `libloading` może zniknąć z `Cargo.lock` Horizona → build nie przejdzie → serwer zostaje na starej wersji, `hot status` mówi dlaczego.
+- Kroki: przygotowanie wersji (`horizon-launcher install` + `prepare` z zasobów serwera) → build silnika z `hot-host` (D15) z `--version <nowe Nightly> --ignore-pins`, bo `hot-host` przypina wersję Horizona (`horizon_revision`), a bez tej flagi build zostaje na starej (`docs/aktualizacje.md`, punkt 7) → test: silnik na kopii świata z ostatniej kopii, 10 botów przez 5 minut, mody gorące ładują się, log bez błędów, MSPT nie gorszy o > 20% → podmiana (D11) → obserwacja 10 min → jeśli gorzej, powrót tą samą drogą i wersja oznaczona jako zła.
+- Okno zgodności klientów: tylko gdy zmienia się coś, czego klient potrzebuje (R24 — protokół stały; kanały `horizon:*` się dopisuje; czy `content_identity` jest takie samo na różnych Nightly, to NIEWIADOMA do sprawdzenia w M9: klient na jednym Nightly, serwer na drugim, ta sama pula). Aplikacja gracza aktualizuje Horizona sama przy starcie, więc okno = czas do najbliższego startu; serwer czeka maks. 24 h i ogłasza termin na czacie.
+- Ryzyko: `libloading` może zniknąć z `Cargo.lock` Horizona → build nie przejdzie → serwer zostaje na starej wersji, `hot status` mówi dlaczego. Mało prawdopodobne: 0.8.9 we wszystkich 10 ostatnich wydaniach, ciągnie ją grafika (`wgpu-hal`, `ash`).
 - `hot-host` używa tylko nazwanych haków i `[transfer]`, nie łatek na dowolne funkcje (R23 — duży churn); dlatego aktualizacje rzadko będą się zatrzymywać.
 
 **D19. Aktualizacja naszego systemu.**
@@ -307,7 +307,7 @@ Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie dz
 - [x] M0.9 S8: prototyp podmiany wariantu A: proxy + dwa silniki na jednym świecie, „usuń encje / zapomnij chunki”, mapowanie id gracza; pomiar pauzy; czy da się rozgrzać nowy silnik przed zwolnieniem świata; ile czasu klient czeka bez pakietów, zanim się rozłączy. Sprawdzenie: prawdziwy klient zostaje połączony, bez ekranu ładowania, pauza zmierzona (`docs/podmiana.md`). **Blokuje D11 i D13.** Jeśli pauza > 1 s — decyzja użytkownika przed M8.
 - [ ] M0.10 S9: `native-build` na Ubuntu x86_64 bez okna, z zasobami z `prepare`. Sprawdzenie: eksport startuje.
 - [ ] M0.11 S10: ThinkCentre: model, CPU, RAM, wersja Ubuntu, architektura; pomiar pustego serwera i 10 botów. Sprawdzenie: `docs/sprzet.md` z wartościami `AllowedCPUs`, `MemoryLow`, `MemoryMax`.
-- [ ] M0.12 S11: ostatnie 10 Nightly — co zmieniło `content_identity`, kanały `horizon:*`, API haków, `Cargo.lock` (`libloading`). Sprawdzenie: `docs/aktualizacje.md`.
+- [x] M0.12 S11: ostatnie 10 Nightly — co zmieniło `content_identity`, kanały `horizon:*`, API haków, `Cargo.lock` (`libloading`). Sprawdzenie: `docs/aktualizacje.md`. Wynik: używane haki i pliki bez zmian od 11-03; D18 potrzebuje `--ignore-pins`.
 - [x] M0.13 S12: `horizon-server` ze światem poza swoim katalogiem i na porcie 25566. Sprawdzenie: dwa supervisory naprzemiennie na tym samym świecie.
 - [ ] M0.14 Wyniki S1–S12 jako `docs/adr/0002-spike.md`; korekta D1–D29, jeśli trzeba. Sprawdzenie: każda NIEWIADOMA w planie zamieniona na FAKT albo nową decyzję.
 
@@ -426,6 +426,10 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Zewnętrzne powiadomienia (Discord, mail).
 
 ## 8. Stan prac
+
+**2026-11-12 — M0.12 (S11) zrobione:** 6 Nightly (wszystkie istniejące) i 4 ostatnie wydania stabilne. Haki i funkcje `Host`, których używa `hot-host`, oraz pliki `content_identity`, `mod_list`, `mod_net` i numery pakietów są takie same od 11-03 do najnowszego Nightly; `libloading` 0.8.9 wszędzie; kanały `horizon:*` tylko się dopisuje. Poprawka D18: `hot-host` przypina wersję Horizona, więc build aktualizacji musi mieć `--ignore-pins`. Od 11-07 cache treści modów ma osobny katalog na zestaw modów (wniosek S7 bez zmian). Szczegóły: `docs/aktualizacje.md`.
+
+**RYZYKO / SZANSA (HIPOTEZA, do obserwacji):** Horizon od 11-05 sam wprowadza mody bez restartu (`docs/design/mod-hotload.md` w repo Horizona): przełączanie modów treści w grze jednoosobowej i LAN, wyłączanie trait modów (`set_mod_on`), w planach mody wasm z wyładowaniem. Serwer dedykowany jeszcze tego nie ma. Jeśli dostanie, część D11 może być zbędna, a mody wasm mogłyby zastąpić nasze `cdylib` (D2). Sprawdzać przy każdym przeglądzie aktualizacji.
 
 **2026-11-12 — M0.9 (S8) zrobione:** prototyp proxy (`spikes/s8-podmiana/proxy/`) przeniósł prawdziwego klienta 10 razy między dwoma silnikami na jednym świecie: ekran `playing` przez cały czas, połączenie zostało, chunki zostały, moby mrugnęły (ok. 0,8 s). Zamiana id gracza konieczna (próba kontrolna bez niej oblała). Pauza 0,96–1,07 s: prawie cała to stop + start silnika. Chunki od B zastępują kopię klienta (brak bloków-duchów); ruch i akcje gracza z przerwy przepadają. Niesprawdzone, do M8: mody i paczka zasobów w odtwarzanej konfiguracji, tryb online, wielu graczy. Szczegóły: `docs/spike/s8-podmiana-prototyp.md`, `docs/podmiana.md`.
 

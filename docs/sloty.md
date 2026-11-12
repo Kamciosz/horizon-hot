@@ -19,7 +19,7 @@ Bloki i przedmioty z modów gorących nie mogą dopisać się do rejestrów gry 
 | 1024/2048 | 1,7 MB | nie mierzono | 1,16–1,34 s | ok. 2,2 s (szacunek) |
 | 4096/8192 | 7,0 MB | 2,04–2,12 s | 1,45–1,82 s | 3,85 s (1 pomiar) |
 
-- „Podmiana z nowym silnikiem” to podmiana z modem natywnym, nowym `hot-host` albo aktualizacją Horizona. Nowy plik programu unieważnia cache treści modów, więc silnik buduje go przy starcie. Szacunek: pauza z ciepłym cache plus różnica między zimnym a ciepłym startem serwera.
+- „Podmiana z nowym silnikiem” to podmiana z modem natywnym, nowym `hot-host` albo aktualizacją Horizona. Nowy plik programu unieważnia cache treści modów, więc silnik buduje go przy starcie. Tak jest też od Nightly 2026-11-07, w którym cache dostał osobny katalog na zestaw modów (`docs/aktualizacje.md`). Szacunek: pauza z ciepłym cache plus różnica między zimnym a ciepłym startem serwera.
 - Pamięć z pełną pulą: serwer ok. +230 MB, klient ok. +250 MB.
 - Powiększenie puli później zmienia `content_identity`. Każdy gracz potrzebuje wtedy nowego pliku (aplikacja gracza pobiera go sama) i musi wejść ponownie.
 
