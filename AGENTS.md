@@ -7,7 +7,7 @@ Ten plik wystarcza, żeby zacząć rozwijać albo naprawiać projekt bez wcześn
 Serwer gry dla małej grupy znajomych. Gra to **Horizon** — reimplementacja Minecraft Java 26.3 w Rust (wydania tylko Nightly: `nightly-<data>-<commit>`). Projekt dodaje:
 
 - **mody gorące** — biblioteki `cdylib` wczytywane do działającego serwera bez restartu;
-- **podmianę silnika** — nowa wersja Horizona albo mod natywny wchodzi bez rozłączania graczy (świat na chwilę „mruga”);
+- **podmianę silnika** — nowa wersja Horizona albo mod natywny wchodzi bez rozłączania graczy: świat stoi ok. 1–4 s (zależnie od puli slotów i tego, czy silnik jest nowy), ale gracz nie widzi ekranu ładowania;
 - **samoaktualizację i samonaprawę** wszystkiego;
 - **instalator serwera** jednym poleceniem (Ubuntu) i **aplikację gracza** w terminalu (macOS, Windows, Linux).
 
@@ -51,7 +51,9 @@ docs/adr/          decyzje (jedna decyzja = jeden plik)
 docs/zmiany/       wpisy do changelogu z pull requestów
 docs/STANDARD_KODU.md  komentarze, błędy i logi, testy — obowiązuje w każdym pliku
 docs/operator.md   obsługa serwera: hot status, hot report, przywracanie z kopii   (planowany)
-PLAN.md            plan budowy (tymczasowy; po zakończeniu treść jest w docs/)
+docs/spike/       wyniki prób z etapu M0 (zbiorczo: docs/adr/0002-spike.md)
+spikes/           kod prób z M0; poza workspace, nie jest kodem produkcyjnym
+PLAN.md            plan budowy (tymczasowy; po zakończeniu treść jest w docs/); stan prac w sekcji 8
 ```
 
 ## 4. Typowe zadania
@@ -73,7 +75,9 @@ cargo test --workspace          # oczekiwane: wszystkie „ok”
 
 Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktualizowana dokumentacja w tym samym commicie.
 
-Środowisko testowe silnika (Mac właściciela): launcher Horizon `/Applications/Horizon.app/Contents/MacOS/horizon-launcher`, źródła wersji w `~/Library/Application Support/horizon-launcher/native/stage`. Na innej maszynie: `horizon-launcher install` + `prepare` (wymaga kupionego Minecrafta właściciela maszyny).
+Środowisko testowe silnika (Mac właściciela): launcher Horizon `/Applications/Horizon.app/Contents/MacOS/horizon-launcher`, źródła wersji w `~/Library/Application Support/horizon-launcher/native/stage`. Na innej maszynie zasoby gry przygotowuje człowiek, który ma kupionego Minecrafta (`horizon-launcher install` + `prepare`). Agent nie uruchamia `prepare` i nie pobiera plików Mojanga; jeśli ich brakuje, zatrzymuje się i prosi właściciela maszyny.
+
+Do czego nie jest potrzebny silnik: `cargo test` w tym repo działa bez Horizona i bez plików gry. Próby z silnikiem opisuje sekcja „Powtórzenie” w każdym pliku `docs/spike/`.
 
 ## 6. Zasady nienaruszalne
 
@@ -85,6 +89,9 @@ Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktua
 - **Gra ma pierwszeństwo przed tłem** — praca w tle w `horizon-bg.slice`, pod hamulcem MSPT (D16).
 - Płatności, publikacja na zewnątrz, działania nieodwracalne → pytanie do właściciela.
 - Sekretów nie commitujesz. Sekret w historii = rotacja klucza.
+- **Zrzutów ekranu z gry nie commitujesz** (tekstury i logo należą do Mojanga). Zostają poza repo.
+- **Nie ruszasz cudzych instancji, serwerów ani światów** na maszynie, na której pracujesz, ani globalnego `servers.dat` launchera. Próby robisz we własnej instancji i we własnym katalogu, a po próbie usuwasz tylko to, co sam utworzyłeś.
+- `--trust-native-code` tylko dla kodu z tego repo albo kodu, który przeczytałeś. Nigdy dla moda z zewnątrz bez zgody właściciela.
 
 ## 7. Logi i błędy (D27, D28)
 

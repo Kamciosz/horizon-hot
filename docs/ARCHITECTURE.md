@@ -33,7 +33,7 @@ push → hotd kopiuje data/ do paczki danych świata → /reload
 **Mod natywny albo nowa wersja Horizona.**
 ```
 hotd buduje nowy silnik w tle → stary zapisuje graczy i świat → nowy startuje
-→ hot-proxy przenosi graczy bez rozłączenia (świat na chwilę „mruga”)
+→ hot-proxy przenosi graczy bez rozłączenia (świat stoi ok. 1–4 s, bez ekranu ładowania)
 ```
 Błąd nowego silnika → gracze wracają na stary.
 
@@ -54,7 +54,7 @@ silnik pada → hot-proxy trzyma połączenia → silnik wstaje z ostatnimi dobr
 
 Pełne uzasadnienia: `docs/adr/`. Kompromisy świadomie przyjęte:
 
-- Podmiana silnika nie jest niewidoczna: świat na chwilę mruga. Podmiana bez żadnego śladu wymagałaby przeniesienia całego stanu gry między procesami — za drogie i kruche przy częstych wydaniach Horizona.
+- Podmiana silnika nie jest niewidoczna: świat stoi ok. 1–4 s (zmierzone na Macu w S7 i S8, `docs/adr/0002-spike.md`). Podmiana bez żadnego śladu wymagałaby przeniesienia całego stanu gry między procesami — za drogie i kruche przy częstych wydaniach Horizona.
 - Stare generacje modów zostają w pamięci (bez wyładowania biblioteki). Pamięć odzyskuje okresowa podmiana silnika.
 
 ## Rozwój
