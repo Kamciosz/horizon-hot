@@ -28,6 +28,8 @@ use crate::classify::{classify, code_mods, plan, valid_id};
 use crate::data::{self, Staged};
 use crate::engine::Engine;
 use crate::git::{Mirror, BUILDS_BRANCH};
+use crate::pack::{self, Look};
+use crate::slots::{self, Slots};
 use crate::state::{write_atomic, State};
 use crate::{codes, sign, VERSION};
 
@@ -175,6 +177,13 @@ impl<E: Engine> Daemon<E> {
                 self.state.fail(&head, &reason);
                 self.state.waiting = None;
             }
+        } else if !pack::dir(&self.cfg.home).join("pack.zip").exists() {
+            // PL: Pierwszy start po aktualizacji `hotd` albo skasowana paczka: odbudowa bez czekania
+            // na nowy commit. EN: First start after a `hotd` update or a deleted pack: rebuild
+            // without waiting for a new commit.
+            if let Err((e, _)) = self.refresh_pack(&head) {
+                self.error(&e);
+            }
         }
         self.save();
     }
@@ -194,6 +203,7 @@ impl<E: Engine> Daemon<E> {
         let p = plan(&classify(&changed), &in_repo, &active);
         self.state.deferred = p.deferred;
         let data_diff = self.data_diff(head, &files)?;
+        let pack = self.pack_update(head, &files)?;
 
         let mut loads = BTreeMap::new();
         if !p.load.is_empty() {
@@ -214,6 +224,12 @@ impl<E: Engine> Daemon<E> {
         }
         self.state.waiting = None;
         if p.load.is_empty() && p.unload.is_empty() && data_diff.is_empty() {
+            // PL: Sam wygląd nie potrzebuje silnika: `hot-core` przeczyta sloty przy starcie.
+            // EN: A look alone needs no engine: `hot-core` reads the slots when it starts.
+            if let Some(u) = &pack {
+                let running = self.engine.pid().is_some();
+                self.install_pack(u, running)?;
+            }
             self.mark_applied(head, false);
             return Ok(());
         }
@@ -254,6 +270,11 @@ impl<E: Engine> Daemon<E> {
             Some(staged)
         };
         let started = Instant::now();
+        // PL: Sloty przed `hot load`, żeby nowy mod od razu znał swoje bloki.
+        // EN: Slots before `hot load`, so a new mod knows its blocks at once.
+        if let Some(u) = &pack {
+            self.install_pack(u, true)?;
+        }
         for id in &p.unload {
             self.engine
                 .command(&format!("hot unload {id}"))
@@ -285,6 +306,7 @@ impl<E: Engine> Daemon<E> {
                 "data_written": written,
                 "data_removed": removed,
                 "reload_ms": reload_ms,
+                "pack_sha1": pack.as_ref().map(|u| u.sha1.clone()),
                 "ms": started.elapsed().as_millis(),
             }),
         );
@@ -305,6 +327,101 @@ impl<E: Engine> Daemon<E> {
         } else {
             (0, None)
         };
+    }
+
+    /// PL: Przydział slotów i paczka zasobów dla commita; `None`, gdy oba są już takie same.
+    /// Wszystko sprawdzone, zanim cokolwiek zostanie zapisane.
+    /// EN: The slot assignment and resource pack for a commit; `None` when both are already the
+    /// same. Everything is checked before anything is written.
+    fn pack_update(
+        &self,
+        head: &str,
+        files: &[String],
+    ) -> Result<Option<PackUpdate>, (DiagError, String)> {
+        let file = self.slots_file();
+        let current =
+            Slots::read(&file).map_err(|e| (e, "hot-state/slots.json nieczytelny".to_owned()))?;
+        let declared = slots::declared_blocks(files);
+        let mut next = current.clone();
+        next.assign(&declared)
+            .map_err(|e| (e, "pula slotów pełna — szczegóły w hot status".to_owned()))?;
+        let mut langs: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        let mut looks = BTreeMap::new();
+        for block in &declared {
+            let (id, name) = block.split_once(':').unwrap_or((block, ""));
+            let path = format!("mods/{id}/assets/blocks/{name}.png");
+            let texture = self.mirror.blob(head, &path).unwrap_or_default();
+            pack::check_texture(&path, &texture)
+                .map_err(|e| (e, format!("{path} nie jest obrazem PNG")))?;
+            if !langs.contains_key(id) {
+                let lang_path = format!("mods/{id}/assets/lang.json");
+                let lang = match self.mirror.blob(head, &lang_path) {
+                    Some(bytes) => pack::parse_lang(id, &bytes)
+                        .map_err(|e| (e, format!("{lang_path} z błędem")))?,
+                    None => BTreeMap::new(),
+                };
+                langs.insert(id.to_owned(), lang);
+            }
+            let shown = langs.get(id).and_then(|l| l.get(name)).cloned();
+            looks.insert(
+                block.clone(),
+                Look {
+                    texture,
+                    name: shown,
+                },
+            );
+        }
+        let zip = pack::zip(&pack::files(&next, &looks));
+        let sha1 = pack::sha1_hex(&zip);
+        let installed =
+            fs::read_to_string(pack::dir(&self.cfg.home).join("pack.sha1")).unwrap_or_default();
+        if next == current && installed.trim() == sha1 {
+            return Ok(None);
+        }
+        Ok(Some(PackUpdate {
+            slots_changed: next != current,
+            slots: next,
+            zip,
+            sha1,
+        }))
+    }
+
+    /// PL: Zapisuje sloty, potem paczkę; `hot slots` mówi `hot-core`, że przydział się zmienił.
+    /// EN: Writes the slots, then the pack; `hot slots` tells `hot-core` the assignment changed.
+    fn install_pack(&mut self, u: &PackUpdate, engine: bool) -> Result<(), (DiagError, String)> {
+        if u.slots_changed {
+            u.slots
+                .write(&self.slots_file())
+                .map_err(|e| (e, "nie zapisano hot-state/slots.json".to_owned()))?;
+        }
+        pack::install(&self.cfg.home, &u.zip)
+            .map_err(|e| (e, "nie zapisano paczki zasobów".to_owned()))?;
+        if u.slots_changed && engine {
+            self.engine
+                .command("hot slots")
+                .map_err(|e| (e, "silnik nie przyjął hot slots".to_owned()))?;
+        }
+        self.log.info(
+            "hotd installed the resource pack; players get it at their next join",
+            json!({ "sha1": u.sha1, "bytes": u.zip.len(), "blocks": u.slots.blocks.len() }),
+        );
+        Ok(())
+    }
+
+    fn refresh_pack(&mut self, head: &str) -> Result<(), (DiagError, String)> {
+        let files = self
+            .mirror
+            .files(head)
+            .map_err(|e| (e, "git nie odczytał commita".to_owned()))?;
+        if let Some(u) = self.pack_update(head, &files)? {
+            let running = self.engine.pid().is_some();
+            self.install_pack(&u, running)?;
+        }
+        Ok(())
+    }
+
+    fn slots_file(&self) -> PathBuf {
+        self.cfg.home.join("hot-state").join("slots.json")
     }
 
     /// PL: Które paczki danych zapisać i usunąć, żeby świat pasował do commita.
@@ -641,6 +758,14 @@ impl<E: Engine> Daemon<E> {
             self.log.error(&e);
         }
     }
+}
+
+/// PL: Nowy przydział slotów i paczka do zapisania. EN: A new slot assignment and pack to write.
+struct PackUpdate {
+    slots: Slots,
+    slots_changed: bool,
+    zip: Vec<u8>,
+    sha1: String,
 }
 
 /// PL: Potrzebne kawałki `hot-state/status.json` z `hot-core`. EN: The needed parts of

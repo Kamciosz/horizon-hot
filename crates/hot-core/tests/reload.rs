@@ -96,6 +96,33 @@ impl HotMod for Kolejka {
 hot_sdk::hot_mod!(Kolejka, id = "kolejka", version = "1", commands = "kolejka");
 "#;
 
+const BLOKI: &str = r#"
+use hot_sdk::{Event, Flow, Host, HotMod};
+struct Bloki;
+impl HotMod for Bloki {
+    fn init(_host: &mut Host<'_>, _state: &[u8]) -> Self {
+        Bloki
+    }
+    fn on_event(&mut self, host: &mut Host<'_>, event: &Event<'_>) -> Flow {
+        match event {
+            Event::Chat { player, text, .. } if *text == "postaw" => {
+                host.set_block([0, 0, 0], "bloki:lada");
+                host.give(*player, "bloki:lada", 1);
+                let seen = host.block([3, 3, 3]);
+                host.reply(&format!("widzę {seen}"));
+                Flow::Cancel
+            }
+            Event::DestroyBlock { block, .. } => {
+                host.reply(&format!("niszczę {block}"));
+                Flow::Cancel
+            }
+            _ => Flow::Continue,
+        }
+    }
+}
+hot_sdk::hot_mod!(Bloki, id = "bloki", version = "1");
+"#;
+
 const BAD_ABI: &str = r#"
 use hot_abi::{Buf, HostApi, ModVTable, Str};
 extern "C" fn init(_: &HostApi, _: Str) -> *mut std::ffi::c_void { std::ptr::null_mut() }
@@ -144,6 +171,7 @@ fn build_mods() -> Result<PathBuf, Box<dyn Error>> {
         ),
         ("gadula", GADULA.to_owned(), "hot-sdk"),
         ("kolejka", KOLEJKA.to_owned(), "hot-sdk"),
+        ("bloki", BLOKI.to_owned(), "hot-sdk"),
         ("zle_abi", BAD_ABI.to_owned(), "hot-abi"),
     ];
     let mut members = Vec::new();
@@ -241,10 +269,14 @@ extern "C" fn f_players(
     };
     each(user, &gracz);
 }
-extern "C" fn f_set_block(_: *mut c_void, _: &[i32; 3], _: Str) -> bool {
+extern "C" fn f_set_block(ctx: *mut c_void, _: &[i32; 3], block: Str) -> bool {
+    fake(ctx)
+        .commands
+        .push(format!("set_block {}", text(block)));
     true
 }
-extern "C" fn f_give(_: *mut c_void, _: &Uuid, _: Str, count: u32) -> u32 {
+extern "C" fn f_give(ctx: *mut c_void, _: &Uuid, item: Str, count: u32) -> u32 {
+    fake(ctx).commands.push(format!("give {}", text(item)));
     count
 }
 extern "C" fn f_particles(
@@ -264,13 +296,19 @@ extern "C" fn f_run_later(ctx: *mut c_void, line: Str) {
         .commands
         .push(format!("HOST GOT run_later {}", text(line)));
 }
+/// PL: Na `[3, 3, 3]` stoi blok ze slotu 3. EN: Slot 3's block stands at `[3, 3, 3]`.
 extern "C" fn f_block(
     _: *mut c_void,
-    _: &[i32; 3],
+    pos: &[i32; 3],
     out: extern "C" fn(*mut c_void, Str),
     user: *mut c_void,
 ) {
-    out(user, Str::from_str("minecraft:air"));
+    let name = if *pos == [3, 3, 3] {
+        "hot_slots:slot_3"
+    } else {
+        "minecraft:air"
+    };
+    out(user, Str::from_str(name));
 }
 extern "C" fn f_data_dir(
     ctx: *mut c_void,
@@ -637,6 +675,46 @@ fn commands_from_player_events_run_on_the_next_tick() -> TestResult {
     );
     s.tick();
     assert_eq!(s.fake.commands.len(), 2, "the queue runs once");
+    s.stop();
+    Ok(())
+}
+
+#[test]
+fn mod_blocks_go_by_their_own_names() -> TestResult {
+    let home = Server::home("bloki");
+    fs::create_dir_all(home.join("hot-state"))?;
+    fs::write(
+        home.join("hot-state/slots.json"),
+        r#"{"blocks": {"bloki:lada": 3}}"#,
+    )?;
+    let mut s = Server::start(&home)?;
+    s.load_and_wait(&mod_file("bloki")?, |st| generation(st, "bloki") == Some(1))?;
+    s.fake.commands.clear();
+    assert_eq!(s.chat("postaw"), ["widzę bloki:lada".to_owned()]);
+    assert_eq!(
+        s.fake.commands,
+        [
+            "set_block hot_slots:slot_3".to_owned(),
+            "give hot_slots:slot_3".to_owned()
+        ]
+    );
+    s.fake.replies.clear();
+    let mut e = Event::new(kind::DESTROY_BLOCK);
+    e.player = [7; 16];
+    e.block = Str::from_str("hot_slots:slot_3");
+    s.send(&e);
+    assert_eq!(s.fake.replies, ["niszczę bloki:lada".to_owned()]);
+
+    // PL: Nowy przydział wchodzi po `hot slots`. EN: A new assignment applies after `hot slots`.
+    fs::write(home.join("hot-state/slots.json"), r#"{"blocks": {}}"#)?;
+    let (_, replies) = s.console("hot slots");
+    assert_eq!(
+        replies,
+        ["Bloki modów: 0 (hot-state/slots.json).".to_owned()]
+    );
+    s.fake.commands.clear();
+    s.chat("postaw");
+    assert_eq!(s.fake.commands[0], "set_block bloki:lada");
     s.stop();
     Ok(())
 }

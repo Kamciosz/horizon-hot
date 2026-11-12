@@ -17,8 +17,6 @@ pub struct Change {
     /// PL: Zmiana wspólna dla wszystkich modów (`Cargo.lock` w korzeniu itp.).
     /// EN: A change shared by every mod (the root `Cargo.lock` and so on).
     pub all_code: bool,
-    /// PL: Mody ze zmienionym `assets/` (M5). EN: Mods with a changed `assets/` (M5).
-    pub assets: BTreeSet<String>,
     /// PL: Zmiana w `native/` (podmiana silnika, M8). EN: A change in `native/` (engine swap, M8).
     pub native: bool,
     /// PL: Zmiana w `hot.toml` (M6). EN: A change in `hot.toml` (M6).
@@ -70,10 +68,10 @@ pub fn classify<S: AsRef<str>>(paths: &[S]) -> Change {
                     continue;
                 }
                 let set = match rest[0] {
-                    // PL: Paczki danych porównuje `data.rs` ze światem, nie z listą zmian.
-                    // EN: `data.rs` compares data packs with the world, not with the change list.
-                    "data" => continue,
-                    "assets" => &mut c.assets,
+                    // PL: Paczki danych porównuje `data.rs` ze światem, a paczkę zasobów `pack.rs`
+                    // po sha1, nie z listą zmian. EN: `data.rs` compares data packs with the world
+                    // and `pack.rs` the resource pack by sha1, not with the change list.
+                    "data" | "assets" => continue,
                     // PL: Wszystko inne w katalogu moda (src/, Cargo.toml, mod.toml, build.rs)
                     // wpływa na kod. EN: Everything else in the mod folder affects the code.
                     _ => &mut c.code,
@@ -118,12 +116,6 @@ pub fn plan(change: &Change, in_repo: &BTreeSet<String>, active: &BTreeSet<Strin
     let unload = active.difference(in_repo).cloned().collect();
     let mut deferred = Vec::new();
     let list = |s: &BTreeSet<String>| s.iter().cloned().collect::<Vec<_>>().join(", ");
-    if !change.assets.is_empty() {
-        deferred.push(format!(
-            "zmiana assets/ w: {} — paczka zasobów dojdzie w M5",
-            list(&change.assets)
-        ));
-    }
     if change.native {
         deferred.push("zmiana native/ — podmiana silnika dojdzie w M8".to_owned());
     }
@@ -197,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn assets_native_and_config_are_deferred_and_data_is_not_code() {
+    fn native_and_config_are_deferred_and_data_and_assets_are_not_code() {
         let c = classify(&[
             "mods/a/data/recipe.json",
             "mods/a/assets/model.json",
@@ -207,7 +199,7 @@ mod tests {
         assert!(c.code.is_empty());
         let p = plan(&c, &set(&["a"]), &set(&["a"]));
         assert!(p.load.is_empty());
-        assert_eq!(p.deferred.len(), 3, "{:?}", p.deferred);
+        assert_eq!(p.deferred.len(), 2, "{:?}", p.deferred);
     }
 
     #[test]

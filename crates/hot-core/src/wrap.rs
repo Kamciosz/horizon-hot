@@ -1,5 +1,6 @@
 //! PL: Tabela gospodarza dla jednego moda na czas jednego wywołania. Większość funkcji idzie
-//! prosto do tabeli `hot-host`. Inaczej działa pięć:
+//! prosto do tabeli `hot-host`. `block`, `set_block` i `give` tłumaczą nazwy bloków modów
+//! (`<id>:<nazwa>` ↔ `hot_slots:slot_N`, M5.1). Inaczej działa też pięć:
 //! - `log` zapisuje wpis w logu `hot-core` z id moda i generacją (D27), potem przekazuje go silnikowi;
 //! - `data_dir` zwraca `hot-data/<mod>/` zamiast katalogu rdzenia;
 //! - `run_later` dopisuje komendę do kolejki rdzenia, wykonywanej na początku następnego ticku;
@@ -7,7 +8,8 @@
 //! - `reply` w odłożonej komendzie gracza (D6a) idzie do tego gracza przez `tell`.
 //!
 //! EN: The host table for one mod during one call. Most functions go straight to the `hot-host`
-//! table. Five differ: `log` writes the entry to the `hot-core` log with the mod id and generation
+//! table; `block`, `set_block` and `give` translate mod block names (`<id>:<name>` ↔
+//! `hot_slots:slot_N`, M5.1). Five more differ: `log` writes the entry to the `hot-core` log with the mod id and generation
 //! (D27) before passing it to the engine; `data_dir` returns `hot-data/<mod>/` instead of the
 //! core's folder; `run_later` adds the command to the core's queue, run at the start of the next
 //! tick; `tell`, when the engine refuses (D6: outside the command hook), sends `tellraw` on the
@@ -22,6 +24,7 @@ use hot_diag::{DiagError, Logger};
 use serde_json::json;
 
 use crate::codes;
+use crate::slots::SlotNames;
 
 /// PL: Kontekst wywołania moda. EN: The context of one mod call.
 pub struct ModCall<'a> {
@@ -37,6 +40,8 @@ pub struct ModCall<'a> {
     /// PL: Gracz odłożonej komendy (D6a): `reply` idzie do niego przez `tell`.
     /// EN: The player of a deferred command (D6a): `reply` goes to them through `tell`.
     pub reply_to: Option<Uuid>,
+    /// PL: Nazwy bloków modów. EN: Mod block names.
+    pub slots: &'a SlotNames,
 }
 
 /// PL: Komenda odłożona na następny tick i mod, który ją zlecił (do logu przy błędzie).
@@ -213,9 +218,28 @@ extern "C" fn block(
     out: extern "C" fn(*mut c_void, Str),
     user: *mut c_void,
 ) {
+    /// PL: Odpowiedź silnika w drodze do moda, z nazwą przetłumaczoną.
+    /// EN: The engine's answer on its way to the mod, with the name translated.
+    struct Relay<'a> {
+        out: extern "C" fn(*mut c_void, Str),
+        user: *mut c_void,
+        slots: &'a SlotNames,
+    }
+    extern "C" fn relay(ptr: *mut c_void, name: Str) {
+        // SAFETY: `ptr` to `Relay` z ramki `block` niżej, żywy przez całe wywołanie silnika.
+        // EN: `ptr` is the `Relay` in the `block` frame below, alive for the whole engine call.
+        let r = unsafe { &*ptr.cast::<Relay<'_>>() };
+        let name = text(name);
+        (r.out)(r.user, Str::from_str(r.slots.to_mod(&name)));
+    }
     // SAFETY: opis `call`. EN: see `call`.
     let c = unsafe { call(ctx) };
-    (c.outer.block)(c.outer.ctx, pos, out, user);
+    let mut r = Relay {
+        out,
+        user,
+        slots: c.slots,
+    };
+    (c.outer.block)(c.outer.ctx, pos, relay, (&raw mut r).cast());
 }
 
 extern "C" fn data_dir(ctx: *mut c_void, out: extern "C" fn(*mut c_void, Str), user: *mut c_void) {
@@ -245,13 +269,20 @@ extern "C" fn data_dir(ctx: *mut c_void, out: extern "C" fn(*mut c_void, Str), u
 extern "C" fn set_block(ctx: *mut c_void, pos: &[i32; 3], block: Str) -> bool {
     // SAFETY: opis `call`. EN: see `call`.
     let c = unsafe { call(ctx) };
-    (c.outer.set_block)(c.outer.ctx, pos, block)
+    let block = text(block);
+    (c.outer.set_block)(c.outer.ctx, pos, Str::from_str(c.slots.to_engine(&block)))
 }
 
 extern "C" fn give(ctx: *mut c_void, player: &Uuid, item: Str, count: u32) -> u32 {
     // SAFETY: opis `call`. EN: see `call`.
     let c = unsafe { call(ctx) };
-    (c.outer.give)(c.outer.ctx, player, item, count)
+    let item = text(item);
+    (c.outer.give)(
+        c.outer.ctx,
+        player,
+        Str::from_str(c.slots.to_engine(&item)),
+        count,
+    )
 }
 
 extern "C" fn particles(

@@ -10,10 +10,10 @@ Gdzie co leży i dlaczego. Stan: zbudowane są `hot-abi`, `hot-diag`, `hot-sdk`,
 | `hot-diag` | biblioteka + CLI | logi JSONL z kodami błędów, panika w logu, `hot report` (szkielet: `hot-diag report`) | wszyscy oprócz `hot-host` |
 | `hot-sdk` | biblioteka dla autorów modów | makro `hot_mod!`, bezpieczne opakowania ABI, `catch_unwind` | `hot-abi` |
 | `hot-host` | w silniku (mod natywny wkompilowany przez `native-build`) | ładuje `hot-core` przy starcie serwera, przekazuje mu haki Horizona, podmienia rdzeń (`hot core load`) | silnik, `hot-core` |
-| `hot-core` | w silniku (`cdylib`) | ładuje generacje modów gorących (`hot load`), stan między generacjami, powrót po panice, `hot-state/status.json`; sloty w M4 | `hot-host`, mody, `hotd` (przez pliki i konsolę) |
-| `hotd` | usługa systemd, tło | repo serwera, podpisane mody z gałęzi `hot-builds` (ADR 0008), `hot-state/hotd.json`; w planie: aktualizacje, kopie, hamulec MSPT | GitHub (git), `horizon-server cmd`, `hot-core` (przez `status.json`) |
+| `hot-core` | w silniku (`cdylib`) | ładuje generacje modów gorących (`hot load`), stan między generacjami, powrót po panice, `hot-state/status.json`; nazwy bloków modów ze `slots.json` | `hot-host`, mody, `hotd` (przez pliki i konsolę) |
+| `hotd` | usługa systemd, tło | repo serwera, podpisane mody z gałęzi `hot-builds` (ADR 0008), `hot-state/hotd.json`, przydział slotów i paczka zasobów; w planie: aktualizacje, kopie, hamulec MSPT | GitHub (git), `horizon-server cmd`, `hot-core` (przez `status.json`) |
 | `hot-proxy` (planowany) | usługa systemd, port 25565 | logowanie graczy, trzymanie połączeń przy podmianie i awarii silnika | gracze, silniki |
-| `hot-pack` (planowany) | usługa systemd, port 8131 | paczka zasobów z sha1 | gracze |
+| `hotd serve-pack` | usługa systemd, port 8131 | paczka zasobów z `hot-state/pack/pack.zip` (buduje ją `hotd`) | gracze |
 | `hot-play` (planowany) | komputer gracza | instalacja, aktualizacja i naprawa gry, start na serwerze | `horizon-launcher` |
 
 ## Najważniejsze ścieżki

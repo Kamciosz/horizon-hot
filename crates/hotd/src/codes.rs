@@ -28,3 +28,10 @@ pub const STATE_FILE: Code = Code::new("HOT-E0207");
 /// PL: Paczki danych moda nie da się przygotować albo silnik jej nie włączył (M3).
 /// EN: A mod's data pack cannot be prepared or the engine did not enable it (M3).
 pub const DATA_PACK_FAILED: Code = Code::new("HOT-E0208");
+
+/// PL: W puli slotów brakuje miejsca na nowe bloki (M5). EN: The slot pool has no room left (M5).
+pub const POOL_FULL: Code = Code::new("HOT-E0209");
+
+/// PL: Paczki zasobów nie da się zbudować albo podać graczom (M5). EN: The resource pack cannot be
+/// built or served (M5).
+pub const PACK_FAILED: Code = Code::new("HOT-E0210");

@@ -11,7 +11,7 @@ Bloki i przedmioty z modów gorących nie mogą dopisać się do rejestrów gry 
 
 ## Rozmiar
 
-**Do decyzji użytkownika** (`PLAN.md`, sekcja 8). Zmierzone na Macu (S7):
+Na razie 1024 bloki i 2048 przedmiotów (stałe `hotd::slots::BLOCKS` i `ITEMS`, wersja puli `1024.2048.0`). Ostateczny rozmiar ustali próba S13 (M0.19): największa pula, przy której podmiana silnika trwa krócej niż 1 s. Dziś pula 1024/2048 wydłuża ją do 1,16–1,34 s, więc budżet z ADR 0004 nie jest jeszcze spełniony. Zmierzone na Macu (S7):
 
 | Pula (bloki/przedmioty) | `.hmod` | Start klienta | Podmiana silnika | Podmiana z nowym silnikiem |
 |---|---|---|---|---|
@@ -22,6 +22,28 @@ Bloki i przedmioty z modów gorących nie mogą dopisać się do rejestrów gry 
 - „Podmiana z nowym silnikiem” to podmiana z modem natywnym, nowym `hot-host` albo aktualizacją Horizona. Nowy plik programu unieważnia cache treści modów, więc silnik buduje go przy starcie. Tak jest też od Nightly 2026-11-07, w którym cache dostał osobny katalog na zestaw modów (`docs/aktualizacje.md`). Szacunek: pauza z ciepłym cache plus różnica między zimnym a ciepłym startem serwera.
 - Pamięć z pełną pulą: serwer ok. +230 MB, klient ok. +250 MB.
 - Powiększenie puli później zmienia `content_identity`. Każdy gracz potrzebuje wtedy nowego pliku (aplikacja gracza pobiera go sama) i musi wejść ponownie.
+
+## Budowa i instalacja
+
+```bash
+hotd slots-source /tmp/hot-slots        # wypisuje wersję puli
+cd /tmp/hot-slots && cargo horizon-mod build
+```
+
+Build jest powtarzalny: to samo źródło daje ten sam SHA-256, więc serwer i gracze budują plik sami. Gotowy plik idzie do `horizon-mods/` serwera i instancji gracza, a w `horizon-mods.txt` obok musi być wiersz `mod.hot_slots:true`.
+
+## Przydział
+
+- Blok deklaruje plik `mods/<id>/assets/blocks/<nazwa>.png` w repo serwera. `hotd` daje mu kolejny wolny slot i zapisuje to w `hot-state/slots.json` (`{"pool": {...}, "blocks": {"<id>:<nazwa>": N}}`). Tylko `hotd` pisze ten plik.
+- Usunięty mod nie zwalnia slotu. Gdy wróci, dostaje ten sam numer.
+- Pełna pula: commit nie wchodzi, nic się nie zmienia, `HOT-E0209` w `hot status`.
+- `hot-core` czyta przydział przy starcie i po komendzie `hot slots`, którą `hotd` wysyła po każdej zmianie. Mod z kodem pisze `<id>:<nazwa>` w `set_block`, `give` i `block`, a w zdarzeniach dostaje tę samą nazwę.
+- Pliki `data/` (przepisy, tagi, tabele łupów) muszą na razie podawać `hot_slots:slot_N` z `slots.json`. Tłumaczenia w plikach danych jeszcze nie ma.
+
+## Paczka zasobów
+
+- `hotd` buduje `hot-state/pack/pack.zip` i `pack.sha1` przy każdym commicie, który zmienia wygląd. Paczka ma teksturę, model `cube_all` i nazwę z `mods/<id>/assets/lang.json` (`{"<nazwa>": "…"}`) dla każdego przydzielonego bloku, którego plik jest w repo. Zły obraz albo zły `lang.json` zatrzymuje commit (`HOT-E0210`).
+- `hotd serve-pack` (port 8131) wysyła ją pod `/pack.zip`. W `server.toml`, w `[properties]`: `resource-pack = "http://<adres>:8131/pack.zip"` i `require-resource-pack = true`, **bez** `resource-pack-sha1`. Silnik czyta te pola tylko przy starcie, a klient bez sha1 pobiera paczkę przy każdym wejściu, więc nowy wygląd dochodzi przy następnym wejściu bez restartu silnika.
 
 ## Zasady
 

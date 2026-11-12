@@ -185,7 +185,13 @@ impl Mirror {
     /// EN: A file from the `hot-builds` branch; `None` when it is absent.
     #[must_use]
     pub fn build_file(&self, path: &str) -> Option<Vec<u8>> {
-        let spec = format!("refs/remotes/origin/{BUILDS_BRANCH}:{path}");
+        self.blob(&format!("refs/remotes/origin/{BUILDS_BRANCH}"), path)
+    }
+
+    /// PL: Treść pliku `path` w `rev`; `None`, gdy go nie ma. EN: The content of `path` at `rev`.
+    #[must_use]
+    pub fn blob(&self, rev: &str, path: &str) -> Option<Vec<u8>> {
+        let spec = format!("{rev}:{path}");
         let out = Command::new("git")
             .arg("--git-dir")
             .arg(&self.dir)

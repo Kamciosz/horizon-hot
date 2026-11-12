@@ -115,5 +115,19 @@ pub fn render(home: &Path) -> String {
             }
         }
     }
+    if let Some(s) = read(&state.join("slots.json")) {
+        let blocks = s["blocks"].as_object().cloned().unwrap_or_default();
+        let sha1 = std::fs::read_to_string(state.join("pack/pack.sha1")).unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "bloki modów: {} z {} (paczka zasobów {})",
+            blocks.len(),
+            s["pool"]["blocks"],
+            sha1.get(..7).unwrap_or("brak")
+        );
+        for (name, slot) in &blocks {
+            let _ = writeln!(out, "  {name} = hot_slots:slot_{slot}");
+        }
+    }
     out
 }

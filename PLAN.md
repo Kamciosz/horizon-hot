@@ -360,7 +360,13 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 
 ### M5 — Sloty i wygląd (D8, D9)
 - [ ] M5.1 `hot-slots.hmod` w rozmiarze z S7; przydział tylko dopisywany.
+  - Źródło puli generuje `hotd slots-source <katalog>` (stałe `hotd::slots::BLOCKS`/`ITEMS`, wersja z nich wyliczona), plik buduje `cargo horizon-mod build`. FAKT (Mac, 2026-11-13): dwa buildy tego samego źródła z różnych katalogów dają ten sam SHA-256, więc serwer i gracze budują go sami i dostają te same bajty.
+  - Blok moda deklaruje plik `mods/<id>/assets/blocks/<nazwa>.png` (tekstura na wszystkie ściany); nazwa w grze z `mods/<id>/assets/lang.json` (`{"<nazwa>": "…"}`). Przydział w `hot-state/slots.json` robi `hotd` (jedyny zapisujący), tylko dopisywany; pełna pula → `HOT-E0209`.
+  - Mod z kodem używa nazwy `<id>:<nazwa>`; `hot-core` tłumaczy ją na slot w `block`, `set_block` i `give` (bez zmiany ABI). Znana luka: przepisy i inne pliki `data/` muszą na razie wskazywać `hot_slots:slot_N`.
 - [ ] M5.2 `hot-pack`: budowa paczki z `assets/`, sha1, serwowanie na 8131.
+  - Paczka powtarzalna (posortowane wpisy, stała data), `hot-state/pack/pack.zip` i `pack.sha1`; serwuje ją `hotd serve-pack` (osobny proces, D9).
+  - FAKT (źródła Horizona, `lan/conn.rs`, `NetConfig` z `server.toml` przy starcie): silnik czyta adres i sha1 paczki tylko przy starcie. Dlatego `server.toml` ma adres bez sha1: klient bez sha1 pobiera paczkę przy każdym wejściu (`server_packs/download.rs`), więc nowy wygląd dochodzi przy następnym wejściu bez restartu silnika. Sha1 przyda się `hot-proxy` (M8), które poda aktualny przy logowaniu.
+  - Bloki ze slotów: haki `tick_block`/`random_tick` z filtrem slotów — po sprawdzeniu wyglądu, nie blokują M5.
 - Sprawdzenie: nowy blok z repo stawiany bez restartu; po następnym wejściu ma swój model (zrzut); podmiana silnika nie zmienia przydziału.
 
 ### M6 — Serwer na ThinkCentre: instalator i priorytety (D16, D25)

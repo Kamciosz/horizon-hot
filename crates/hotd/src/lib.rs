@@ -18,7 +18,9 @@ pub mod daemon;
 pub mod data;
 pub mod engine;
 pub mod git;
+pub mod pack;
 pub mod sign;
+pub mod slots;
 pub mod state;
 pub mod status;
 

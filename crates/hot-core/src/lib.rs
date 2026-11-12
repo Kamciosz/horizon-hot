@@ -17,6 +17,7 @@
 pub mod codes;
 mod core;
 pub mod loader;
+mod slots;
 pub mod store;
 mod wrap;
 

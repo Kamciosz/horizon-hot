@@ -26,7 +26,7 @@ Właściciel: Szymon Sosnowski. Serwer stoi na współdzielonym ThinkCentre z Ub
 | `hot-core` | logika gospodarza: mody, sloty, komenda `/hot`; sam przeładowywalny |
 | `hotd` | demon w tle: git, CI, aktualizacje, kopie, hamulec MSPT |
 | `hot-proxy` | proxy przed silnikiem; trzyma graczy przy podmianie i awarii silnika |
-| `hot-pack` | serwer HTTP paczki zasobów |
+| `hotd serve-pack` | serwer HTTP paczki zasobów (dawniej planowany `hot-pack`) |
 | `hot-play` | aplikacja gracza (terminal) |
 | `hot-diag` | wspólne logi i raporty błędów |
 | slot | z góry zarejestrowany pusty blok/przedmiot z `hot-slots.hmod`, któremu mod gorący nadaje nazwę, wygląd i zachowanie |
@@ -46,12 +46,11 @@ crates/hot-host/   mod natywny w silniku: ładuje hot-core, przekazuje haki; poz
 examples/licznik/  przykładowy mod gorący: licznik ticków, stan przez przeładowanie
 examples/sklep/    przykład: komenda /sklep, monety, give, tell poza komendą
 examples/teleport-blok/  przykład: klik w magnetyt, set_block, particles, run_later
-crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; data/ → paczki danych świata; hotd status
+crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; data/ → paczki danych świata; assets/ → sloty i paczka zasobów; hotd status
 scripts/           server-install.sh (instalator serwera na Ubuntu, D25); hot-build.sh i
                    hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)
 templates/server-repo/  pliki do repo serwera: hot.yml (kopiuje instalator) i README z układem repo dla autorów modów
 crates/hot-proxy/  proxy                                       (planowany)
-crates/hot-pack/   paczka zasobów                              (planowany)
 crates/hot-play/   aplikacja gracza                            (planowany)
 docs/bledy/        katalog kodów błędów HOT-EXXXX (test: crates/hot-diag/tests/catalog.rs)
 docs/adr/          decyzje (jedna decyzja = jeden plik)

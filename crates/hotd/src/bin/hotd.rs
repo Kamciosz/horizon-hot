@@ -1,7 +1,9 @@
 //! PL: Program `hotd`: `run` (usługa systemd, krok co 10 s), `once` (jeden krok, do testów
-//! i ręcznej naprawy), `status` (to samo co `hot status`).
+//! i ręcznej naprawy), `status` (to samo co `hot status`), `serve-pack` (paczka zasobów dla
+//! graczy, osobna usługa, D9) i `slots-source` (źródło `hot-slots.hmod`, M5.1).
 //! EN: The `hotd` program: `run` (systemd service, a step every 10 s), `once` (a single step, for
-//! tests and manual repair), `status` (same as `hot status`).
+//! tests and manual repair), `status` (same as `hot status`), `serve-pack` (the resource pack for
+//! players, a separate service, D9) and `slots-source` (the `hot-slots.hmod` source, M5.1).
 
 #![allow(clippy::print_stdout, clippy::print_stderr)] // PL: program wiersza poleceń. EN: a CLI program.
 
@@ -17,6 +19,8 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
                  [--engine-dir DIR] [--allowed-signers FILE] [--interval SECONDS]
        hotd once (same options; one step, then exit)
        hotd status [--home DIR]
+       hotd serve-pack [--home DIR] [--port 8131]
+       hotd slots-source DIR   (then: cd DIR && cargo horizon-mod build)
 
 --home is the engine's HOT_HOME (hot-state/ and logs/ live there; default $HOT_HOME).
 --engine-dir is the horizon-server --dir of the engine (default: --home); mod data packs go
@@ -32,6 +36,7 @@ struct Args {
     engine_dir: Option<PathBuf>,
     allowed_signers: Option<PathBuf>,
     interval: u64,
+    port: u16,
 }
 
 fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -45,6 +50,7 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         engine_dir: None,
         allowed_signers: None,
         interval: 10,
+        port: 8131,
     };
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or(format!("{flag} needs a value"));
@@ -55,6 +61,7 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--engine" => a.engine = value()?.into(),
             "--engine-dir" => a.engine_dir = Some(value()?.into()),
             "--allowed-signers" => a.allowed_signers = Some(value()?.into()),
+            "--port" => a.port = value()?.parse().map_err(|e| format!("--port: {e}"))?,
             "--interval" => {
                 a.interval = value()?.parse().map_err(|e| format!("--interval: {e}"))?;
             }
@@ -65,7 +72,29 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
 }
 
 fn main() -> ExitCode {
-    let args = match parse(std::env::args().skip(1)) {
+    let mut argv = std::env::args().skip(1).peekable();
+    if argv.peek().map(String::as_str) == Some("slots-source") {
+        let Some(dir) = argv.nth(1) else {
+            eprintln!("hotd: slots-source needs a folder\n\n{USAGE}");
+            return ExitCode::from(2);
+        };
+        return match hotd::slots::write_pool_source(std::path::Path::new(&dir)) {
+            Ok(()) => {
+                println!(
+                    "hot_slots {} ({} blocks, {} items) in {dir}",
+                    hotd::slots::version(),
+                    hotd::slots::BLOCKS,
+                    hotd::slots::ITEMS
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("hotd: cannot write {dir}: {e} (the folder must not exist)");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let args = match parse(argv) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("hotd: {e}\n\n{USAGE}");
@@ -82,6 +111,9 @@ fn main() -> ExitCode {
     if args.command == "status" {
         print!("{}", hotd::status::render(&home));
         return ExitCode::SUCCESS;
+    }
+    if args.command == "serve-pack" {
+        return serve_pack(&home, args.port);
     }
     if args.command != "run" && args.command != "once" {
         eprintln!("hotd: unknown command {}\n\n{USAGE}", args.command);
@@ -117,4 +149,42 @@ fn main() -> ExitCode {
         }
         std::thread::sleep(Duration::from_secs(args.interval.max(1)));
     }
+}
+
+/// PL: Usługa paczki zasobów; błąd portu idzie do `logs/hotd-pack.jsonl` z kodem `HOT-E0210`.
+/// EN: The resource pack service; a port error goes to `logs/hotd-pack.jsonl` as `HOT-E0210`.
+fn serve_pack(home: &std::path::Path, port: u16) -> ExitCode {
+    let log = match hot_diag::Logger::open(
+        hot_diag::LogConfig::new("hotd-pack", hotd::VERSION, home.join("logs")),
+        hot_diag::Redactor::new(),
+    ) {
+        Ok(l) => std::sync::Arc::new(l),
+        Err(e) => {
+            eprintln!("hotd: {}", serde_json::Value::Object(e.fields()));
+            return ExitCode::FAILURE;
+        }
+    };
+    hot_diag::install_panic_hook(std::sync::Arc::clone(&log));
+    let listener = match std::net::TcpListener::bind(("0.0.0.0", port)) {
+        Ok(l) => l,
+        Err(e) => {
+            let err = hot_diag::DiagError::new(
+                hotd::codes::PACK_FAILED,
+                format!("hotd serve-pack cannot listen on port {port}"),
+                "Stop what holds the port (ss -ltnp | grep PORT) or start with --port N and set the same port in resource-pack in server.toml (an engine restart applies it)",
+            )
+            .caused_by(&e)
+            .context("port", port)
+            .state("Players get no resource pack: slot blocks look like missing textures");
+            log.error(&err);
+            eprintln!("hotd: {}", serde_json::Value::Object(err.fields()));
+            return ExitCode::FAILURE;
+        }
+    };
+    log.info(
+        "hotd serve-pack is listening",
+        serde_json::json!({ "port": port, "file": hotd::pack::dir(home).join("pack.zip") }),
+    );
+    hotd::pack::serve(&listener, home, &log);
+    ExitCode::SUCCESS
 }

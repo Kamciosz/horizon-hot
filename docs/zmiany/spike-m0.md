@@ -41,6 +41,8 @@
 - `examples/sklep` (monety za czas gry, `/sklep kup`, `hot sklep daj`) i `examples/teleport-blok` (magnetyt przenosi gracza do celu).
 - Ostrzeżenia `hot-core` w logu: mod odpowiada na komendę gracza bez deklaracji w `commands` (raz na mod i komendę) oraz dwa mody deklarują tę samą komendę. Każde z poprawką dla agenta.
 - `templates/server-repo/README.md` i dokumentacja `hot_mod!`: serwer nie sprawdza uprawnień do komend modów, mod robi to sam po `permission`.
+- Bloki modów (M5): plik `mods/<id>/assets/blocks/<nazwa>.png` dostaje slot z puli, a `hotd` zapisuje przydział w `hot-state/slots.json` (tylko dopisywany). Mod z kodem używa nazwy `<id>:<nazwa>`, a `hot-core` tłumaczy ją na `hot_slots:slot_N` i z powrotem; komenda `hot slots` wczytuje przydział ponownie.
+- Paczka zasobów z repo serwera: `hotd` buduje powtarzalny `hot-state/pack/pack.zip` (tekstura, model, nazwa z `lang.json`) bez czekania na CI, a `hotd serve-pack` serwuje go na porcie 8131. `hotd slots-source <katalog>` tworzy źródło `hot-slots.hmod`. Kody `HOT-E0209` (pełna pula) i `HOT-E0210` (zły obraz albo `lang.json`).
 
 ### Zmienione
 - CI uruchamia się też po pushu na gałęzie `spike/**`, nie tylko na `main` i w PR-ach.

@@ -19,6 +19,7 @@ use hot_sdk::{Flow, Host, HotMod};
 use serde_json::{json, Value};
 
 use crate::loader::{self, Gen, Outcome};
+use crate::slots::SlotNames;
 use crate::store::{self, ModRecord, ModsFile, Paths};
 use crate::wrap::{Later, ModCall};
 use crate::{codes, VERSION};
@@ -76,6 +77,8 @@ pub struct Core {
     cancelled_by: Option<String>,
     /// PL: Pary (mod, komenda), o których już ostrzegano. EN: (mod, command) pairs already warned.
     warned: BTreeSet<(String, String)>,
+    /// PL: Nazwy bloków modów z `hot-state/slots.json` (M5.1). EN: Mod block names (M5.1).
+    slots: SlotNames,
 }
 
 impl HotMod for Core {
@@ -108,7 +111,9 @@ impl HotMod for Core {
             reply_to: None,
             cancelled_by: None,
             warned: BTreeSet::new(),
+            slots: SlotNames::default(),
         };
+        core.read_slots();
         core.restore(host.raw());
         core
     }
@@ -142,7 +147,16 @@ impl HotMod for Core {
             kind::PLAYER_LEFT => self.deferred.retain(|d| d.player != event.player),
             _ => {}
         }
-        let flow = self.dispatch(api, event);
+        // PL: Blok ze slotu mod widzi pod swoją nazwą; napis żyje do końca tej funkcji.
+        // EN: A slot block reaches mods under their own name; the string lives until the end here.
+        // SAFETY: napis ważny w wywołaniu. EN: the string is valid for the call.
+        let engine_block = unsafe { event.block.as_str() }.unwrap_or("");
+        let mod_block = self.slots.to_mod(engine_block).to_owned();
+        let mut translated = *event;
+        if mod_block != engine_block {
+            translated.block = Str::from_str(&mod_block);
+        }
+        let flow = self.dispatch(api, &translated);
         if event.kind == kind::PLAYER_COMMAND && flow == Flow::Cancel {
             self.warn_undeclared(event);
         }
@@ -337,6 +351,7 @@ impl Core {
             panic: None,
             later: &self.later,
             reply_to: self.reply_to,
+            slots: &self.slots,
         };
         let api = call.api();
         let result = f(&api);
@@ -750,6 +765,13 @@ impl Core {
                     out.push(format!("Nie ma aktywnego moda {rest}."));
                 }
             }
+            "slots" => {
+                self.read_slots();
+                out.push(format!(
+                    "Bloki modów: {} (hot-state/slots.json).",
+                    self.slots.len()
+                ));
+            }
             "list" | "status" => {
                 out.push(format!(
                     "hot-core {VERSION}, ABI {}, mody: {}, w kolejce: {}",
@@ -786,7 +808,7 @@ impl Core {
             }
             _ => {
                 out.push(
-                    "Użycie: hot load <plik> | hot unload <mod> | hot list | hot <mod> [argumenty]"
+                    "Użycie: hot load <plik> | hot unload <mod> | hot list | hot slots | hot <mod> [argumenty]"
                         .to_owned(),
                 );
             }
@@ -798,6 +820,15 @@ impl Core {
     }
 
     // ---------- PL: pliki stanu i błędy / EN: state files and errors ----------
+
+    /// PL: Przydział slotów od `hotd`; przy błędzie zostaje poprzedni. EN: The slot assignment
+    /// from `hotd`; on an error the previous one stays.
+    fn read_slots(&mut self) {
+        match SlotNames::read(&self.paths.state().join("slots.json")) {
+            Ok(names) => self.slots = names,
+            Err(e) => self.error(&e),
+        }
+    }
 
     fn panicked(
         &mut self,

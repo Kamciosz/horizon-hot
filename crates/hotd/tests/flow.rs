@@ -245,10 +245,16 @@ impl World {
 
     /// PL: Commit na `main`: zapisuje pliki, usuwa ścieżki, wypycha. EN: A commit on `main`.
     fn commit(&self, write: &[(&str, &str)], remove: &[&str]) -> String {
-        for (path, text) in write {
+        let bytes: Vec<(&str, &[u8])> = write.iter().map(|(p, t)| (*p, t.as_bytes())).collect();
+        self.commit_bytes(&bytes, remove)
+    }
+
+    /// PL: Jak `commit`, ale pliki binarne (obrazy PNG). EN: Like `commit`, with binary files.
+    fn commit_bytes(&self, write: &[(&str, &[u8])], remove: &[&str]) -> String {
+        for (path, content) in write {
             let p = self.work.join(path);
             fs::create_dir_all(p.parent().unwrap()).unwrap();
-            fs::write(p, text).unwrap();
+            fs::write(p, content).unwrap();
         }
         for path in remove {
             git(&self.work, &["rm", "-r", "--quiet", path]);
@@ -712,4 +718,111 @@ fn bad_commit_puts_back_the_previous_data_packs() {
         ["reload"],
         "the restarted engine reloads the good packs"
     );
+}
+
+/// PL: Najkrótszy „PNG” dla `hotd`: sprawdza tylko sygnaturę; reszta odróżnia wersje.
+/// EN: The shortest "PNG" for `hotd`: only the signature is checked; the rest tells versions apart.
+fn png(tag: &str) -> Vec<u8> {
+    let mut b = b"\x89PNG\r\n\x1a\n".to_vec();
+    b.extend_from_slice(tag.as_bytes());
+    b
+}
+
+const LADA: &str = "mods/wyglad/assets/blocks/lada.png";
+const LANG: (&str, &str) = (
+    "mods/wyglad/assets/lang.json",
+    "{\"lada\": \"Lada sklepowa\"}",
+);
+
+fn read_slots(w: &World) -> Value {
+    serde_json::from_slice(&fs::read(w.home.join("hot-state/slots.json")).unwrap()).unwrap()
+}
+
+fn pack_zip(w: &World) -> Vec<u8> {
+    fs::read(w.home.join("hot-state/pack/pack.zip")).unwrap()
+}
+
+fn has(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+#[test]
+fn a_block_texture_gets_a_slot_and_a_pack_without_ci() {
+    let w = World::new("look");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let v1 = w.commit_bytes(&[(LADA, &png("v1")), (LANG.0, LANG.1.as_bytes())], &[]);
+    d.step();
+    assert_eq!(
+        d.state().applied.as_deref(),
+        Some(v1.as_str()),
+        "no CI needed"
+    );
+    assert_eq!(fake.take_commands(), ["hot slots"]);
+    assert_eq!(read_slots(&w)["blocks"]["wyglad:lada"], 0);
+    let zip = pack_zip(&w);
+    assert!(has(&zip, b"assets/hot_slots/textures/block/slot_0.png"));
+    assert!(has(&zip, &png("v1")));
+    assert!(has(&zip, b"Lada sklepowa"));
+    let sha1 = fs::read_to_string(w.home.join("hot-state/pack/pack.sha1")).unwrap();
+
+    // PL: Nowy wygląd tego samego bloku: ten sam slot, nowa paczka, silnik nic nie dostaje.
+    // EN: A new look for the same block: the same slot, a new pack, nothing for the engine.
+    w.commit_bytes(&[(LADA, &png("v2"))], &[]);
+    d.step();
+    assert!(fake.take_commands().is_empty());
+    assert_eq!(read_slots(&w)["blocks"]["wyglad:lada"], 0);
+    assert!(has(&pack_zip(&w), &png("v2")));
+    assert_ne!(
+        fs::read_to_string(w.home.join("hot-state/pack/pack.sha1")).unwrap(),
+        sha1
+    );
+
+    // PL: Mod usunięty: slot zostaje zajęty, paczka traci teksturę. Nowy blok dostaje kolejny.
+    // EN: The mod removed: its slot stays taken, the pack loses the texture. A new block gets the next.
+    w.commit(&[], &["mods/wyglad"]);
+    d.step();
+    assert!(!has(&pack_zip(&w), b"textures/block/slot_0.png"));
+    assert_eq!(read_slots(&w)["blocks"]["wyglad:lada"], 0);
+    w.commit_bytes(&[("mods/inny/assets/blocks/kamien.png", &png("k"))], &[]);
+    d.step();
+    assert_eq!(read_slots(&w)["blocks"]["inny:kamien"], 1);
+    w.commit_bytes(&[(LADA, &png("v3"))], &[]);
+    d.step();
+    assert_eq!(
+        read_slots(&w)["blocks"]["wyglad:lada"],
+        0,
+        "the old slot comes back"
+    );
+    assert!(
+        w.status_text().contains("wyglad:lada = hot_slots:slot_0"),
+        "{}",
+        w.status_text()
+    );
+}
+
+#[test]
+fn a_bad_texture_rejects_the_commit_and_changes_nothing() {
+    let w = World::new("look-bad");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let v1 = w.commit_bytes(&[(LADA, &png("v1"))], &[]);
+    d.step();
+    fake.take_commands();
+    let zip = pack_zip(&w);
+
+    let bad = w.commit_bytes(
+        &[
+            (LADA, b"GIF89a".as_slice()),
+            ("mods/wyglad/assets/blocks/nowy.png", &png("n")),
+        ],
+        &[],
+    );
+    d.step();
+    assert!(fake.take_commands().is_empty());
+    assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
+    assert!(d.state().failed.iter().any(|(c, _)| *c == bad));
+    assert_eq!(d.state().errors.last().unwrap()["code"], "HOT-E0210");
+    assert_eq!(pack_zip(&w), zip);
+    assert!(read_slots(&w)["blocks"].get("wyglad:nowy").is_none());
 }

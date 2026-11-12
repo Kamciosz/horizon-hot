@@ -6,6 +6,8 @@ Każdy commit na gałęzi serwera trafia na serwer bez restartu. Ten plik opisuj
 mods/<id>/Cargo.toml     mod z kodem (Rust, hot-api); buduje go CI (.github/workflows/hot.yml)
 mods/<id>/src/…
 mods/<id>/data/<przestrzeń nazw>/…   paczka danych: przepisy, łupy, tagi, funkcje, osiągnięcia
+mods/<id>/assets/blocks/<nazwa>.png  nowy blok z tą teksturą
+mods/<id>/assets/lang.json           nazwy bloków w grze: {"<nazwa>": "…"}
 .github/workflows/hot.yml   kopia z /srv/horizon/server-repo-files/ na serwerze
 ```
 
@@ -26,3 +28,12 @@ mods/<id>/data/<przestrzeń nazw>/…   paczka danych: przepisy, łupy, tagi, fu
 - Każdy plik `.json` musi być poprawnym JSON-em, a `data/` nie może mieć dowiązań symbolicznych; inaczej commit nie wchodzi (`HOT-E0208`, powód w `hot status`).
 - Wszystkie zmiany w `data/` z jednego commita wchodzą jednym `reload`. Na czas `reload` świat stoi (pomiar: `docs/sprzet.md` w horizon-hot); commit bez zmian w `data/` nie robi `reload`.
 - Plik, który serwer pominął (np. nieznany przedmiot w przepisie), widać w `hot status` jako „plik pominięty przez silnik”.
+
+## Nowe bloki (`assets/`)
+
+- Plik `mods/<id>/assets/blocks/<nazwa>.png` (PNG, najlepiej 16×16) dodaje blok. Serwer daje mu wolne miejsce z puli i buduje paczkę zasobów, bez czekania na CI.
+- Gracz widzi nowy wygląd po ponownym wejściu na serwer. Gra pyta wtedy o paczkę zasobów serwera; trzeba ją przyjąć.
+- W kodzie moda blok nazywa się `<id>:<nazwa>`, np. `set_block(pos, "sklep:lada")`, `give(gracz, "sklep:lada", 1)`, a `block(pos)` zwraca tę samą nazwę.
+- W plikach `data/` (przepisy, tagi, łupy) trzeba na razie podać nazwę z puli, `hot_slots:slot_<numer>`. Numer jest w `hot status` i w `hot-state/slots.json` na serwerze.
+- Blok ma kolizję, światło i twardość kamienia. Kształt inny niż sześcian i własne zachowanie przy ticku jeszcze nie działają.
+- Usunięcie pliku nie zwalnia miejsca w puli: gdy blok wróci, dostaje to samo. Plik, który nie jest PNG, albo zły `lang.json` zatrzymuje commit (`HOT-E0210`).
