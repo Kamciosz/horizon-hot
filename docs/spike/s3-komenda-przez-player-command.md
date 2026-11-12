@@ -40,6 +40,11 @@ spike-hot-s2: /sklep handled, tell=false
 ## Wnioski
 
 1. `Flow::Cancel` w `player_command` wycisza „Unknown command”. Komendy modów gorących idą tą drogą: `hot-host` pyta `hot-core`, czy któryś mod zna komendę.
-2. Odpowiedź na komendę: **tylko przez `event.replies`**. `Host::tell` do gracza, który wywołał komendę, zwraca `false` na serwerze dedykowanym. Przyczyna w kodzie Horizona: `native_tell` → `native_send_all` (`crates/horizon-client/src/game/native_server.rs:246`) sprawdza `lan_acting_uuid` i hub LAN; na serwerze dedykowanym w tym haku żaden warunek nie jest spełniony. Czy `tell` działa poza hakiem gracza (np. z `server_tick`) — NIEWIADOMA, sprawdzić w M4 testem.
+2. Odpowiedź na komendę: **tylko przez `event.replies`**. `Host::tell` do gracza, który wywołał komendę, zwraca `false` na serwerze dedykowanym. Przyczyna (z kodu Horizona, zgodna z obserwacją), ścieżki w `crates/horizon-client/src/game/`:
+   - `native_tell` → `native_send_all` (`native_server.rs:246-256`) wysyła przez `self.lan`, a dla „gracza, który działa” — przez `lan_acting_uuid`;
+   - na czas obsługi pakietów graczy hub jest wyjęty z `self.lan` (`lan.rs:2075`, `lan.rs:2218`: „the hub is back after the commands”) i przekazany do `guest_command` (`lan_actions.rs:3357`) jako parametr, więc `self.lan` jest wtedy `None`;
+   - `lan_acting_uuid` ustawiają tylko komendy wykonywane w imieniu gracza (`commands/world_cmds.rs:1973`), nie hak `player_command`.
+
+   Poza obsługą pakietów (np. z `server_tick`) hub jest na miejscu, więc `tell` powinien działać — HIPOTEZA, sprawdzić testem w M4.
 3. Logi z `eprintln!` w modzie natywnym trafiają do `logs/supervisor.log`, nie do `latest.log`. `hot-diag` musi pisać do własnego pliku, nie liczyć na stderr.
 4. Podpowiedzi komend (Tab) dla `/sklep` nie będzie, bo komenda nie jest w drzewie. Do rozważenia w M4, jeśli gracze będą o to prosić.

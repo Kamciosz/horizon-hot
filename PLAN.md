@@ -428,6 +428,7 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 ## 8. Stan prac
 
 **2026-11-12 — M0.3–M0.6 (S2–S5) zrobione:** pula slotów w `.hmod` działa, klient bez niej dostaje „Missing: hot_slots 0.1.0”; `/sklep` przez `Flow::Cancel` bez „Unknown command”, odpowiedź tylko przez `event.replies` (`Host::tell` w tym haku = `false`); `run_command` z `server_tick` działa; wygląd, model i nazwa slotu z paczki serwera działają tylko wtedy, gdy `.hmod` nie ma `models/`, `textures/`, `lang/` (D8 poprawione). Szczegóły: `docs/spike/s2-…` – `s5-…`. Dalej: M0.13, M0.9, M0.8, M0.7, M0.12, M0.14, M0b. M0.10 i M0.11 czekają na ThinkCentre.
+- Zasoby prób (moje, do usunięcia po M0): katalog `/private/tmp/claude-501/hot-spike/` (serwery `s1-srv` port 25611, `s2-srv` port 25612, silniki `s1-server`, `s2-server`, paczka `pack-src`/`www`); `python3 -m http.server 8137` (log `http.log`); instancja Horizona `hot-spike` (`~/Library/Application Support/horizon/instances/hot-spike`); projekty `~/Developer/horizon-mod-lab/projects/spike-hot-*`.
 
 **2026-11-12 — M0.2 (S1) zrobione:** `hot-abi` jako `[[crate]]` w paczce trait moda buduje się z silnikiem serwera; log `hot_abi::ABI_MAJOR = 1`. Szczegóły: `docs/spike/s1-hot-abi-w-silniku.md`. Dalej: M0.3–M0.6.
 

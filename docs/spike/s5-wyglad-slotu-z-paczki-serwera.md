@@ -19,16 +19,17 @@ resource-pack-sha1 = "<sha1 pliku pack.zip>"
 require-resource-pack = false
 ```
 
-Cztery rundy, w każdej nowy `pack.zip`, nowy sha1, restart serwera, ponowne wejście klienta:
+Pięć rund, w każdej restart serwera i ponowne wejście klienta (nowy sha1 tam, gdzie zmieniła się paczka):
 
 | Runda | `.hmod` zawiera | Paczka zawiera | Wynik w grze |
 |---|---|---|---|
 | 1 | blockstate, model `cube_all`, nazwę | teksturę `slot_0` | tekstura z paczki — **działa** |
-| 2 | jak wyżej | + model `cube_column` z nową teksturą `slot_0_top`, nazwę | model i nazwa z `.hmod`, paczka zignorowana |
+| 2 | jak wyżej | + model `cube_column` z nową teksturą `slot_0_top` na górze, nazwę | model i nazwa z `.hmod`, paczka zignorowana |
 | 3 | jak wyżej | model z teksturą `minecraft:block/diamond_block` na górze | dalej model z `.hmod` |
-| 4 | **tylko blockstate i model przedmiotu** | model, nową teksturę `slot_0_top`, nazwę | model, nowa tekstura i nazwa z paczki — **działa** |
+| 4 | **tylko blockstate i model przedmiotu** | jak w rundzie 3 (ten sam sha1, paczka z pamięci klienta) | góra diamentowa, boki w szachownicę, nazwa „Blok sklepu (z paczki)” — **model i nazwa z paczki działają** |
+| 5 | jak w rundzie 4 | model z nową teksturą `slot_0_top` na górze | góra niebieska; log `block sprites: 1303 layers` (wcześniej 1302) — **paczka dodaje nową teksturę** |
 
-Runda 4: górna ściana niebieska (`slot_0_top`), boki w szachownicę (`slot_0`), nazwa przedmiotu „Blok sklepu (z paczki)”. Log klienta: `block sprites: 1303 layers` (wcześniej 1302 — paczka dodała nową teksturę). Zrzut ekranu nie jest w repo, bo zawiera tekstury gry; powtórzenie: kroki niżej.
+Zrzuty ekranu nie są w repo, bo zawierają tekstury gry; powtórzenie: kroki niżej.
 
 ## Przyczyna wyniku rund 2–3
 
