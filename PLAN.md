@@ -154,7 +154,7 @@ Gracze łączą się z `hot-proxy` (Rust, na `horizon-protocol`) na porcie 25565
 ### Budowa i zasoby
 
 **D14. Mody gorące budowane w GitHub Actions; serwer tylko pobiera.**
-`cdylib` modu nie zawiera plików Mojanga, więc CI jest dozwolone (inaczej niż silnik, R21). Workflow w repo serwera buduje `.so` dla architektury ThinkCentre, podpisuje (klucz CI), publikuje jako artefakt commita. `hotd` pobiera, sprawdza podpis i ładuje. Zastępuje „budowę ze źródeł na serwerze” z wersji 1.
+`cdylib` modu nie zawiera plików Mojanga, więc CI jest dozwolone (inaczej niż silnik, R21). Workflow w repo serwera buduje `.so` dla architektury ThinkCentre, podpisuje (klucz CI) i wypycha wynik na gałąź `hot-builds` repo serwera (nie artefakt Actions: ten wymaga tokenu API i wygasa; ADR 0008). `hotd` pobiera ją gitem, sprawdza podpis (`ssh-keygen -Y verify`) i ładuje. Zastępuje „budowę ze źródeł na serwerze” z wersji 1.
 
 **D15. Silnik budowany na ThinkCentre, w tle.**
 Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je ma. `native-build --server-output` w klasie „tło” (D16), z blokadą pliku (R27). Silnik budujemy rzadko: nowy `.hnmod`, nowe Nightly, zmiana `hot-host`. Pierwszy build ok. 12 min, potem przyrostowo (R22).
@@ -340,11 +340,11 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
   - przeładowanie samego `hot-core` → PID ten sam, mody działają dalej.
 
 ### M2 — CI modów i `hotd` (git → artefakt → załadowanie)
-- [ ] M2.1 Workflow `hot.yml` dla repo serwera: budowa `.so`, podpis, artefakt (D14).
-- [ ] M2.2 `hotd`: polling repo co 10 s, pobranie artefaktu, weryfikacja podpisu.
-- [ ] M2.3 Klasyfikacja zmian D24 (testy jednostkowe na przykładowych diffach).
-- [ ] M2.4 `hot apply` przez `horizon-server cmd`, odczyt `hot-state/status.json`, oznaczanie złych commitów (D13).
-- [ ] M2.5 `hot status` (terminal) i `/hot status` (gra) (D21).
+- [ ] M2.1 Workflow `hot.yml` dla repo serwera: budowa `.so`, podpis, artefakt (D14). Zrobione: `templates/server-repo/.github/workflows/hot.yml`, `scripts/hot-build.sh`, `scripts/hot-publish.sh` (ADR 0008); skrypty sprawdzone lokalnie. Nie sprawdzone: przebieg w GitHub Actions — brak repo serwera (założenie publicznego repo to publikacja, decyzja właściciela).
+- [x] M2.2 `hotd`: polling repo co 10 s, pobranie artefaktu, weryfikacja podpisu (`crates/hotd`).
+- [x] M2.3 Klasyfikacja zmian D24 (testy jednostkowe na przykładowych diffach: `crates/hotd/src/classify.rs`).
+- [x] M2.4 `hot apply` przez `horizon-server cmd`, odczyt `hot-state/status.json`, oznaczanie złych commitów (D13).
+- [x] M2.5 `hot status` (terminal: `hotd status`) i `/hot status` (gra) (D21).
 - Sprawdzenie: push → zmiana na serwerze ≤ 3 min; repo bez `mods/` → czysty serwer; artefakt z błędnym podpisem odrzucony; commit niekompilujący się → serwer bez zmian, `hot status` mówi dlaczego.
 
 ### M3 — Dane (D7)
@@ -482,3 +482,5 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Próba z researchu: `~/Developer/horizon-mod-lab/projects/probe-hot-host` — baza dla M0.2 i M1.3.
 - W `native/stage/Cargo.toml` (members) zostało `native-api/probe_hot_host`; launcher przepisuje listę przy buildzie — sprawdzić przy najbliższym buildzie „Drony Test”.
 - Następny krok: M0.2, po „go” użytkownika.
+
+**2026-11-12 — M2 zrobione poza przebiegiem w Actions:** `crates/hotd` (lustro gita, klasyfikacja D24, podpis `ssh-keygen`, `hot load`/`hot unload` z potwierdzeniem z `status.json`, zły commit wg D13, `hot-state/hotd.json`), skrypty CI i szablon `hot.yml`; wyniki CI na gałęzi `hot-builds` zamiast artefaktów Actions (ADR 0008), kody `HOT-E0201`–`HOT-E0207`. Testy bez sieci (`crates/hotd/tests/flow.rs`, 7): dobry commit czeka na CI i się ładuje; repo bez `mods/` → czysty serwer bez CI; podmieniony plik → odrzucony i usunięty (mutacja: test pada bez sprawdzania podpisu); commit, który się nie kompiluje → serwer bez zmian, `hot status` mówi dlaczego, poprawka wchodzi; inny PID silnika w 60 s → zły commit. Na prawdziwym silniku (Mac, `m1/srv`) z `hot-build.sh` i `hot-publish.sh` na lokalnym repo: commit → załadowany w 0,63 s, licznik ciągły (11326 → 11662) i nowa odpowiedź po drugim commicie, repo bez `mods/` → 0 modów, commit z błędem kompilacji → serwer bez zmian i powód w `hot status` oraz w `/hot status`, PID silnika cały czas ten sam. Nie sprawdzone: push → serwer ≤ 3 min (brak repo serwera na GitHubie i brak ThinkCentre). Dalej: cienki M6.1.

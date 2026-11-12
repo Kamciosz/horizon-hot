@@ -1,0 +1,15 @@
+[package]
+name = "hotd"
+description = "Demon serwera: śledzi repo serwera, pobiera podpisane mody z CI i ładuje je w silniku"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+hot-diag = { path = "../hot-diag" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

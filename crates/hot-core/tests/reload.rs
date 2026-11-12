@@ -675,3 +675,36 @@ fn a_paused_server_switches_on_a_console_command() -> TestResult {
     s.stop();
     Ok(())
 }
+
+#[test]
+fn hot_status_shows_the_state_of_hotd() -> TestResult {
+    // PL: `/hot status` w grze pokazuje też stan `hotd` z `hot-state/hotd.json` (D21).
+    // EN: `/hot status` in game also shows the `hotd` state from `hot-state/hotd.json` (D21).
+    let home = Server::home("hotd-status");
+    let mut s = Server::start(&home)?;
+    let (_, replies) = s.console("hot status");
+    assert!(
+        replies.iter().any(|r| r.contains("hotd: brak stanu")),
+        "{replies:?}"
+    );
+    fs::write(
+        home.join("hot-state/hotd.json"),
+        r#"{"head":"b64df969dc","applied":"21e1c94aa","waiting":null,
+            "failed":[{"commit":"b64df969dc","reason":"CI nie zbudowało moda licznik"}]}"#,
+    )?;
+    let (_, replies) = s.console("hot status");
+    assert!(
+        replies
+            .iter()
+            .any(|r| r == "hotd: repo b64df96, zastosowany 21e1c94"),
+        "{replies:?}"
+    );
+    assert!(
+        replies
+            .iter()
+            .any(|r| r.contains("commit b64df96 nie wszedł: CI nie zbudowało moda licznik")),
+        "{replies:?}"
+    );
+    s.stop();
+    Ok(())
+}

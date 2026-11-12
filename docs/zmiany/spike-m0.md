@@ -25,6 +25,10 @@
 - `hot <mod> …` przekazuje komendę konsoli tylko temu modowi.
 - Kody `HOT-E0406` (rdzeń się nie wczytał) i `HOT-E0407` (rdzeń spanikował) w `docs/bledy/`.
 - ADR 0007: logi `hot-host`, komendy modów i pauza pustego serwera.
+- `crates/hotd`: demon, który co 10 s pobiera repo serwera, liczy zmiany od ostatniego zastosowanego commita (D24), pobiera podpisane biblioteki modów z gałęzi `hot-builds`, ładuje je w silniku i zapisuje stan w `hot-state/hotd.json`; `hotd status` w terminalu. Kody `HOT-E0201`–`HOT-E0207`.
+- `scripts/hot-build.sh`, `scripts/hot-publish.sh` i szablon `templates/server-repo/.github/workflows/hot.yml`: budowa modów w CI, podpis `ssh-keygen`, wynik na gałęzi `hot-builds`.
+- ADR 0008: wyniki CI na gałęzi `hot-builds` i podpis `ssh-keygen` zamiast artefaktów Actions.
+- `/hot status` w grze pokazuje też stan `hotd`: commit repo, zastosowany commit, na co czeka i dlaczego ostatni commit nie wszedł.
 
 ### Zmienione
 - `hot-core` przełącza gotowe wczytania także przy komendzie konsoli, bo pusty serwer w pauzie nie wywołuje ticku.

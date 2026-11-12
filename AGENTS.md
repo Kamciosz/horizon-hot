@@ -44,7 +44,9 @@ crates/hot-core/   gospodarz modów gorących: hot load, generacje, powrót po p
 crates/hot-host/   mod natywny w silniku: ładuje hot-core, przekazuje haki; poza workspace
                    (build: crates/hot-host/build-bundle.sh + horizon-launcher native-build)
 examples/licznik/  przykładowy mod gorący: licznik ticków, stan przez przeładowanie
-crates/hotd/       demon w tle                                 (planowany)
+crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; hotd status
+scripts/           hot-build.sh i hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)
+templates/server-repo/  pliki, które instalator kopiuje do repo serwera (hot.yml)
 crates/hot-proxy/  proxy                                       (planowany)
 crates/hot-pack/   paczka zasobów                              (planowany)
 crates/hot-play/   aplikacja gracza                            (planowany)
@@ -77,6 +79,8 @@ cargo test --workspace          # oczekiwane: wszystkie „ok”
 crates/hot-host/build-bundle.sh <katalog> && horizon-launcher native-build <katalog> \
   --server-output <wyjście> --version nightly-2026-11-05-66f3981 --trust-native-code   # ok. 2 min
 ```
+
+Próba `hotd` bez GitHuba: lokalne repo z `mods/<id>/`, `HOT_SIGNING_KEY_FILE=<klucz> scripts/hot-build.sh <repo> <out>`, `scripts/hot-publish.sh <repo> <out>`, potem `hotd once --home <HOT_HOME> --repo file://<origin.git> --engine <horizon-server> --allowed-signers <plik>`. Testy `cargo test -p hotd` potrzebują `git` i `ssh-keygen`.
 
 Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktualizowana dokumentacja w tym samym commicie.
 

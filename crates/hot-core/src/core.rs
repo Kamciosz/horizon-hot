@@ -590,6 +590,7 @@ impl Core {
                         m.gen.id, m.gen.version, m.generation
                     ));
                 }
+                out.extend(hotd_lines(&self.paths.state().join("hotd.json")));
             }
             _ if self.mods.iter().any(|m| m.gen.id == verb) => {
                 // PL: `hot <mod> …` trafia tylko do tego moda jako komenda konsoli `<mod> …` (D5).
@@ -717,6 +718,40 @@ impl Core {
             self.log.error(&e);
         }
     }
+}
+
+/// PL: Stan `hotd` z `hot-state/hotd.json` dla `/hot status` w grze (D21): commit repo
+/// i zastosowany, na co czeka, ostatni nieudany commit. Brak pliku = `hotd` nie działa.
+/// EN: `hotd` state from `hot-state/hotd.json` for `/hot status` in game (D21).
+fn hotd_lines(path: &std::path::Path) -> Vec<String> {
+    let Some(d) = std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return vec!["hotd: brak stanu — hotd nie działa albo nie śledzi repo".to_owned()];
+    };
+    let short = |v: &Value| {
+        v.as_str()
+            .map_or_else(|| "brak".to_owned(), |s| s.get(..7).unwrap_or(s).to_owned())
+    };
+    let mut out = vec![format!(
+        "hotd: repo {}, zastosowany {}",
+        short(&d["head"]),
+        short(&d["applied"])
+    )];
+    if let Some(w) = d["waiting"].as_str() {
+        out.push(format!("  czeka: {w}"));
+    }
+    if let Some(f) = d["failed"].as_array().and_then(|a| a.last()) {
+        if f["commit"] == d["head"] {
+            out.push(format!(
+                "  commit {} nie wszedł: {}",
+                short(&f["commit"]),
+                f["reason"].as_str().unwrap_or("")
+            ));
+        }
+    }
+    out
 }
 
 /// PL: `panicked at src/lib.rs:12:5: ...` → (`src/lib.rs`, 12). EN: Parses the panic place.

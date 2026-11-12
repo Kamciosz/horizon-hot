@@ -11,7 +11,7 @@ Gdzie co leży i dlaczego. Stan: zbudowane są `hot-abi`, `hot-diag`, `hot-sdk`,
 | `hot-sdk` | biblioteka dla autorów modów | makro `hot_mod!`, bezpieczne opakowania ABI, `catch_unwind` | `hot-abi` |
 | `hot-host` | w silniku (mod natywny wkompilowany przez `native-build`) | ładuje `hot-core` przy starcie serwera, przekazuje mu haki Horizona, podmienia rdzeń (`hot core load`) | silnik, `hot-core` |
 | `hot-core` | w silniku (`cdylib`) | ładuje generacje modów gorących (`hot load`), stan między generacjami, powrót po panice, `hot-state/status.json`; sloty w M4 | `hot-host`, mody, `hotd` (przez pliki i konsolę) |
-| `hotd` (planowany) | usługa systemd, tło | repo serwera, artefakty CI, aktualizacje, kopie, hamulec MSPT | GitHub, `horizon-server`, `hot-core` |
+| `hotd` | usługa systemd, tło | repo serwera, podpisane mody z gałęzi `hot-builds` (ADR 0008), `hot-state/hotd.json`; w planie: aktualizacje, kopie, hamulec MSPT | GitHub (git), `horizon-server cmd`, `hot-core` (przez `status.json`) |
 | `hot-proxy` (planowany) | usługa systemd, port 25565 | logowanie graczy, trzymanie połączeń przy podmianie i awarii silnika | gracze, silniki |
 | `hot-pack` (planowany) | usługa systemd, port 8131 | paczka zasobów z sha1 | gracze |
 | `hot-play` (planowany) | komputer gracza | instalacja, aktualizacja i naprawa gry, start na serwerze | `horizon-launcher` |
@@ -20,7 +20,7 @@ Gdzie co leży i dlaczego. Stan: zbudowane są `hot-abi`, `hot-diag`, `hot-sdk`,
 
 **Zmiana kodu moda gorącego.**
 ```
-push do repo serwera → CI buduje .so i podpisuje → hotd pobiera, sprawdza podpis
+push do repo serwera → CI buduje .so, podpisuje, wypycha na hot-builds → hotd pobiera gitem, sprawdza podpis
 → hot-core ładuje nową generację poza wątkiem gry → przełączenie na granicy ticku
 ```
 Gracz niczego nie zauważa. Panika w modzie → powrót do poprzedniej generacji.

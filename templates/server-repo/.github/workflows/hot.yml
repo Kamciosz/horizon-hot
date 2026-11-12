@@ -1,0 +1,49 @@
+# PL: Budowa modów gorących (D14, ADR 0008). Instalator kopiuje ten plik do repo serwera
+# i wpisuje wersję horizon-hot w `ref` niżej. Każdy push na main buduje mods/*/ na Ubuntu 22.04
+# (starsze glibc, więc biblioteka działa też na nowszym Ubuntu), podpisuje pliki kluczem
+# z sekretu HOT_SIGNING_KEY i wypycha wynik na gałąź hot-builds. hotd na serwerze pobiera ją
+# co 10 s. Gdy kompilacja padnie, wynik z "ok": false też trafia na hot-builds, a `hot status`
+# na serwerze pokazuje błąd.
+# EN: Builds hot mods (D14, ADR 0008). The installer copies this file into the server repository
+# and pins the horizon-hot version in `ref` below. Every push to main builds mods/*/ on Ubuntu
+# 22.04 (older glibc, so the library also runs on newer Ubuntu), signs the files with the
+# HOT_SIGNING_KEY secret and pushes the result to the hot-builds branch, which hotd fetches every
+# 10 s. A failed build is published too ("ok": false), and `hot status` on the server shows it.
+name: hot
+
+on:
+  push:
+    branches: [main]
+
+# PL: Zapis tylko po to, żeby wypchnąć gałąź hot-builds. EN: Write access only to push hot-builds.
+permissions:
+  contents: write
+
+# PL: Dwa pushe naraz nie ścigają się o hot-builds. EN: Two pushes never race on hot-builds.
+concurrency:
+  group: hot-builds
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 50
+      - uses: actions/checkout@v7
+        with:
+          repository: Kamciosz/horizon-hot
+          ref: main
+          path: .hot
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Budowa i podpis
+        env:
+          HOT_SIGNING_KEY: ${{ secrets.HOT_SIGNING_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$HOT_SIGNING_KEY" > "$RUNNER_TEMP/hot-key"
+          HOT_SIGNING_KEY_FILE="$RUNNER_TEMP/hot-key" bash .hot/scripts/hot-build.sh . "$RUNNER_TEMP/hot-out"
+      - name: Publikacja na hot-builds
+        if: success() || failure()
+        run: bash .hot/scripts/hot-publish.sh . "$RUNNER_TEMP/hot-out"
