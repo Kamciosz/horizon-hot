@@ -59,6 +59,18 @@ pub trait HotMod: Sized + 'static {
         let _ = host;
         Vec::new()
     }
+
+    /// PL: Zdarzenie w postaci z ABI. Domyślnie zamienia je i woła [`HotMod::on_event`].
+    /// Nadpisuje tylko `hot-core`, który przekazuje zdarzenie modom bez zmian.
+    /// EN: The event in its ABI form. By default converts it and calls [`HotMod::on_event`].
+    /// Only `hot-core` overrides it, to pass the event to mods unchanged.
+    #[doc(hidden)]
+    fn on_raw_event(&mut self, host: &mut Host<'_>, event: &hot_abi::Event) -> Flow {
+        // SAFETY: napisy zdarzenia są ważne przez całe wywołanie (kontrakt ABI).
+        // EN: the event's strings are valid for the whole call (ABI contract).
+        let event = unsafe { Event::from_abi(event) };
+        self.on_event(host, &event)
+    }
 }
 
 /// PL: UUID gracza. EN: A player's UUID.
@@ -270,6 +282,14 @@ impl<'call> Host<'call> {
         Host { api }
     }
 
+    /// PL: Surowa tabela gospodarza; potrzebna tylko `hot-core`, który buduje z niej tabele modów.
+    /// EN: The raw host table; only `hot-core` needs it, to build the mods' tables from it.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn raw(&self) -> &'call HostApi {
+        self.api
+    }
+
     /// PL: Wpis informacyjny w logu silnika. EN: An info line in the engine's log.
     pub fn info(&mut self, message: &str) {
         (self.api.log)(self.api.ctx, hot_abi::level::INFO, Str::from_str(message));
@@ -287,7 +307,7 @@ impl<'call> Host<'call> {
 
     /// PL: Linia na czacie gracza; `false`, gdy go nie ma. EN: A chat line to a player.
     pub fn tell(&mut self, player: PlayerId, message: &str) -> bool {
-        (self.api.tell)(self.api.ctx, player.0, Str::from_str(message))
+        (self.api.tell)(self.api.ctx, &player.0, Str::from_str(message))
     }
 
     /// PL: Linia na czacie wszystkich graczy. EN: A chat line to every player.
@@ -332,7 +352,7 @@ impl<'call> Host<'call> {
     #[must_use]
     pub fn block(&mut self, pos: [i32; 3]) -> String {
         let mut out = String::new();
-        (self.api.block)(self.api.ctx, pos, write_string, (&raw mut out).cast());
+        (self.api.block)(self.api.ctx, &pos, write_string, (&raw mut out).cast());
         out
     }
 
@@ -366,21 +386,73 @@ pub mod state {
 /// EN: Parts for the [`hot_mod!`] macro; not for direct use.
 #[doc(hidden)]
 pub mod __rt {
+    use std::cell::RefCell;
     use std::ffi::c_void;
-    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::panic::{self, catch_unwind, AssertUnwindSafe};
+    use std::sync::Once;
 
-    use hot_abi::{flow, Buf, HostApi, Str};
+    use hot_abi::{flow, level, Buf, HostApi, Str};
 
-    use crate::{Event, Flow, Host, HotMod};
+    use crate::{Flow, Host, HotMod};
+
+    thread_local! {
+        static LAST_PANIC: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+
+    /// PL: Hak paniki w kopii biblioteki standardowej tego moda (każdy `cdylib` ma własną, więc
+    /// hak nie dotyka silnika). Zapamiętuje miejsce i treść paniki, żeby gospodarz dostał je w
+    /// logu: bez tego wpis o panice nie miałby pliku i linii (D27). Poprzedni hak dalej pisze na
+    /// stderr.
+    ///
+    /// EN: A panic hook in this mod's own copy of the standard library (every `cdylib` has one,
+    /// so the hook does not touch the engine). Remembers the panic's place and message so the host
+    /// gets them in the log: without it the panic entry would lack file and line (D27). The
+    /// previous hook still prints to stderr.
+    fn install_hook() {
+        static HOOK: Once = Once::new();
+        HOOK.call_once(|| {
+            let previous = panic::take_hook();
+            panic::set_hook(Box::new(move |info| {
+                let payload = info.payload();
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "non-text panic payload".to_owned());
+                let place = info
+                    .location()
+                    .map_or_else(|| "unknown place".to_owned(), ToString::to_string);
+                let backtrace = std::backtrace::Backtrace::force_capture();
+                let text = format!("panicked at {place}: {message}\n{backtrace}");
+                LAST_PANIC.with(|p| *p.borrow_mut() = Some(text));
+                previous(info);
+            }));
+        });
+    }
+
+    /// PL: Oddaje gospodarzowi opis ostatniej paniki jako błąd w logu. Pierwsza linia zaczyna się
+    /// od `panicked at`, dalej backtrace.
+    /// EN: Hands the last panic's description to the host as an error log line. The first line
+    /// starts with `panicked at`, the backtrace follows.
+    fn report_panic(api: &HostApi) {
+        let text = LAST_PANIC
+            .with(|p| p.borrow_mut().take())
+            .unwrap_or_else(|| "panicked at unknown place: no panic hook message".to_owned());
+        (api.log)(api.ctx, level::ERROR, Str::from_str(&text));
+    }
 
     pub extern "C" fn init<T: HotMod>(api: &HostApi, prev: Str) -> *mut c_void {
+        install_hook();
         catch_unwind(AssertUnwindSafe(|| {
             let mut host = Host::new(api);
             // SAFETY: stan pożyczony na czas wywołania (kontrakt ABI). EN: borrowed for the call.
             let state = unsafe { prev.bytes() };
             Box::into_raw(Box::new(T::init(&mut host, state))).cast::<c_void>()
         }))
-        .unwrap_or(std::ptr::null_mut())
+        .unwrap_or_else(|_| {
+            report_panic(api);
+            std::ptr::null_mut()
+        })
     }
 
     pub extern "C" fn on_event<T: HotMod>(
@@ -393,14 +465,15 @@ pub mod __rt {
             // EN: `instance` comes from `init::<T>` and the host calls the mod from one thread.
             let this = unsafe { &mut *instance.cast::<T>() };
             let mut host = Host::new(api);
-            // SAFETY: napisy zdarzenia ważne w wywołaniu. EN: event strings valid in the call.
-            let event = unsafe { Event::from_abi(event) };
-            match this.on_event(&mut host, &event) {
+            match this.on_raw_event(&mut host, event) {
                 Flow::Continue => flow::CONTINUE,
                 Flow::Cancel => flow::CANCEL,
             }
         }))
-        .unwrap_or(flow::PANICKED)
+        .unwrap_or_else(|_| {
+            report_panic(api);
+            flow::PANICKED
+        })
     }
 
     pub extern "C" fn deactivate<T: HotMod>(instance: *mut c_void, api: &HostApi) -> Buf {
@@ -417,7 +490,10 @@ pub mod __rt {
                 cap: state.capacity(),
             }
         }))
-        .unwrap_or(Buf::EMPTY)
+        .unwrap_or_else(|_| {
+            report_panic(api);
+            Buf::EMPTY
+        })
     }
 
     pub extern "C" fn free_buf(buf: Buf) {

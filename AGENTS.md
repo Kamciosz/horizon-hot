@@ -39,8 +39,8 @@ Właściciel: Szymon Sosnowski. Serwer stoi na współdzielonym ThinkCentre z Ub
 ```
 crates/hot-abi/    granica C ABI (stabilna, wersjonowana ABI_MAJOR)
 crates/hot-diag/   logi JSONL, kody błędów, panika w logu, szkielet hot report
-crates/hot-sdk/    makro hot_mod!, bezpieczne opakowania       (planowany)
-crates/hot-core/   gospodarz modów gorących                    (planowany)
+crates/hot-sdk/    makro hot_mod!, Host<'call>, panika z miejscem w logu
+crates/hot-core/   gospodarz modów gorących: hot load, generacje, powrót po panice
 crates/hotd/       demon w tle                                 (planowany)
 crates/hot-proxy/  proxy                                       (planowany)
 crates/hot-pack/   paczka zasobów                              (planowany)

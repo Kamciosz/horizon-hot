@@ -14,6 +14,11 @@
 - `crates/hot-diag`: błąd z polami D27, zapis JSONL z rotacją, maskowanie sekretów, panika w logu, szkielet `hot report` (`hot-diag report`). Zależność `serde_json` (`docs/adr/0003-serde-json-w-hot-diag.md`).
 - `docs/bledy/HOT-E0001.md`, `HOT-E0002.md` i zakres `E00xx`; test zgodności kodów z katalogiem w CI.
 - Kod prób w `spikes/` (poza workspace, budowany launcherem Horizona albo `cargo horizon-mod`).
+- `crates/hot-abi`: ABI v1 (`ModVTable`, `HostApi`, `Event` z `kind`, `PlayerInfo`), test układu struktur w pamięci; ADR 0006 opisuje kształt ABI.
+- `crates/hot-sdk`: cecha `HotMod`, makro `hot_mod!`, `Host<'call>` z funkcjami gospodarza, łapanie paniki w każdym eksporcie z miejscem i backtrace w logu.
+- `crates/hot-core`: `hot load`, `hot unload`, `hot list`; wczytanie pliku w tle, przełączenie generacji na granicy ticku, stan przekazywany między generacjami, powrót do poprzedniej generacji po panice, próba 6000 ticków (D13), `hot-state/mods.json` i `status.json` zapisywane atomowo, log `logs/hot-core.jsonl`. Zależność `libloading` (ADR 0005). Kody `HOT-E0401`–`HOT-E0405` w `docs/bledy/`.
+- `crates/hot-core/tests/reload.rs`: 11 testów na prawdziwych modach `cdylib` z udawanym gospodarzem, w tym 50 przeładowań z rzędu.
+- `hot-diag`: wpisy `info` i `warn` (`Logger::info`, `Logger::warn`).
 
 ### Zmienione
 - `AGENTS.md`: zasady pracy na maszynie z grą (bez `prepare` przez agenta, bez zrzutów gry w repo, bez ruszania cudzych instancji), `spikes/` i `docs/spike/` w mapie repo, zmierzona pauza podmiany zamiast „mrugnięcia”; to samo w `docs/ARCHITECTURE.md`. `PLAN.md`, D2: `hot-host` nie używa `hot-diag`; D9 i D16 doprecyzowane.

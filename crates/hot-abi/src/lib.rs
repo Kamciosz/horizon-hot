@@ -53,6 +53,15 @@ impl Str {
         }
     }
 
+    /// PL: Pożycza bajty (np. stan moda) na czas wywołania. EN: Borrows bytes for the call.
+    #[must_use]
+    pub const fn from_bytes(b: &[u8]) -> Self {
+        Str {
+            ptr: b.as_ptr(),
+            len: b.len(),
+        }
+    }
+
     /// PL: Bajty napisu.
     /// EN: The string's bytes.
     ///
@@ -222,8 +231,10 @@ pub struct HostApi {
     pub ctx: *mut c_void,
     /// PL: Wpis do logu silnika. EN: A line in the engine's log.
     pub log: extern "C" fn(ctx: *mut c_void, level: u32, message: Str),
-    /// PL: Linia na czacie jednego gracza. EN: A chat line to one player.
-    pub tell: extern "C" fn(ctx: *mut c_void, player: Uuid, message: Str) -> bool,
+    /// PL: Linia na czacie jednego gracza. Tablice idą przez wskaźnik: w C nie da się ich
+    /// przekazać przez wartość. EN: A chat line to one player. Arrays go by pointer: C cannot
+    /// pass them by value.
+    pub tell: extern "C" fn(ctx: *mut c_void, player: &Uuid, message: Str) -> bool,
     /// PL: Linia na czacie wszystkich. EN: A chat line to everyone.
     pub broadcast: extern "C" fn(ctx: *mut c_void, message: Str),
     /// PL: Odpowiedź na komendę gracza albo konsoli. EN: The answer to a player's or console command.
@@ -242,7 +253,7 @@ pub struct HostApi {
     /// EN: The block at a position (`minecraft:air` when none); written to `out(user, text)`.
     pub block: extern "C" fn(
         ctx: *mut c_void,
-        pos: [i32; 3],
+        pos: &[i32; 3],
         out: extern "C" fn(user: *mut c_void, block: Str),
         user: *mut c_void,
     ),

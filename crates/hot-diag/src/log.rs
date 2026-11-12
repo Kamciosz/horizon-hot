@@ -99,6 +99,33 @@ impl Logger {
         }
     }
 
+    /// PL: Wpis informacyjny, np. „mod załadowany”. `context` jak w D27: identyfikatory do
+    /// odtworzenia (mod, generacja, ścieżka). Błędów tak nie zapisuj: one idą przez [`Self::error`].
+    ///
+    /// EN: An info entry, e.g. "mod loaded". `context` as in D27: identifiers needed to reproduce
+    /// (mod, generation, path). Do not write errors this way: they go through [`Self::error`].
+    pub fn info(&self, what: &str, context: Value) {
+        self.message("info", what, context);
+    }
+
+    /// PL: Ostrzeżenie: coś poszło inaczej, ale składnik poradził sobie sam.
+    /// EN: A warning: something went differently, but the component coped on its own.
+    pub fn warn(&self, what: &str, context: Value) {
+        self.message("warn", what, context);
+    }
+
+    fn message(&self, level: &str, what: &str, context: Value) {
+        let mut fields = Map::new();
+        fields.insert("level".into(), level.into());
+        fields.insert("what".into(), what.into());
+        fields.insert("context".into(), context);
+        let line = self.line(fields);
+        if let Err(e) = self.write_line(&line) {
+            let failure = self.line(write_error(&self.path(), &e).fields());
+            fallback_stderr(&line, &failure);
+        }
+    }
+
     fn line(&self, fields: Map<String, Value>) -> String {
         let mut v = Value::Object(fields);
         if let Value::Object(m) = &mut v {

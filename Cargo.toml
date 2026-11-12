@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hot-abi", "crates/hot-diag", "crates/hot-sdk"]
+members = ["crates/hot-abi", "crates/hot-core", "crates/hot-diag", "crates/hot-sdk"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,7 @@ repository = "https://github.com/Kamciosz/horizon-hot"
 # PL: Wersje zależności w jednym miejscu. Nowa zależność wymaga ADR (docs/adr/).
 # EN: Dependency versions in one place. A new dependency needs an ADR (docs/adr/).
 [workspace.dependencies]
+libloading = "0.8.9"
 serde_json = "1.0.151"
 
 # PL: Błąd ma trafić do logu z kontekstem (docs/STANDARD_KODU.md), a nie zakończyć proces paniką bez opisu.

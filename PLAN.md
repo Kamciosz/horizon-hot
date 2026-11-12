@@ -328,10 +328,10 @@ Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie dz
 Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a sprawdzenie kroku obejmuje wywołanie co najmniej jednego błędu i obejrzenie wpisu w logu.
 
 ### M1 — Rdzeń przeładowania (`hot-abi`, `hot-sdk`, `hot-host`, `hot-core`)
-- [ ] M1.1 `hot-abi`: VTable z wersją, `init`, `deactivate`, `server_tick`, `player_chat`; testy `size_of`/`align_of`.
-- [ ] M1.2 `hot-sdk`: makro `hot_mod!`, `HostCtx<'call>`, `catch_unwind` w każdym eksporcie, stan między generacjami.
+- [x] M1.1 `hot-abi`: VTable z wersją, `init`, `deactivate`, `server_tick`, `player_chat`; testy `size_of`/`align_of`.
+- [x] M1.2 `hot-sdk`: makro `hot_mod!`, `HostCtx<'call>`, `catch_unwind` w każdym eksporcie, stan między generacjami.
 - [ ] M1.3 `hot-host`: tylko ładowanie `hot-core` i przekazywanie haków (D2). Paczka składana skryptem: kopia `crates/hot-abi` jako `[[crate]]` (wynik S1, `docs/spike/s1-hot-abi-w-silniku.md`).
-- [ ] M1.4 `hot-core`: `hot load <ścieżka>`, ładowanie poza wątkiem serwera, przełączenie na granicy ticku, unikalne nazwy plików, ostatnie dobre generacje (D13).
+- [x] M1.4 `hot-core`: `hot load <ścieżka>`, ładowanie poza wątkiem serwera, przełączenie na granicy ticku, unikalne nazwy plików, ostatnie dobre generacje (D13).
 - [ ] M1.5 `examples/licznik`: liczy ticki, odpowiada na czacie, stan przechodzi przez przeładowanie.
 - Sprawdzenie M1:
   - przeładowanie zmienia odpowiedź, PID silnika ten sam, licznik zachowany;
@@ -443,6 +443,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Raz przy instalacji osoba z kupionym Minecraftem loguje się kontem Microsoft (instalator pokazuje kod). Tego nie da się obejść.
 - Kolejność pracy: M1 (przeładowanie bez pauzy), M2 (git → CI → załadowanie), cienki M6.1 (instalator), potem M3–M5, M7, M0.19 i M8, na końcu M9–M13. Sprawdzenia, których nie da się zrobić bez ThinkCentre ani czystych maszyn graczy, oznaczam „nie sprawdzone: brak maszyny” i nie odhaczam.
 - Narzędzia: `horizon-bots` (crate w repo Horizona) do prób z botami, `limactl` lub `docker` do czystego Ubuntu bez logowania.
+
+**2026-11-12 — M1.1, M1.2, M1.4 zrobione (bez silnika):** `hot-abi` (ABI v1), `hot-sdk` (`HotMod`, `hot_mod!`, panika z miejscem w logu) i `hot-core` (`hot load/unload/list`, przełączenie na granicy ticku, powrót po panice, próba 6000 ticków, start po awarii z ostatniej dobrej generacji). 11 testów w `crates/hot-core/tests/reload.rs` na prawdziwych `cdylib`; mutacje „bez przekazania stanu” i „bez powrotu do poprzedniej generacji” je czerwienią. Odstępstwa od D4 i M1.1–M1.2 (jedno `on_event`, `init` w wątku serwera, `Host` zamiast `HostCtx`) w ADR 0006. Dalej: M1.3 `hot-host` i M1.5 `examples/licznik`, potem sprawdzenia M1 w silniku.
 
 **OTWARTE (D28, maskowanie w raporcie):** `hot report` maskuje znane sekrety i adresy IPv4. Nie maskuje jeszcze adresów IPv6 graczy (dojdzie w M8, razem z logami `hot-proxy`) ani ścieżek z katalogiem domowym i nazwą użytkownika w raporcie gracza z „Napraw” (M11; Horizon w `share-log` je usuwa).
 

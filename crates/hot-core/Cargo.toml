@@ -1,0 +1,23 @@
+[package]
+name = "hot-core"
+description = "Gospodarz modów gorących w silniku: ładowanie, generacje, przełączanie na granicy ticku"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# PL: `cdylib` ładuje `hot-host` w silniku; `rlib` dla testów, które wołają tę samą tabelę ABI.
+# EN: `hot-host` loads the `cdylib` in the engine; the `rlib` is for tests calling the same ABI table.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+hot-abi = { path = "../hot-abi" }
+hot-diag = { path = "../hot-diag" }
+hot-sdk = { path = "../hot-sdk" }
+libloading.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

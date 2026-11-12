@@ -150,3 +150,32 @@ fn unwritable_log_directory_reports_hot_e0001() {
     }
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn info_and_warn_entries_carry_level_context_and_masking() -> Result<(), DiagError> {
+    let dir = temp_dir("info");
+    let mut redactor = Redactor::new();
+    redactor.add("tajny-token-123");
+    let log = Logger::open(LogConfig::new("hot-core", "0.1.0", &dir), redactor)?;
+    log.info(
+        "Hot mod \"licznik\" generation 2 is active",
+        serde_json::json!({ "mod": "licznik", "generation": 2 }),
+    );
+    log.warn(
+        "Token tajny-token-123 was in a message",
+        serde_json::json!({}),
+    );
+    let all = entries(&log.path());
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0]["level"], "info");
+    assert_eq!(all[0]["component"], "hot-core");
+    assert_eq!(all[0]["context"]["generation"], 2);
+    assert_eq!(all[1]["level"], "warn");
+    assert!(
+        !all[1].to_string().contains("tajny-token-123"),
+        "{}",
+        all[1]
+    );
+    let _ = fs::remove_dir_all(dir);
+    Ok(())
+}

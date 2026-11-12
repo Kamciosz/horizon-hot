@@ -8,9 +8,9 @@ Gdzie co leży i dlaczego. Stan: zbudowany jest tylko `hot-abi`; reszta opisuje 
 |---|---|---|---|
 | `hot-abi` | biblioteka | stabilna granica C ABI między gospodarzem a modami | — |
 | `hot-diag` | biblioteka + CLI | logi JSONL z kodami błędów, panika w logu, `hot report` (szkielet: `hot-diag report`) | wszyscy oprócz `hot-host` |
-| `hot-sdk` (planowany) | biblioteka dla autorów modów | makro `hot_mod!`, bezpieczne opakowania ABI, `catch_unwind` | `hot-abi` |
+| `hot-sdk` | biblioteka dla autorów modów | makro `hot_mod!`, bezpieczne opakowania ABI, `catch_unwind` | `hot-abi` |
 | `hot-host` (planowany) | w silniku (mod natywny `.hnmod`) | ładuje `hot-core`, przekazuje mu haki Horizona | silnik, `hot-core` |
-| `hot-core` (planowany) | w silniku (`cdylib`) | ładuje generacje modów gorących, sloty, komenda `/hot` | `hot-host`, mody |
+| `hot-core` | w silniku (`cdylib`) | ładuje generacje modów gorących (`hot load`), stan między generacjami, powrót po panice, `hot-state/status.json`; sloty w M4 | `hot-host`, mody, `hotd` (przez pliki i konsolę) |
 | `hotd` (planowany) | usługa systemd, tło | repo serwera, artefakty CI, aktualizacje, kopie, hamulec MSPT | GitHub, `horizon-server`, `hot-core` |
 | `hot-proxy` (planowany) | usługa systemd, port 25565 | logowanie graczy, trzymanie połączeń przy podmianie i awarii silnika | gracze, silniki |
 | `hot-pack` (planowany) | usługa systemd, port 8131 | paczka zasobów z sha1 | gracze |
