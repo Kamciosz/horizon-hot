@@ -435,6 +435,15 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 
 ## 8. Stan prac
 
+**DECYZJA (2026-11-12): bez danych o ThinkCentre.** Użytkownik nie poda ani sprzętu, ani dostępu. Dlatego:
+- M0.10 i M0.11 przechodzą do instalatora. `server-install.sh` czyta `uname -m`, `nproc` i `/proc/meminfo` i z nich liczy `AllowedCPUs`, `MemoryLow` i `MemoryMax` według wzoru w D16. Architektura nieznana: CI buduje mody gorące na x86_64 i aarch64, a `hotd` wybiera plik według `uname -m`.
+- S9 (`native-build` na Linuksie) nie da się sprawdzić z tej maszyny, bo wymaga `prepare` z kontem gracza. Krok budowy silnika w instalatorze kończy się przy błędzie kodem `HOT-E…`, wpisem w katalogu i wskazówką `hot report`.
+- Rozgrzany silnik (S13) działa tylko wtedy, gdy pamięć pozwala; inaczej podmiana idzie na zimno z wpisem w logu (D16).
+- Oczekujące wybory przyjmuję jako decyzje: pula 1024/2048, paczka wysyłana od razu (D9, wariant a).
+- Raz przy instalacji osoba z kupionym Minecraftem loguje się kontem Microsoft (instalator pokazuje kod). Tego nie da się obejść.
+- Kolejność pracy: M1 (przeładowanie bez pauzy), M2 (git → CI → załadowanie), cienki M6.1 (instalator), potem M3–M5, M7, M0.19 i M8, na końcu M9–M13. Sprawdzenia, których nie da się zrobić bez ThinkCentre ani czystych maszyn graczy, oznaczam „nie sprawdzone: brak maszyny” i nie odhaczam.
+- Narzędzia: `horizon-bots` (crate w repo Horizona) do prób z botami, `limactl` lub `docker` do czystego Ubuntu bez logowania.
+
 **OTWARTE (D28, maskowanie w raporcie):** `hot report` maskuje znane sekrety i adresy IPv4. Nie maskuje jeszcze adresów IPv6 graczy (dojdzie w M8, razem z logami `hot-proxy`) ani ścieżek z katalogiem domowym i nazwą użytkownika w raporcie gracza z „Napraw” (M11; Horizon w `share-log` je usuwa).
 
 **2026-11-12 — M0b (M0.15–M0.18) zrobione:** `AGENTS.md` uzupełniony o zasady pracy z grą. `crates/hot-diag`: `DiagError::new(code, what, fix)` (brak pola = błąd kompilacji, testy `compile_fail` z kodem E0061), zapis JSONL z rotacją, maskowanie znanych sekretów w każdym polu, panika jako `HOT-E0002` z backtrace, katalog błędów wklejany do programu przy budowie. Test katalogu w CI w obie strony. `hot-diag report`: pięć części D28, < 200 KB, sekrety i adresy IPv4 graczy zamaskowane. Testy maskowania sprawdzone mutacją (wyłączone maskowanie → testy czerwone). Etap M0 czeka tylko na ThinkCentre (M0.10, M0.11). Następny krok: M1.
