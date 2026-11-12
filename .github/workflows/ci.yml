@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # PL: Także gałęzie prób, żeby ich commity przechodziły tę samą bramkę na Linuksie.
+    # EN: Spike branches too, so their commits pass the same gate on Linux.
+    branches: [main, "spike/**"]
   pull_request:
 
 # PL: Workflow tylko czyta repozytorium. Bez tego token dostaje domyślne, szersze uprawnienia.
