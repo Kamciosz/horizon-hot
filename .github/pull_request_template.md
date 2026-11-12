@@ -1,22 +1,23 @@
-## Co zmienia ten PR
+## Co zmienia
 
-<!-- Krótko: co robi zmiana. Link do issue, jeśli jest. -->
+<!-- Krótko: co robi zmiana i którego składnika dotyczy. -->
 
 ## Po co
 
-<!-- Problem/uzasadnienie. Dlaczego teraz, czemu tak, a nie inaczej. -->
+<!-- Problem albo zgłoszenie (#numer). Dlaczego tak, a nie inaczej. -->
 
-## Jak testowane
+## Jak sprawdzone
 
-<!-- Komendy i kroki. Wynik (np. "gradlew test: 12 passed"). -->
+<!-- Komendy i wynik. Test, który obleje bez tej zmiany. -->
 
-## Ryzyka i wpływ na inne moduły
+## Ryzyka
 
-<!-- Co może się zepsuć, na co uważać przy review, czy wymaga migracji danych. -->
+<!-- Co może się zepsuć w innych składnikach. Czy zmienia ABI, format danych albo zachowanie przy aktualizacji. -->
 
-## Checklista
-- [ ] build / testy / lint przechodzą lokalnie
-- [ ] `CHANGELOG.md` uzupełniony
-- [ ] dokumentacja/komentarze w nieoczywistych miejscach zaktualizowane
-- [ ] brak martwego kodu, debug-printów, plików tymczasowych
-- [ ] commity atomowe i zgodne z Conventional Commits
+## Lista
+
+- [ ] `cargo fmt`, `clippy` i `test` przechodzą (komendy w `AGENTS.md`)
+- [ ] nowe błędy mają kod `HOT-EXXXX` i wpis w `docs/bledy/`
+- [ ] plik `docs/zmiany/<gałąź>.md` z wpisem do changelogu
+- [ ] dokumentacja zmieniona w tym samym PR (README, ARCHITECTURE, ADR, przewodniki)
+- [ ] brak martwego kodu, `println!` do debugowania i plików tymczasowych

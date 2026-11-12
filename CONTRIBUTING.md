@@ -1,17 +1,18 @@
-# CONTRIBUTING
+# Jak pracujemy
 
-Dzięki, że wchodzisz w projekt. Poniżej zasady, które trzymają kod czytelnym dla kolejnych osób.
+## Pierwsze uruchomienie
 
-## Setup
 ```bash
-git clone <adres>
-cd <projekt>
-<komenda instalacji zależności>
-<komenda build>
-<komenda testów>
+git clone https://github.com/Kamciosz/horizon-hot.git
+cd horizon-hot
+git config core.hooksPath .githooks
+cargo test --workspace
 ```
 
+Sprawdź, czy hook działa: `git config core.hooksPath` ma zwrócić `.githooks`. Wersję Rusta ustawia `rust-toolchain.toml`.
+
 ## Gałęzie
+
 | Typ | Nazwa | Od czego |
 |---|---|---|
 | funkcja | `feat/krotki-opis` | `main` |
@@ -19,32 +20,35 @@ cd <projekt>
 | dokumentacja | `docs/krotki-opis` | `main` |
 | refaktor | `refactor/krotki-opis` | `main` |
 
-`main` jest zawsze zielone (build + testy). Bez pushy bezpośrednich do `main`.
+`main` zawsze się buduje i przechodzi testy. Nikt nie wrzuca zmian prosto do `main`.
 
-## Commity (Conventional Commits)
+## Commity
+
 ```
-<typ>(<zakres>): opis co i dlaczego   ← temat, ≤72 znaki
+<typ>(<zakres>): co i po co        temat od 10 do 72 znaków
 
 Dlaczego ta zmiana jest potrzebna.
-Co się zmienia dla innych modułów.
 Jak to sprawdzić.
 ```
-Typy: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
-Format wymusza hook: `git config core.hooksPath .githooks` (robisz to raz po klonie; opis w tym pliku niżej nie wystarcza — hook jest obowiązkowy).
+
+Typy: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Zakres to nazwa składnika: `hot-core`, `hotd`, `hot-proxy`, `hot-play`…
+
+Temat piszemy po polsku w formie bezosobowej: „dodanie”, „poprawka”, „usunięcie”. Przykład: `feat(hot-core): ładowanie generacji poza wątkiem serwera`.
+
+Hook odrzuca zły format, temat dłuższy niż 72 znaki i ślady AI w commicie. CI sprawdza to samo w każdym pull requeście.
 
 ## Pull request
-1. Rebase na świeży `main`: `git fetch && git rebase origin/main`.
-2. Wypełnij szablon PR (co / po co / jak testowane / ryzyka).
-3. Minimum 1 review. Review to nie formalność: brakuje testu? brakuje komentarza w nieoczywistym miejscu? → komentarz.
-4. Merge dopiero, gdy CI zielone i komentarze rozwiązane.
 
-## Definition of done
-- [ ] build + testy + lint przechodzą lokalnie (komendy w `AGENTS.md`)
-- [ ] `CHANGELOG.md` uzupełniony (sekcja `Unreleased`)
-- [ ] docs/README zaktualizowane, jeśli zmieniło się zachowanie lub struktura
-- [ ] brak martwego kodu, debug-printów i plików tymczasowych w diffie
-- [ ] commity atomowe i opisowe (nie „fix", „update")
+1. `git fetch && git rebase origin/main`.
+2. Dodaj `docs/zmiany/<gałąź>.md` z wpisem do changelogu (`docs/zmiany/README.md`). `CHANGELOG.md` zmienia tylko właściciel przy wydaniu — dzięki temu równoległe PR-y nie mają konfliktów.
+3. Wypełnij szablon: co, po co, jak sprawdzone, ryzyka.
+4. Szymon przegląda i scala. Bez zielonego CI nie scalamy.
 
-## Style
-- Formatowanie: `<formatter>` (konfiguracja w repo) — uruchom przed commitem.
-- Nazwy po angielsku, opisowe. Komentarze: tam, gdzie kod nie mówi „dlaczego".
+## Kiedy gotowe
+
+- [ ] `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` przechodzą
+- [ ] jest test, który obleje bez tej zmiany
+- [ ] nowe błędy mają kod i wpis w `docs/bledy/` (`docs/STANDARD_KODU.md`)
+- [ ] plik `docs/zmiany/<gałąź>.md`
+- [ ] dokumentacja zmieniona razem z kodem
+- [ ] brak martwego kodu, `println!` do debugowania i plików tymczasowych

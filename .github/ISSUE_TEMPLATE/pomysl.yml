@@ -1,0 +1,32 @@
+name: Pomysł
+description: Nowa funkcja albo zmiana.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Jaki problem rozwiązuje
+      description: Kto ma ten problem i kiedy.
+    validations:
+      required: true
+  - type: textarea
+    id: pomysl
+    attributes:
+      label: Co proponujesz
+    validations:
+      required: true
+  - type: dropdown
+    id: skladnik
+    attributes:
+      label: Składnik
+      options:
+        - mody gorące (hot-core, hot-sdk, hot-abi)
+        - podmiana silnika (hot-proxy)
+        - aktualizacje i naprawy (hotd)
+        - paczka zasobów (hot-pack)
+        - aplikacja gracza (hot-play)
+        - instalator serwera
+        - logi i raporty (hot-diag)
+        - inny
+    validations:
+      required: true

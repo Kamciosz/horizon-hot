@@ -1,0 +1,46 @@
+name: Błąd
+description: Coś nie działa na serwerze albo w aplikacji gracza.
+labels: [bug]
+body:
+  - type: textarea
+    id: co
+    attributes:
+      label: Co się stało
+      description: Co zobaczyłeś i czego się spodziewałeś.
+    validations:
+      required: true
+  - type: input
+    id: kod
+    attributes:
+      label: Kod błędu
+      description: Z logu albo raportu, np. HOT-E0412. Puste, jeśli nie ma.
+      placeholder: HOT-E0000
+  - type: textarea
+    id: raport
+    attributes:
+      label: Raport
+      description: |
+        Serwer: wynik `hot report`. Gracz: plik z „Napraw” w aplikacji.
+        Sekrety są w nim zamaskowane, ale przejrzyj go przed wklejeniem.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: kroki
+    attributes:
+      label: Jak to powtórzyć
+      placeholder: |
+        1. ...
+        2. ...
+  - type: dropdown
+    id: gdzie
+    attributes:
+      label: Gdzie
+      options:
+        - serwer
+        - aplikacja gracza (macOS)
+        - aplikacja gracza (Windows)
+        - aplikacja gracza (Linux)
+        - instalator serwera
+    validations:
+      required: true

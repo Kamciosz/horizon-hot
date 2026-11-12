@@ -7,3 +7,16 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Szymon Sosnowski"]
+repository = "https://github.com/Kamciosz/horizon-hot"
+
+# PL: Błąd ma trafić do logu z kontekstem (docs/STANDARD_KODU.md), a nie zakończyć proces paniką bez opisu.
+# EN: An error must reach the log with context (docs/STANDARD_KODU.md), not end the process with a bare panic.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+print_stdout = "warn"
+print_stderr = "warn"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

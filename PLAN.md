@@ -1,334 +1,433 @@
-# PLAN — horizon-hot
+# PLAN — horizon-hot (wersja 2)
 
-Serwer Horizon (Minecraft 26.3 w Rust), który bierze mody z repozytorium git i wczytuje je w trakcie gry, bez restartu serwera.
+Serwer Horizon (Minecraft Java 26.3 napisany w Rust), który bierze mody z repozytorium na GitHubie i wczytuje je w trakcie gry, bez restartu. Do tego instalacja jednym poleceniem i prosta aplikacja terminalowa dla graczy. Wszystko aktualizuje się samo i samo naprawia.
 
-Stan: plan zatwierdzony do dyskusji, kod jeszcze nie istnieje. Data: 2026-11-12.
-Oznaczenia: **FAKT** = sprawdzone w kodzie Horizona (rewizja `66f3981`, `~/Library/Application Support/horizon-launcher/native/stage`) albo próbą; **NIEWIADOMA** = rozstrzyga ją wskazany spike z M0.
-
----
-
-## 1. Cel i kryterium „gotowe”
-
-Cel: operator robi `git push` do repo serwera, a w ciągu kilkudziesięciu sekund zmiana działa na serwerze. **Serwer nigdy się nie restartuje i nikt nie zostaje rozłączony** — także przy modach natywnych `.hnmod` i aktualizacji Horizona. Te dwa przypadki idą przez przeszczep silnika za proxy (D12): gracze zostają połączeni, a świat stoi kilka sekund. Wszystko inne działa bez żadnej pauzy (D1, D8, D16, D17).
-
-„Gotowe” dla całego projektu (każdy punkt ma obserwację, która by oblała):
-
-1. Repo bez katalogu `mods/` → serwer działa jak zwykły Horizon 26.3 (log: `hot-host: 0 modów`, gracz wchodzi).
-2. Push zmiany w kodzie moda → nowa wersja logiki działa bez restartu: PID procesu `horizon-engine` taki sam przed i po, gracz połączony bez przerwy, zachowanie zmienione.
-3. Push zmiany w `data/` moda → `/reload`, nowy przepis działa, PID bez zmian.
-4. Push nowego bloku z puli slotów → blok istnieje w grze bez restartu serwera (wygląd: patrz D9).
-5. Push moda, który panikuje → mod wyłączony, serwer działa dalej, poprzednia generacja przywrócona, commit oznaczony jako zły.
-6. Push moda, który wywołuje segfault → serwer wstaje z ostatnią dobrą generacją, a nie wpada w pętlę awarii.
-7. 100 przeładowań pod obciążeniem → MSPT w granicach ustalonego marginesu, wzrost pamięci zmierzony i ograniczony.
-7a. Na docelowym ThinkCentre, z 10 botami, w trakcie wdrożenia (pobranie, przeładowanie, migracja) p99 MSPT < 50 ms — gracze nie mają lagu. Test obciążeniowy obok (np. `stress-ng` w slice tła) nie podnosi MSPT ponad ten próg.
-8. `~/engineering-standard/bin/quality-audit` ≥ 120/125.
+- Data: 2026-11-12. Wersja 2 zastępuje wersję 1 (ta sama data) po weryfikacji wykonalności w kodzie Horizona.
+- Stan: plan. Repo założone (`f788091`: szablon standardu, CI Rust, pusty `hot-abi`). Budowa rusza na „go”.
+- Oznaczenia: **FAKT** = sprawdzone w kodzie Horizona (rewizja `66f3981`, `~/Library/Application Support/horizon-launcher/native/stage`, ścieżki względem `crates/`) albo próbą; **NIEWIADOMA** = rozstrzyga ją wskazany spike z M0.
 
 ---
 
-## 2. Ustalenia z researchu (podstawa decyzji)
+## 1. Wymagania użytkownika
 
-| # | Ustalenie | Status | Źródło |
-|---|---|---|---|
-| R1 | Mod natywny (trait mod) może zależeć od `libloading 0.8.9`; przechodzi kontrolę `E_CRATE_DEPENDENCY` | FAKT (próba) | `projects/probe-hot-host` w horizon-mod-lab, build 39 s |
-| R2 | Taki mod buduje się do samodzielnego silnika serwera (`native-build --server-output`) i na serwerze dedykowanym ładuje `.dylib`, wywołując z niej funkcję | FAKT (próba) | log: `hot-host probe: hot_probe() = 4242` |
-| R3 | Haki serwera działają na jednym wątku „Server thread”, 20 TPS | FAKT | `entry.rs:35`, `docs/server.md:42` |
-| R4 | Lista modów natywnych to jeden `OnceLock`, bez wyładowania ani przeładowania | FAKT | `mod_api.rs:594` |
-| R5 | Mod może zarejestrować własną komendę (gracza i konsoli), np. `hot reload` | FAKT | `docs/native-mods.md:2095-2105`, `native_server.rs:999-1054`, `dedicated.rs:1904` |
-| R6 | `horizon-server cmd` przekazuje komendę na stdin silnika; komenda moda ma pierwszeństwo | FAKT | `cli.rs:150-161`, `supervisor.rs:685` |
-| R7 | Haki przekazują typy Rusta (`&mut dyn Host`, `ItemStack`, `Text`); silnik ma własny alokator `horizon_threads::Allocator` | FAKT | `launcher/src/native_mods/api.rs:104` |
-| R8 | Bloki i przedmioty rejestrują się tylko przy starcie; `/reload` ich nie doda | FAKT | `docs/mods.md:23-25` |
-| R9 | Zachowanie bloku można ustalać hakami w locie (`use_item_on`, `right_click_block`, `destroy_block`, `place_block`, `tick_block`, `random_tick`) | FAKT | `native_hooks.rs:6584-6892` |
-| R10 | `/reload` na serwerze dedykowanym przeładowuje przepisy, łupy, tagi, zaawansowania i funkcje `mcfunction`, po czym synchronizuje graczy | FAKT | `game.rs:20248-20300`, `functions.rs:716` |
-| R11 | Klient Horizon musi mieć identyczny rejestr treści (hash `content_identity`); inaczej dostaje rozłączenie „Content registry mismatch” | FAKT | `content_identity.rs:1-17`, `lan/conn.rs:1041-1076` |
-| R12 | Mody natywne nie są porównywane z klientem; `.hmod` z `side="both"` tak | FAKT | `docs/mods.md:86-93` |
-| R13 | Serwerowy resource pack jest wysyłany tylko w fazie konfiguracji; serwer nie ma kodu wysyłania paczki w trakcie gry ani hostingu HTTP | FAKT | `lan/conn.rs:1151-1170` |
-| R14 | Klient obsługuje wysłanie paczki w trakcie gry, `item_model` i `custom_model_data` | FAKT | `net.rs:885-890`, `item_model.rs:1116,1355` |
-| R15 | `/transfer` działa po obu stronach (wymaga `accepts-transfers`) | FAKT | `commands.rs:1122`, `net.rs:925` |
-| R16 | `server.toml` i `[properties]` (adres paczki, `accepts-transfers`) działają dopiero po restarcie | FAKT | `docs/hosting.md:200` |
-| R17 | Katalog budowy `native/stage` i `build.log` są wspólne dla wszystkich buildów natywnych launchera | FAKT (próba) | nagłówek logu wymieniał `drony_native` |
-| R18 | Horizon planuje mody `dylib` ładowane przy starcie i **nigdy** nie wyładowywane; WASM usunięty; Plugin API (W9) niezaimplementowane | FAKT | issue #7386, `docs/native-mods.md:664`, `docs/server-next.md:153` |
+| # | Wymaganie |
+|---|---|
+| W1 | Serwer Horizon; mody z podpiętego repo na GitHubie; repo może nie mieć modów. |
+| W2 | Zmiana modów **bez restartu serwera**, z możliwie najkrótszą pauzą (1,5 s to za długo). |
+| W3 | Działa na współdzielonym ThinkCentre kolegi (Ubuntu, `sudo` jest); słaby sprzęt nie może przerywać gry — ciężka praca idzie w tle. |
+| W4 | Wszystko aktualizuje się samo: mody, Horizon, nasz system, aplikacja gracza. |
+| W5 | Wszystko samo się naprawia po błędzie; przywrócenie świata z kopii tylko po potwierdzeniu operatora. |
+| W6 | Serwer instaluje i konfiguruje jedno polecenie na Ubuntu. |
+| W7 | Aplikacja gracza: terminalowa, odporna na pomyłki, instalowana jedną linijką na macOS, Windows i Linuksie. |
+| W8 | Bez zewnętrznych powiadomień; stan widać w grze (operatorzy) i w `hot status`. |
+| W9 | Gotowy projekt może rozwijać i naprawiać ktoś z zespołu (człowiek albo agent AI) bez historii rozmów i bez tego planu; każdy błąd zostawia log, z którego model bez wiedzy o projekcie umie go naprawić. |
+
+## 2. Kryterium „gotowe” (całość)
+
+Każdy punkt ma obserwację, która by oblała:
+
+1. Repo bez `mods/` → zwykły serwer; gracz wchodzi (W1).
+2. Push zmiany w kodzie moda gorącego → nowe zachowanie w ≤ 3 min (z budową w CI), PID silnika ten sam, gracz połączony bez przerwy (W1, W2).
+3. Push zmiany w `data/` → nowy przepis działa, PID ten sam (W2).
+4. Push nowego bloku z puli slotów → blok w grze bez restartu (W2).
+5. Push moda natywnego `.hnmod` → działa po podmianie silnika; nikt nie rozłączony; pauza świata zmierzona i ≤ 1 s; gracz bez ekranu ładowania (W2, wariant A).
+6. Nowe Nightly Horizona → serwer sam przechodzi na nie jak w punkcie 5; wydanie, którego nie da się zbudować → serwer zostaje na starym, `hot status` mówi dlaczego (W4).
+7. Mod z paniką → wyłączony, wraca poprzednia generacja, serwer działa (W5).
+8. Mod z segfaultem → silnik wstaje z ostatnią dobrą generacją bez pętli awarii; gracze przytrzymani przez proxy i wprowadzeni z powrotem (W5).
+9. Na ThinkCentre z 10 botami, w trakcie budowy silnika i podmiany: p99 MSPT < 50 ms (W3).
+10. Czysta maszyna Ubuntu → jedno polecenie → autotest „Działa”; drugie uruchomienie bez zmian (W6).
+11. Czyste maszyny macOS, Windows 11, Ubuntu Desktop → jedna linijka → „Graj” → gracz na serwerze; uszkodzony plik launchera lub Horizona naprawiony przy następnym starcie (W7, W5).
+12. `quality-audit` ≥ 120/125.
+13. Test „nowej osoby w zespole”: świeży agent dostaje tylko repo (bez `PLAN.md`) i wynik `hot report` z celowo wywołanego błędu (po jednym z każdej kategorii D27) i bez innych wskazówek naprawia go albo trafnie wskazuje przyczynę. Obserwacja: transkrypt w `docs/testy/obcy-agent.md` (W9).
 
 ---
 
-## 3. Decyzje architektoniczne
+## 3. Ustalenia z researchu i weryfikacji
 
-Każda decyzja ma postać gotową do przeniesienia do `docs/adr/NNNN-*.md` (kontekst → decyzja → konsekwencje).
+| # | Ustalenie | Status i źródło |
+|---|---|---|
+| R1 | Trait mod może zależeć od `libloading 0.8.9` (jest w `Cargo.lock` Horizona) | FAKT, próba `horizon-mod-lab/projects/probe-hot-host`, build 39 s (cache ciepły) |
+| R2 | Taki mod w silniku serwera (`native-build --server-output`) ładuje `.dylib` i woła z niej funkcję | FAKT, log `hot_probe() = 4242` |
+| R3 | Pętla serwera: jeden wątek, 20 TPS; generowanie chunków i światło na puli wątków | FAKT, `docs/server.md:28` |
+| R4 | Mody natywne ładowane raz (`OnceLock`), bez wyładowania; Horizon planuje dylibs nigdy niewyładowywane | FAKT, `mod_api.rs:594`, issue #7386 |
+| R5 | Mod rejestruje komendy gracza i konsoli | FAKT, `docs/native-mods.md:2095-2105`, `native_server.rs:999-1054` |
+| R6 | Hak `player_command` dostaje każdą komendę przed obsługą i może ją anulować | FAKT, `horizon-client/src/game/lan_actions.rs:3357-3385` |
+| R7 | `horizon-server cmd` przekazuje komendę na stdin silnika | FAKT, `horizon-server/src/cli.rs:150-161`, `supervisor.rs:685` |
+| R8 | Silnik bez `panic=abort`; alokator mimalloc bez `override` → cdylib ma własną stertę i własny hook paniki | FAKT, `Cargo.toml` (profile), `third_party/libmimalloc-sys/Cargo.toml:62` |
+| R9 | Bloki i przedmioty rejestrują się raz przy starcie, z zamrożonym kształtem, światłem, twardością, stanami | FAKT, `docs/mods.md:23-25,140-260` |
+| R10 | Zachowanie bloku można ustalać hakami w locie | FAKT, `native_hooks.rs:6584-6892` |
+| R11 | Serwer dedykowany ładuje `.hmod` z `horizon-mods/` + `horizon-mods.txt` (`mod.<id>:true`) | FAKT, `game/mods.rs:78`, `horizon-client-render/src/mod_list.rs:12-61`, `horizon-server/src/engine.rs:270` |
+| R12 | Klient Horizon (`brand == "horizon"`) musi mieć te same `.hmod` z `side="both"` i ten sam `content_identity`, inaczej rozłączenie | FAKT, `lan/conn.rs:1003-1076`, `content_identity.rs` |
+| R13 | `/reload` na serwerze dedykowanym: przepisy, łupy, tagi, zaawansowania, `mcfunction` + synchronizacja graczy | FAKT, `game.rs:20248-20300`, `functions.rs:716` |
+| R14 | Paczka zasobów: wysyłana w konfiguracji; z poprawnym sha1 → cache, nowy sha1 → pobranie; trait API nie ma wysyłki paczki w trakcie gry | FAKT, `server_packs.rs:50,209`, `download.rs:214-262` |
+| R15 | `/transfer` na ten sam host:port działa; `accepts-transfers` zmienia się bez restartu | FAKT, `game/remote.rs:2058-2070`, `lan/mod.rs:362`, `management_methods.rs:149` |
+| R16 | Forwarding Velocity v1: `online_mode=false`, `forwarding.secret`, adres IP | FAKT, `lan/forwarding.rs`, `docs/velocity-forwarding.md`, `game/dedicated.rs:234` |
+| R17 | Klient obsługuje `StartConfiguration`, ale zeruje świat i pokazuje ekran rekonfiguracji | FAKT, `net.rs:891`, `game/remote.rs:9996-10040` |
+| R18 | Horizon ma `[transfer]`: `player-expect`, `player-export [freeze]` (zamyka okna, NBT gracza), `player-release`; brak strony importu | FAKT, `docs/server.md:147-254`, `game/dedicated/transfer.rs` |
+| R19 | Stan gry: `Game` ~480 pól, `Guest` ~163 pola na gracza; podmiana niewidoczna dla klienta (≤ 50 ms) to miesiące pracy | FAKT, `game.rs:2383-3289`, `lan/guest.rs:85` |
+| R20 | Zapis chunka w pamięci (`Chunk::into_nbt`) i zbiór zmienionych chunków istnieją | FAKT, `horizon-world/src/chunk.rs:255`, `game.rs:15895` |
+| R21 | Budowa silnika wymaga przygotowanych zasobów gry; pobieranie plików Mojanga w CI zabronione przez politykę Horizona | FAKT, `launcher/src/native_mods.rs:2113`, `docs/microsoft-account.md:104-108` |
+| R22 | Pierwszy build silnika ok. 12 min, potem przyrostowo | FAKT, `docs/native-mods.md:1967`; próba: 39 s |
+| R23 | Od 2026-10-28 tylko wydania Nightly; ~6 w dwa tygodnie; między nimi 51–4491 commitów; `game.rs` 2391 commitów od 1.11 | FAKT, `gh release list`, `gh api compare` |
+| R24 | `PROTOCOL_VERSION` stały dla 26.3; `content_identity` liczony z rejestrów, nie z wersji Horizona | FAKT, `horizon-protocol/src/lib.rs:31`, `content_identity.rs:56-75` |
+| R25 | `status --json`: MSPT `average/p50/p95/p99` z ostatnich 100 ticków, `rss_bytes`, `cpu_percent`; próbka co 1 s | FAKT, `game/dedicated/status.rs:156-160`, `clock.rs:291`, `supervisor.rs:536` |
+| R26 | `horizon-server update` działa tylko dla instalacji z `install.sh` | FAKT, komunikat programu |
+| R27 | Katalog budowy `native/stage` i `build.log` są wspólne dla buildów natywnych | FAKT, próba |
+| R28 | Pusty serwer Horizon: ok. 1,4–1,5 GB RAM | FAKT, `docs/server.md` (pomiar M4 Pro) |
 
-### D1. Jeden mod natywny „hot-host” wkompilowany w silnik raz; reszta to biblioteki ładowane w locie
-- **Kontekst:** R4 i R18 — Horizon nie przeładuje modu natywnego. R1 i R2 — `libloading` działa w silniku serwera.
-- **Decyzja:** `hot-host` to trait mod budowany `native-build --server-output`. Implementuje haki z listy D5 i przekazuje je do modów „gorących” (`.dylib` na macOS, `.so` na Linuksie), wczytywanych przez `libloading`.
-- **Konsekwencje:** silnik budujemy wyłącznie, gdy zmienia się sam `hot-host` albo wersja Horizona. Mod gorący potrafi tylko to, co daje lista haków D5 i funkcje gospodarza D6.
+---
 
-### D2. Granica host ↔ mod to stabilne C ABI (`hot-abi`), nie ABI Rusta
-- **Kontekst:** R7 — silnik ma własny alokator, a haki przekazują typy Rusta. ABI Rusta jest stabilne tylko przy identycznym kompilatorze, źródłach i flagach.
-- **Decyzja:** crate `hot-abi`: struktury `#[repr(C)]`, napisy jako `(ptr, len)` pożyczane na czas wywołania, wynik `Flow` jako `u8`. Każdy mod eksportuje `hot_mod_abi() -> u32` i `hot_mod_entry() -> *const HotModVTable`. Host odrzuca mod z inną wersją główną ABI. Pamięć zwalnia zawsze ta strona, która ją przydzieliła.
-- **Konsekwencje:** mod gorący można zbudować dowolnym stabilnym Rustem (≥ wersja minimalna w `hot-sdk`). Każdy hak trzeba przetłumaczyć ręcznie, dlatego lista z D5 jest celowo krótka i rośnie tylko wtedy, gdy ktoś potrzebuje nowego haka.
+## 4. Decyzje architektoniczne
 
-### D3. Starej generacji nigdy nie wyładowujemy
-- **Kontekst:** `dlclose` biblioteki Rusta grozi awarią (wątki, statyki, destruktory TLS), a na macOS zwykle i tak nic nie robi.
-- **Decyzja:** każda generacja to kopia pliku pod unikalną nazwą `gen/<mod>-<sha>-<n>.dylib`. Stara generacja zostaje w pamięci, ale nie dostaje już wywołań. Wyładowanie następuje dopiero przy restarcie procesu.
-- **Konsekwencje:** każde przeładowanie zostawia rozmiar biblioteki w pamięci. Kryterium M1 mierzy ten wzrost. Opcjonalny restart nocny (M7) czyści pamięć.
+Każda w formie gotowej do `docs/adr/NNNN-*.md` (kontekst → decyzja → konsekwencje). Numer ADR = numer decyzji + 1 (ADR 0001 to struktura projektu).
 
-### D4. Kontrakt cyklu życia moda jest w ABI od wersji 1
-- `init(ctx, prev_state: bytes) -> status` — wywoływane **poza** wątkiem serwera; tam też jest `dlopen`. Przełączenie generacji następuje na granicy ticku (w `server_tick`), więc przeładowanie nie zatrzymuje ticków.
-- `deactivate(ctx) -> bytes` — **obowiązkowe**: zatrzymuje wątki i timery moda i zwraca stan do przekazania nowej generacji.
-- Kontekst `ctx` jest ważny tylko w czasie jednego wywołania. `hot-sdk` wymusza to czasem życia (`HostCtx<'call>`).
-- Każde wejście do moda jest opakowane w `catch_unwind` (w `hot-sdk`). Panika → kod błędu → host wyłącza mod i wraca do poprzedniej generacji.
-- Trwałe dane mod trzyma w `hot-data/<mod>/` w katalogu serwera.
+### Warstwa gorąca (bez żadnej pauzy)
 
-### D5. Haki w v1 (kuratorowana lista)
-`server_tick`, `player_logged_in`, `player_logged_out`, `player_chat`, `player_command`, `use_item`, `use_item_on`, `right_click_block`, `left_click_block`, `place_block`, `destroy_block`, `tick_block`, `random_tick`, `server_data_loaded`. Komendy modów idą przez jedną komendę główną `/hot <mod> <argumenty…>`, zarejestrowaną przez `hot-host` przy starcie (R5). Własne komendy najwyższego poziomu (`/sklep`) są możliwe tylko wtedy, gdy spike S3 potwierdzi, że da się przechwycić i anulować `player_command`.
+**D1. Gospodarz w silniku + mody gorące ładowane w locie.**
+Kontekst: R1, R2, R4. Decyzja: jeden trait mod `hot-host` wkompilowany w silnik; mody gorące to `cdylib` (`.so` na serwerze, `.dylib` na Macu w testach) ładowane przez `libloading`. Konsekwencje: mod gorący robi tylko to, co dają haki D5 i funkcje D6; nowe bloki — przez sloty (D8).
 
-### D6. Funkcje gospodarza dla modu (v1)
-Wiadomość do gracza i do wszystkich, `run_command` (R: `native_server.rs:479`; spike S4), odczyt i zapis bloku, danie przedmiotu, informacje o graczu (nazwa, UUID, pozycja), cząsteczki, log. Wszystkie jako tabela wskaźników funkcji w `HostVTable`, ważna tylko w trakcie wywołania.
+**D2. `hot-host` jest cienkim, stałym loaderem; logika gospodarza to `hot-core`.**
+`hot-host` tylko ładuje `hot-core` (też `cdylib`) i przekazuje mu wszystkie haki. `hot-core` zarządza modami, slotami i komendą `/hot` i przeładowuje się jak mod gorący. Zmiana gospodarza nie wymaga nowego silnika.
 
-### D7. Pula slotów na bloki i przedmioty w osobnym `.hmod` (`hot-slots`, `side="both"`)
-- **Kontekst:** R8 — rejestry są zamrożone od startu. R11 i R12 — klient musi mieć ten sam rejestr, a mody natywne nie są sprawdzane.
-- **Decyzja:** sloty (`hot:block_000…255`, `hot:item_000…511`) leżą w modzie zawartości `hot-slots.hmod`. **`hot-host` nie rejestruje żadnej treści** (żadnego `native_blocks` ani `native_items`) — inaczej klienci dostaliby rozłączenie z niejasną przyczyną. Gracz instaluje `hot-slots.hmod` raz.
-- **Przydział slotów** jest tylko dopisywany i zapisywany w stanie serwera (`hot-state/slots.json`). Raz przydzielony slot nigdy nie trafia do innego moda, bo świat zapisuje bloki po identyfikatorze. Zwolnienie slotu to jawna komenda operatora.
-- **Konsekwencje:** zabraknie slotów → trzeba wydać większą pulę = restart serwera i aktualizacja u graczy. Rozmiar puli jest wersjonowany.
+**D3. Granica to stabilne C ABI (`hot-abi`).**
+Kontekst: R8 — osobne sterty i hooki paniki. Decyzja: struktury `#[repr(C)]`, napisy `(ptr, len)` pożyczane na czas wywołania, każda strona zwalnia własną pamięć; `hot_mod_abi() -> u32`, `hot_mod_entry() -> *const HotModVTable`; inny `ABI_MAJOR` → odmowa. Konsekwencje: mody budują się dowolnym stabilnym Rustem; każdy hak tłumaczymy ręcznie, dlatego lista D5 jest krótka.
 
-### D8. Dane modów jako paczka danych świata + `/reload`
-Katalog `mods/<id>/data/` jest kopiowany do `<świat>/datapacks/hot-<id>/`, po czym daemon wysyła `reload` (R10). Zmiana samych danych nie wymaga budowania niczego.
+**D4. Cykl życia moda w ABI od wersji 1; starej generacji nie wyładowujemy.**
+- `init(ctx, prev_state)` i `dlopen` poza wątkiem serwera; przełączenie generacji na granicy ticku.
+- Obowiązkowe `deactivate(ctx) -> state`: zatrzymuje wątki i timery, oddaje stan.
+- `ctx` ważny tylko na czas wywołania (`HostCtx<'call>` w `hot-sdk`).
+- `catch_unwind` w każdym eksporcie (`hot-sdk`); panika → mod wyłączony, wraca poprzednia generacja.
+- Każda generacja to kopia pliku pod unikalną nazwą; stara zostaje w pamięci bez wywołań. Pamięć odzyskuje podmiana silnika (D11) wykonywana automatycznie, gdy wzrost przekroczy próg — bez restartu.
+- Trwałe dane moda: `hot-data/<mod>/`.
 
-### D9. Wygląd: resource pack serwowany przez daemon pod stałym adresem
-- **Kontekst:** R13 i R16 — adres paczki ustawia się raz, a serwer wysyła paczkę tylko przy wejściu gracza.
-- **Decyzja:** daemon sam serwuje `http://<host>:8131/pack.zip` (stały adres, ustawiony raz w `init`). Paczka powstaje z `mods/*/assets/` i przydziału slotów. Pole `sha1` jest puste, więc klient pobiera paczkę przy każdym wejściu (spike S5). Komenda `/hot refresh` robi graczom `/transfer` na ten sam serwer (R15): kilka sekund ekranu ładowania, bez restartu serwera.
-- **Konsekwencje:** jeśli S5 obleje, nowy wygląd widać dopiero po ponownym wejściu gracza. Logika i dane i tak działają od razu. Wysłanie paczki w trakcie gry (R14 — klient to umie) wymaga dostępu `hot-host` do pakietów — sprawdza to spike S6. Jeśli się uda, `/transfer` przestaje być potrzebny.
+**D5. Haki v1.**
+`server_tick`, `player_logged_in`, `player_logged_out`, `player_chat`, `player_command` (własne komendy najwyższego poziomu, np. `/sklep` — R6), `use_item`, `use_item_on`, `right_click_block`, `left_click_block`, `place_block`, `destroy_block`, `tick_block`, `random_tick`, `server_data_loaded`. Plus komenda `/hot <mod> …` rejestrowana przez `hot-host`.
 
-### D10. Format repozytorium serwera
+**D6. Funkcje gospodarza v1.**
+Wiadomość do gracza i do wszystkich, `run_command`, odczyt i zapis bloku, danie przedmiotu, dane gracza (nazwa, UUID, pozycja), cząsteczki, log. Tabela `HostVTable` ważna tylko w trakcie wywołania.
+
+**D7. Dane modów jako paczka danych świata + `/reload`.**
+`mods/<id>/data/` → `<świat>/datapacks/hot-<id>/` → `reload` (R13). Bez budowania.
+
+**D8. Pula slotów w `hot-slots.hmod` (`side="both"`), gracz instaluje ją raz (robi to aplikacja gracza).**
+- Kontekst: R9, R11, R12. **`hot-host` i `hot-core` nie rejestrują żadnej treści** — inaczej klienci dostaliby rozłączenie z niejasną przyczyną.
+- Pula od pierwszej wersji duża: 4096 bloków (pełna kostka, bez stanów) i 8192 przedmiotów. Rozmiar sprawdzany w M5 (start, pamięć klienta). Zmiana puli zmienia `content_identity` → wymaga nowego pliku u graczy; dlatego pula jest duża i stała.
+- Przydział slotów tylko dopisywany, w `hot-state/slots.json` (objęty kopią zapasową); slot nigdy nie wraca do innego moda bez jawnej komendy operatora.
+- Slot daje: nazwę i wygląd (paczka zasobów) + zachowanie (haki D5). Nie daje innego kształtu, światła ani twardości (R9).
+
+**D9. Wygląd: paczka zasobów serwowana przez `hot-pack` pod stałym adresem, z prawdziwym sha1.**
+`hot-pack` (osobny mały proces, poza hamulcem D16) serwuje `http://<host>:8131/pack.zip`; adres ustawiony raz przy instalacji. Nowa paczka = nowy sha1 → klient pobiera tylko zmienioną (R14). Nowy wygląd dociera do graczy przy podmianie przez proxy (D11) — ten sam mechanizm co silnik — albo przy następnym wejściu. NIEWIADOMA S6: czy proxy może samo wysłać `ResourcePackPush` w trakcie gry (klient to obsługuje, R14) — wtedy wygląd zmienia się bez żadnego mrugnięcia.
+
+### Silnik i proxy (wariant A)
+
+**D10. `hot-proxy` przed silnikiem.**
+Gracze łączą się z `hot-proxy` (Rust, na `horizon-protocol`) na porcie 25565; silnik słucha na `127.0.0.1:25566` w trybie forwardingu Velocity (R16). Proxy kończy szyfrowanie, kompresję, keep-alive i teleporty po stronie klienta i mapuje identyfikatory encji między klientem a silnikiem. Logowanie Microsoft weryfikuje proxy (tryb online), więc serwer zostaje premium.
+
+**D11. Podmiana silnika — wariant A: gracz zostaje, świat „mruga”, bez ekranu ładowania.**
+- Kontekst: R17 — `StartConfiguration` pokazuje ekran; R19 — podmiana całkiem niewidoczna to miesiące pracy.
+- Kroki:
+  1. Nowy silnik buduje się w tle (D15) do nowego katalogu.
+  2. Stary silnik: `player-export freeze` dla każdego gracza (R18: zamyka okna, zapisuje NBT), `save-all flush`, koniec ticków.
+  3. Nowy silnik startuje na tym samym świecie; gracze wchodzą do niego przez proxy jako ci sami (forwarding, ten sam UUID).
+  4. Proxy nie przekazuje klientowi nowego `Login`: zamiast tego wysyła „usuń encje” i „zapomnij chunki”, potem przepuszcza nowe chunki i encje, mapując identyfikator gracza na stary. Klient widzi mrugnięcie świata, bez ekranu.
+  5. Błąd nowego silnika przed przełączeniem → stary wraca do gry (świat jeszcze w pamięci); po przełączeniu → podmiana z powrotem tą samą drogą.
+- Budżet: pauza świata ≤ 1 s (zapis zmienionych chunków + start na wczytanym świecie). NIEWIADOMA: czy silnik da się uruchomić przed zwolnieniem świata przez stary (rozgrzanie) — S8.
+- Wyjątek: zmiana rejestrów (nowe bloki w `.hnmod`, nowa pula) → klient potrzebuje nowych plików; wtedy aplikacja gracza je pobiera, a gracz wchodzi ponownie. Dlatego treść idzie przez sloty.
+- To samo przełączenie służy do: aktualizacji Horizona (D18), odzyskania pamięci po generacjach (D4), wznowienia po awarii silnika (D13).
+
+**D12. Dwa katalogi silnika (niebieski/zielony) pod nadzorem `hotd`.**
+`/srv/horizon/engine-a` i `engine-b`, wspólny świat w `/srv/horizon/world` (przenoszony między nimi tylko w kroku 3 D11). Każdy pod własnym `horizon-server --dir` z własnym portem. NIEWIADOMA S12: czy `horizon-server` przyjmie świat spoza swojego katalogu i drugi port.
+
+**D13. Ochrona przed pętlą awarii i wznowienie po awarii.**
+- Przy starcie `hot-core` ładuje tylko generacje oznaczone jako ostatnie dobre (przeżyły 5 min).
+- `hotd` oznacza commit jako zły, gdy silnik padł ≤ 60 s od jego załadowania; nie aplikuje go ponownie.
+- Po awarii silnika proxy trzyma połączenia graczy (ekran „Wczytywanie…” trwa, dopóki silnik nie wstanie), potem wprowadza ich jak w D11. Cel: nikt nie traci połączenia, jeśli silnik wstanie w ≤ 30 s (limit czasu klienta, NIEWIADOMA S8).
+
+### Budowa i zasoby
+
+**D14. Mody gorące budowane w GitHub Actions; serwer tylko pobiera.**
+`cdylib` modu nie zawiera plików Mojanga, więc CI jest dozwolone (inaczej niż silnik, R21). Workflow w repo serwera buduje `.so` dla architektury ThinkCentre, podpisuje (klucz CI), publikuje jako artefakt commita. `hotd` pobiera, sprawdza podpis i ładuje. Zastępuje „budowę ze źródeł na serwerze” z wersji 1.
+
+**D15. Silnik budowany na ThinkCentre, w tle.**
+Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je ma. `native-build --server-output` w klasie „tło” (D16), z blokadą pliku (R27). Silnik budujemy rzadko: nowy `.hnmod`, nowe Nightly, zmiana `hot-host`. Pierwszy build ok. 12 min, potem przyrostowo (R22).
+
+### Sprzęt (W3)
+
+**D16. Gra ma pierwszeństwo; tło pracuje z resztek.**
+- Gra (silnik, `hot-proxy`, `hot-pack`): slice systemd `horizon-game.slice`, `CPUWeight=10000`, `MemoryLow=` (z S10), `AllowedCPUs=` na poziomie procesu.
+- Tło (`hotd`: git, pobieranie, budowa silnika, kopie zapasowe): `horizon-bg.slice`, `CPUWeight=1`, `MemoryMax=`, `IOWeight=1`, `nice 19`, `ionice -c3`, `SCHED_IDLE`.
+- Hamulec MSPT: `hotd` co sekundę czyta `status --json` (R25). p95 > 35 ms → zatrzymuje swoje procesy potomne (`SIGSTOP` na grupie budowy, wstrzymanie kopii); p95 < 25 ms przez 10 s → wznawia. Sam `hotd`, `hot-pack` i hamulec nigdy nie są zatrzymywane. Opóźnienie reakcji 1–5 s (okno 100 ticków, R25).
+- Podmiana silnika (D11) tylko wtedy, gdy wolna pamięć mieści drugi silnik z zapasem ponad `MemoryLow` gry; inaczej czeka.
+
+### Aktualizacje i naprawy (W4, W5, W8)
+
+**D17. Aktualizacja modów:** push → CI (D14) → `hotd` (polling co 10 s, bez webhooka, bez otwartego portu) → klasyfikacja (tabela D24) → zastosowanie.
+
+**D18. Aktualizacja Horizona — kanał Nightly.**
+- Kontekst: R23, R26. `hotd` raz na godzinę pyta API GitHuba o nowe Nightly.
+- Kroki: przygotowanie wersji (`horizon-launcher install` + `prepare` z zasobów serwera) → build silnika z `hot-host` (D15) → test: silnik na kopii świata z ostatniej kopii, 10 botów przez 5 minut, mody gorące ładują się, log bez błędów, MSPT nie gorszy o > 20% → podmiana (D11) → obserwacja 10 min → jeśli gorzej, powrót tą samą drogą i wersja oznaczona jako zła.
+- Okno zgodności klientów: tylko gdy zmienia się coś, czego klient potrzebuje (R24 — protokół stały; kanały `horizon:*`). Aplikacja gracza aktualizuje Horizona sama przy starcie, więc okno = czas do najbliższego startu; serwer czeka maks. 24 h i ogłasza termin na czacie.
+- Ryzyko: `libloading` może zniknąć z `Cargo.lock` Horizona → build nie przejdzie → serwer zostaje na starej wersji, `hot status` mówi dlaczego.
+- `hot-host` używa tylko nazwanych haków i `[transfer]`, nie łatek na dowolne funkcje (R23 — duży churn); dlatego aktualizacje rzadko będą się zatrzymywać.
+
+**D19. Aktualizacja naszego systemu.**
+`hotd`, `hot-proxy`, `hot-pack`, `hot-core` mają wydania w repo `horizon-hot`; `hotd` sprawdza je raz na dobę. `hot-core` → przeładowanie (D2). `hotd`, `hot-pack` → restart usługi, gra nie zauważa. `hot-proxy` → przekazanie gniazd i stanu szyfrowania do nowego procesu (`SCM_RIGHTS`); do czasu M13 aktualizacja proxy czeka na moment bez graczy online.
+
+**D20. Samonaprawa — tabela.**
+
+| Błąd | Reakcja automatyczna |
+|---|---|
+| panika w modzie | wyłączenie, poprzednia generacja (D4) |
+| commit się nie buduje (CI) | nic nie zmienia się na serwerze; `hot status` |
+| segfault silnika | supervisor wstaje, ostatnie dobre generacje, gracze przytrzymani (D13) |
+| zły commit (awaria ≤ 60 s) | oznaczony, pominięty (D13) |
+| zła aktualizacja Horizona | powrót (D18) |
+| `hotd`/`hot-pack`/`hot-proxy` pada | systemd `Restart=always` |
+| uszkodzony świat | **bez automatu**: `hot status` pokazuje problem i polecenie przywrócenia z kopii; operator potwierdza |
+| pełny dysk | usuwanie najstarszych kopii ponad retencję i buildów; potem `hot status` |
+
+**D21. Stan i komunikaty bez zewnętrznych powiadomień.**
+`hot status` (terminal na serwerze) i `/hot status` (w grze) pokazują: wersję Horizona, commit modów, listę modów i generacji, ostatnie błędy, oczekujące aktualizacje. Operatorzy w grze dostają wiadomość na czacie, gdy coś wymaga ich decyzji.
+
+### Diagnostyka i przejmowanie projektu (W9)
+
+**D27. Logi pisane dla modelu, który nie zna projektu.**
+- Kontekst: projekt będą kontynuować i naprawiać agenci bez historii rozmów; błąd ma być naprawialny z samego logu.
+- Wspólny crate `hot-diag`, używany przez wszystkie składniki (`hotd`, `hot-core`, `hot-sdk`, `hot-proxy`, `hot-pack`, `hot-play`, skrypty instalacyjne przez `hot-diag` CLI). Nikt nie loguje z pominięciem go.
+- Format: JSON Lines, jeden wpis na linię, klucze i treść po angielsku (spójnie z logami Horizona; komunikaty dla gracza osobno, po polsku). Każdy wpis o błędzie ma pola:
+
+| Pole | Treść | Przykład |
+|---|---|---|
+| `code` | stały kod błędu | `HOT-E0412` |
+| `component`, `version` | składnik i commit, z którego zbudowany | `hotd`, `a1b2c3d` |
+| `what` | co się stało, jednym zdaniem, bez skrótów projektowych | `Hot mod "sklep" panicked in server_tick and was disabled` |
+| `expected` | co powinno się stać | `server_tick returns without panic` |
+| `context` | wszystkie identyfikatory potrzebne do odtworzenia: mod, generacja, commit repo serwera, wersja Horizona, ścieżki plików | `{"mod":"sklep","generation":7,...}` |
+| `cause` | najbardziej prawdopodobna przyczyna (jeśli znana) | `index out of bounds at mods/sklep/src/lib.rs:42` |
+| `fix` | konkretny następny krok: komenda albo plik do zmiany | `fix the panic, push; previous generation 6 is active meanwhile` |
+| `doc` | ścieżka do wpisu w katalogu błędów | `docs/bledy/HOT-E0412.md` |
+| `source` | miejsce w kodzie, które zgłosiło błąd | `crates/hot-core/src/generation.rs:118` |
+| `chain` | pełny łańcuch przyczyn (`anyhow`/`std::error::Error::source`), backtrace przy panice | `[...]` |
+| `state` | co system zrobił sam i w jakim stanie zostawił serwer | `rolled back to generation 6; server running` |
+
+- Zakaz: komunikatów bez kontekstu („failed”, „error: invalid data”), `unwrap()` poza testami, połykania błędów. Clippy `unwrap_used`, `expect_used` jako błąd.
+- Katalog błędów `docs/bledy/HOT-EXXXX.md`: znaczenie, typowe przyczyny, komendy diagnostyczne, naprawy, pliki kodu. Test w CI: każdy kod użyty w kodzie ma wpis i odwrotnie; każdy wpis ma wszystkie sekcje.
+- Kategorie kodów: `E01xx` instalacja, `E02xx` git i CI, `E03xx` budowa silnika, `E04xx` mody gorące, `E05xx` dane i paczka zasobów, `E06xx` proxy i podmiana silnika, `E07xx` aktualizacje, `E08xx` sprzęt i hamulec, `E09xx` aplikacja gracza, `E10xx` świat i kopie.
+- Rotacja: `/srv/horizon/logs/<składnik>.jsonl`, 50 MB × 5 plików; u gracza w katalogu danych aplikacji.
+
+**D28. `hot report` — samowystarczalny pakiet dla obcego modelu.**
+- Na serwerze `hot report`, u gracza „Napraw” w `hot-play`. Wynik: jeden plik tekstowy (Markdown, < 200 KB, do wklejenia w czat z dowolnym modelem).
+- Zawartość, w tej kolejności:
+  1. Nagłówek „Czym jest ten system” — 20 linii: składniki, przepływ, gdzie co leży (stały tekst z `hot-diag`).
+  2. Wersje: nasze składniki, Horizon, system, sprzęt.
+  3. Ostatnie błędy z pełnymi wpisami D27 i treścią ich wpisów z `docs/bledy/`.
+  4. `hot status`, ostatnie 200 linii logów każdego składnika i silnika, konfiguracja.
+  5. Instrukcja dla modelu: gdzie jest repo, jak odtworzyć, czego nie wolno (lista z `AGENTS.md`).
+- Sekrety (`forwarding.secret`, klucze, tokeny, adresy IP graczy) zamaskowane; test w CI sprawdza, że żaden znany sekret nie trafia do raportu.
+
+**D29. Gotowy projekt tłumaczy się sam, bez tego planu.**
+- `PLAN.md` to plan budowy, nie dokumentacja. Po M12 wszystko, co zespół musi wiedzieć, jest w repo poza nim: decyzje w `docs/adr/` (D1–D29 przeniesione), działanie w `docs/ARCHITECTURE.md`, obsługa w `docs/operator.md`, błędy w `docs/bledy/`.
+- `AGENTS.md`: czym jest projekt, słownik, mapa repo, komendy, zasady nienaruszalne, jak dodać mod, jak dodać składnik, jak debugować z `hot report`.
+- Przewodniki „jak zrobić typową rzecz”: nowy mod gorący, nowy hak w ABI, nowy kod błędu, wydanie wersji.
+- Każdy crate ma na górze `lib.rs`/`main.rs` komentarz: do czego służy, kto go używa, z czym rozmawia.
+- Decyzje zmieniane później → nowy ADR, stary oznaczony „zastąpiony przez”.
+- Dokumentacja zmienia się w tym samym commicie co kod (sprawdza to recenzja PR).
+
+### Repozytoria, instalacja, aplikacja gracza
+
+**D22. Format repo serwera (na GitHubie).**
 ```
 repo-serwera/
-  hot.toml                  # włączone mody, ustawienia
-  mods/                     # może nie istnieć → czysty serwer
+  hot.toml            # porty, kanał aktualizacji, operatorzy, okno zgodności
+  mods/               # może nie istnieć → czysty serwer
     <id>/
-      mod.toml              # id, wersja, wymagane sloty
-      Cargo.toml + src/     # opcjonalnie: logika (cdylib, zależy od hot-sdk)
-      data/                 # opcjonalnie: paczka danych
-      assets/               # opcjonalnie: modele i tekstury slotów
-  cold/                     # opcjonalnie: zwykłe .hmod/.hnmod (ścieżka zimna, D12)
+      mod.toml        # id, wersja, sloty
+      Cargo.toml src/ # opcjonalnie: logika (cdylib, zależy od hot-sdk)
+      data/           # opcjonalnie: paczka danych
+      assets/         # opcjonalnie: modele i tekstury slotów
+  native/             # opcjonalnie: mody natywne .hnmod (podmiana silnika)
+  .github/workflows/hot.yml   # dodawany przez instalator: budowa modów (D14)
 ```
-Mody budujemy **ze źródeł** na maszynie serwera (`cargo build --release`), nie z gotowych binarek: powtarzalność i przegląd kodu w gicie.
+Prywatne repo → klucz tylko do odczytu (deploy key) generowany przez instalator.
 
-### D11. Daemon `hotd` jako osobny proces obok `horizon-server`
-- Nie forkujemy Horizona ani `horizon-server`. Daemon działa na tej samej maszynie (R: silnik działa tylko na systemie i architekturze, na których go zbudowano).
-- Git przez polecenie `git` (nie `git2`): `fetch` co 10 s albo webhook. Bez tokio: wątki std + `tiny_http` (webhook i serwowanie paczki) + `zip`.
-- Do serwera mówi przez `horizon-server --dir <X> cmd "hot apply <manifest>"` (R6). Host czyta manifest z dysku i zapisuje wynik do `hot-state/status.json`.
-- **Zaufanie:** daemon przyjmuje tylko commity podpisane kluczem z `allowed_signers` (`git verify-commit`). Kod modów działa bez piaskownicy.
+**D23. Workspace `horizon-hot`.**
+`crates/hot-abi`, `crates/hot-diag`, `crates/hot-sdk`, `crates/hot-core`, `crates/hotd`, `crates/hot-proxy`, `crates/hot-pack`, `crates/hot-play` (aplikacja gracza), `bundle/hot-host` (`horizon-mixin.toml`), `content/hot-slots` (`.hmod`), `examples/`, `scripts/server-install.sh`, `scripts/install.sh`, `scripts/install.ps1`, `.github/workflows/` (CI + wydania). Conventional Commits, forma bezosobowa, autor Szymon Sosnowski.
 
-### D12. Przeszczep silnika przez własne proxy (`hot-proxy`) — zamiast restartu
-- **Kontekst:** mod natywny `.hnmod` i aktualizacja Horizona to nowy plik programu; działającego procesu nie da się przekompilować. Horizon ma już wszystko, czego potrzebuje proxy:
-  - FAKT: obsługa forwardingu Velocity (`horizon-server/src/config.rs:69`, kanał `velocity:player_info` w `horizon-protocol/src/packets/login.rs:92`);
-  - FAKT: pakiet `StartConfiguration` w protokole (`horizon-protocol/src/packets/play.rs:2075`);
-  - FAKT: klient Horizon obsługuje powrót do konfiguracji (`horizon-client/src/net.rs:891`, `game/remote.rs:10902`).
-- **Decyzja:** gracze łączą się z `hot-proxy` (Rust, na crate `horizon-protocol`), a nie bezpośrednio z silnikiem. Proxy trzyma połączenie TCP gracza i szyfrowanie przez cały czas. Za nim działa silnik, w trybie forwardingu.
-- Podmiana silnika to **migracja na żywo** (jak live migration maszyn wirtualnych), wymaga forka silnika (D19):
-  1. **Rozgrzanie:** nowy silnik buduje się i startuje obok w trybie gotowości — rejestry, zasoby, wątki gotowe, bez świata. Start (próba: 1,6 s) dzieje się, gdy stary silnik normalnie gra; nie ma go na krytycznej ścieżce.
-  2. **Kopia wstępna:** stary silnik, nadal tykając, przesyła przez gniazdo lokalne wszystkie wczytane chunki, encje i stan graczy. Śledzi chunki i encje zmienione od kopii („brudne”) i wysyła je w kolejnych rundach, aż delta zmieści się w budżecie.
-  3. **Zamrożenie na jeden tick:** stary silnik kończy tick, wysyła ostatnią deltę i stan sesji graczy (identyfikatory encji, wysłane chunki, otwarte okna, identyfikatory teleportów, keep-alive).
-  4. **Przełączenie:** nowy silnik wykonuje następny tick, a proxy przekierowuje strumienie pakietów graczy na nowy silnik. Klient nie dostaje żadnego ekranu ładowania — stan po obu stronach jest identyczny.
-  5. Stary proces czeka 60 s jako zapas. Błąd nowego przed przełączeniem = przerwanie migracji, gracze nic nie widzą; błąd po przełączeniu = migracja z powrotem tą samą drogą.
-- **Budżet pauzy: ≤ 50 ms (jeden tick)**, czyli tyle, ile trwa zwykły pojedynczy wolny tick. Gracz tego nie odróżni od lagu sieci.
-- **Wyjątek:** jeśli nowy silnik zmienia rejestry (nowe bloki z `.hnmod`), klient musi je dostać. Bez forka klienta wymaga to `StartConfiguration` (ekran ładowania u gracza, świat na serwerze dalej tyka). Z forkiem klienta (D18) rejestry dochodzą pakietem w trakcie gry, bez ekranu ładowania.
-- **Konsekwencje:** nikt nie jest rozłączony, świat stoi najwyżej jeden tick. Zmiany z warstwy gorącej (D1, D8) idą bez żadnej pauzy. `hot-proxy` zmienia się rzadko; jego własna aktualizacja to przekazanie gniazd TCP i stanu szyfrowania do nowego procesu (`SCM_RIGHTS`, jak w nginx) — etap M9, pauza rzędu milisekund.
+**D24. Klasyfikacja zmian (serce `hotd`).**
 
-### D19. Fork silnika: eksport i import stanu na żywo
-- Zapis chunków i encji już istnieje (format zapisu świata); fork używa go do serializacji w pamięci zamiast na dysk. Nowe są: śledzenie brudnych chunków i encji, serializacja sesji gracza oraz tryb gotowości bez świata.
-- Fork trzymamy jako mixin bundle (`horizon-mixins`) albo łatki na przypięty commit, żeby aktualizacje Horizona dało się przenosić.
-- NIEWIADOMA: jak bardzo stan sesji gracza w `native-game` jest rozproszony. Rozstrzyga spike S8 (M0): mapa stanu sesji + prototyp eksportu jednego chunka i jednego gracza.
-- Buildy natywne biorą blokadę pliku, bo `native/stage` jest wspólny (R17), i nie działają równolegle z buildami w laboratorium.
-
-### D20. Gra ma pierwszeństwo; wszystko inne pracuje w tle z resztek
-- **Kontekst:** serwer stoi na współdzielonym ThinkCentre kolegi (część maszyny). Ograniczony sprzęt nie może przerwać gry.
-- **Decyzja — trzy klasy pracy:**
-  1. **Gra** (silnik + proxy): zarezerwowane rdzenie i pamięć, najwyższy priorytet. Linux: osobny `systemd` slice z `CPUWeight=10000`, `MemoryLow=` (pamięć chroniona) i przypięciem do rdzeni (`AllowedCPUs=`).
-  2. **Tło** (daemon, git, paczki, kopia stanu przy migracji): `SCHED_IDLE` + `nice 19` + `ionice -c3`, osobny slice z `CPUWeight=1`, `MemoryMax=`, `IOWeight=1`. Dostaje CPU tylko wtedy, gdy gra go nie potrzebuje.
-  3. **Kompilacja**: nigdy na serwerze (D21).
-- **Hamulec MSPT:** daemon co sekundę czyta `horizon-server status --json`. MSPT > 35 ms → wszystkie prace w tle stają (`SIGSTOP` grupy procesów, kopia migracji wstrzymana), MSPT < 25 ms przez 10 s → ruszają dalej. Gra nigdy nie czeka na tło; tło zawsze czeka na grę.
-- **Migracja (D12) tylko, gdy się mieści:** przed rozgrzaniem drugiego silnika daemon sprawdza, czy po jego starcie zostanie zapas pamięci ponad `MemoryLow` gry. Jeśli nie — czeka. Silnik w gotowości trzyma tylko rejestry, bez świata.
-- **Konsekwencje:** na słabym sprzęcie zmiany wchodzą wolniej (minuty zamiast sekund), ale gracze nie odczuwają ich wcale. Kryterium „gotowe” mierzy MSPT graczy, nie czas wdrożenia.
-
-### D21. Kompilacja poza serwerem — w CI na tym samym systemie i architekturze
-- **Kontekst:** budowa modów i silnika zjadłaby słaby sprzęt na minuty. Silnik z `--server-output` działa tylko na systemie i architekturze, na których powstał (bez kompilacji skrośnej), a ThinkCentre to najpewniej x86_64, a Mac — arm64.
-- **Decyzja:** GitHub Actions (runner Linux x86_64) buduje `.so` modów gorących i silnik, podpisuje je i publikuje jako artefakt commita. Daemon na serwerze tylko pobiera, sprawdza podpis i ładuje. Zastępuje decyzję D10 o budowaniu ze źródeł na serwerze (źródła nadal w gicie, budowa powtarzalna w CI).
-- NIEWIADOMA: czy `horizon-launcher native-build` działa w CI bez okna i bez konta Microsoft. Rozstrzyga spike S9.
-
-### D22. Automatyczna aktualizacja Horizona — bez restartu, z bramkami
-- **Kontekst:** wbudowane `horizon-server update` działa tylko dla instalacji z `install.sh` (FAKT: odmawia dla innego układu katalogów) i robi restart. Nasz silnik jest własnym buildem (hot-host + łatki forka D19), więc aktualizację prowadzimy sami.
-- **Decyzja — potok:**
-  1. **Wykrycie:** CI co godzinę pyta API GitHuba o nowe wydania `horizon-rust/horizon`. Domyślnie tylko wydania stabilne (tagi `vRRRR.MM.DD`), nie Nightly (ustawienie w `hot.toml`).
-  2. **Przeniesienie forka:** łatki D19 i `hot-host` nakładane na nowy commit, build silnika (D21). Nie nakładają się albo nie kompilują → aktualizacja wstrzymana, zgłoszenie (issue w repo + wiadomość do operatora), serwer zostaje na starej wersji.
-  3. **Test w CI:** silnik startuje na kopii świata z ostatniej kopii zapasowej, 10 botów gra 5 minut, mody gorące ładują się, MSPT i log bez błędów, test migracji stanu stary → nowy. Oblany → wstrzymanie jak wyżej.
-  4. **Okno zgodności klientów:** jeśli nowa wersja zmienia `content_identity` (R11) albo protokół, starsi klienci Horizona byliby rozłączani. Daemon czeka, aż launcher graczy zdąży się zaktualizować (domyślnie 24 h od wydania, ustawienie), i ogłasza na czacie „serwer przejdzie na wersję X o …”. Zmiana niewidoczna dla klienta → bez czekania.
-  5. **Podmiana:** migracja na żywo (D12) w klasie „tło” (D20), z kopią zapasową świata przed nią.
-  6. **Powrót:** nowy silnik w ciągu 10 min zgłasza błędy albo MSPT wyraźnie gorszy niż przed aktualizacją → migracja z powrotem na starą wersję tą samą drogą; wersja oznaczona jako zła.
-- **Konsekwencje:** aktualizacje wchodzą same, bez restartu, a zepsuta nie trafia na serwer. Koszt: łatki forka trzeba utrzymywać przy każdej wersji Horizona — dlatego dążymy do wysłania ich do Horizona jako PR, żeby forka było jak najmniej. Zmiana formatu zapisu świata między wersjami: migracja stanu używa konwersji, którą nowa wersja i tak ma dla starych światów; brak konwersji → aktualizacja przez zapis na dysk z krótką pauzą świata, zapowiedzianą na czacie.
-- NIEWIADOMA: jak często wydania Horizona zmieniają `content_identity` i protokół. Rozstrzyga S11 (historia ostatnich 10 wydań).
-
-### D23. Własny launcher serwera — nakładka na `horizon-launcher`, nie nowy launcher
-- **Kontekst:** gracze mają wejść na serwer jednym kliknięciem. `horizon-launcher` ma pełne CLI: `account sign-in`, `install`, `prepare`, `instance create`, `multiplayer add`, `play --server`.
-- **Decyzja:** mała aplikacja w Rust (styl Rune), która woła CLI `horizon-launcher`. Kroki przy pierwszym uruchomieniu: instalacja Horizona → logowanie Microsoft **raz** (kod urządzenia, logowanie robi Horizon) → `prepare` z kupionej gry gracza → własna instancja serwera → wgranie `hot-slots.hmod` do `horizon-mods/` i wpis w `horizon-mods.txt` → adres serwera na liście. Potem przycisk „Graj” = `play --server`, także offline pod nickiem (`account offline`).
-- **Granice:** bez pomijania sprawdzenia zakupu gry; bez plików Mojanga w launcherze; bez logo Minecrafta, Mojanga i Horizona jako własnej marki.
-- **Konsekwencje:** launcher jest mały, bo całą ciężką pracę robi `horizon-launcher`; aktualizacje Horizona przychodzą same. Zmiana CLI `horizon-launcher` może zepsuć nakładkę — test na każdym Nightly w D22.
-
-### D24. Odporność na pomyłki: gracz instaluje jednym ruchem na macOS, Windows i Linuksie
-- **Decyzja (wybór użytkownika, 2026-11-12): tylko skrypt**, bez `.dmg`, `.exe` i `.AppImage`:
-  - macOS i Linux: `curl -fsSL <adres>/install.sh | sh`;
-  - Windows (PowerShell): `irm <adres>/install.ps1 | iex`.
-- Skrypt pobiera launcher, sprawdza jego SHA-256, kładzie go w folderze użytkownika i tworzy skrót („Graj na <serwer>”) na pulpicie / w menu. Bez uprawnień administratora.
-- Plik pobrany przez `curl` lub PowerShell zwykle nie dostaje znacznika „z internetu” (kwarantanna macOS, Mark of the Web w Windows), więc ostrzeżenia „nieznany deweloper” prawdopodobnie nie będzie i podpis kodu nie jest potrzebny. HIPOTEZA — sprawdzenie w M11.3 na czystych maszynach.
-- Instalator sam sprawdza wszystko, co może pójść nie tak (brak miejsca, brak internetu, stara wersja, przerwana instalacja), mówi po polsku, co zrobić, i da się go uruchomić drugi raz bez szkody (idempotentny).
-- Launcher sam się aktualizuje. Przycisk „Coś nie działa” zbiera log i diagnozę do jednego pliku, który gracz wysyła Tobie.
-- Builda na trzy systemy robi CI (macOS arm64 + x86_64, Windows x86_64, Linux x86_64). Launcher nie zawiera plików Mojanga, więc tu CI jest dozwolone (inaczej niż przy silniku, R: `docs/microsoft-account.md`).
-- Podpis kodu (płatny) wraca do decyzji tylko wtedy, gdy M11.3 pokaże ostrzeżenia systemu mimo instalacji skryptem.
-
-### D25. Serwer: jeden skrypt na Ubuntu Server instaluje i konfiguruje wszystko
-- **Cel:** ThinkCentre kolegi z już zainstalowanym Ubuntu (FAKT od użytkownika, 2026-11-12); wersja i architektura do odczytu w S10.
-- **Polecenie:** `curl -fsSL <adres>/server-install.sh | sudo bash -s -- --repo <git-url>`.
-- **Skrypt robi:** sprawdza system (Ubuntu 24.04 LTS, x86_64/arm64, RAM, dysk, porty) → tworzy użytkownika `horizon` → instaluje `horizon-server` oficjalnym `install.sh` i zależności (git, Rust do budowy w tle) → przygotowanie zasobów gry: logowanie Microsoft kodem urządzenia (jedyny krok ręczny: „otwórz link, wpisz kod”) albo `import-resources` z folderu skopiowanego z Twojego Maca → `init` świata, generuje sekrety (forwarding, klucze podpisu), whitelistę, tryb serwera → jednostki systemd: silnik, `hot-proxy`, `hotd` + slice'y z D20 → zapora `ufw` (25565, paczka zasobów) → kopie zapasowe co noc z retencją 7 dni → na końcu **autotest**: łączy bota, sprawdza `status`, ładuje testowy mod gorący, pokazuje adres serwera i „✅ Działa”.
-- Idempotentny: drugie uruchomienie niczego nie psuje i naprawia brakujące elementy. `--uninstall` usuwa wszystko oprócz świata i kopii.
-- **Wymaga `sudo`** — jeśli kolega da tylko konto bez roota albo kontener, potrzebny wariant bez systemd (do ustalenia, gdy będzie wiadomo, jak udostępni maszynę).
-
-### D16. `hot-host` jako cienki, stały loader
-`hot-host` w silniku robi tylko jedno: ładuje bibliotekę `hot-core` i przekazuje jej wszystkie haki. Logika gospodarza (lista modów, przydział slotów, komendy `/hot`) siedzi w `hot-core`, przeładowywanym jak zwykły mod gorący. Zmiana gospodarza nie wymaga więc nowego silnika.
-
-### D17. Duża pula slotów i konwerter `.hmod` → sloty
-- Pula: 4096 bloków i 8192 przedmioty (limit Horizona to 2^20 stanów bloków, `mod_content.rs:1860`). Rozmiar sprawdzany w M5 pod kątem czasu startu i pamięci klienta.
-- Gotowe mody zawartości `.hmod` daemon przepisuje na sloty, paczkę danych i paczkę zasobów. Wtedy klient nie musi niczego instalować ani restartować. Ograniczenie: w grze identyfikator to slot, a nazwę i wygląd daje paczka zasobów.
-
-### D18. Fork klienta Horizon — nowa treść bez restartu u gracza (etap późny)
-Klient wczytuje bloki i przedmioty tylko przy starcie (R8), więc treść spoza puli slotów wymagałaby restartu **klienta**. Rozwiązanie w forku `horizon-client`: przy `StartConfiguration` klient pobiera z serwera listę treści, dobudowuje rejestr bloków i przedmiotów i przeładowuje zasoby; przeładowanie zasobów Horizon już ma. Zgodność `content_identity` jest liczona po dobudowaniu. Do tego czasu nowa treść idzie przez sloty (D17).
-
-### D13. Ochrona przed pętlą awarii
-Segfaultu w modzie nie złapie żaden `catch_unwind`. `restart_on_crash` podniesie serwer, więc:
-- przy starcie host ładuje tylko generacje oznaczone jako **ostatnie dobre** — takie, które przeżyły 5 minut;
-- daemon oznacza commit jako zły, jeśli silnik padł w ciągu 60 s od `hot apply`, i nie aplikuje go ponownie.
-
-### D14. Tabela klasyfikacji zmian (serce daemona)
-
-| Co zmienił commit | Działanie | Restart? |
+| Zmiana | Działanie | Co widzi gracz |
 |---|---|---|
-| tylko `mods/*/data/` | kopia do `datapacks/`, `reload` | nie |
-| `mods/*/src/` | `cargo build` → `hot apply` (nowa generacja) | nie |
-| `mods/*/assets/` lub sloty w ramach puli | przebudowa paczki, `/hot refresh` | nie (gracze robią szybki transfer) |
-| nowy mod / usunięty mod | jak wyżej: `deactivate` albo `init` | nie |
-| `hot-core` (logika gospodarza) | jak mod gorący (D16) | nie |
-| `.hmod` w `cold/` | konwersja na sloty (D17) | nie |
-| `.hnmod` w `cold/`, wersja Horizona, nowa pula slotów | przeszczep silnika przez proxy (D12) | nie — gracze połączeni, świat stoi kilka sekund |
+| `mods/*/data/` | kopia + `reload` | nic |
+| `mods/*/src/` | artefakt z CI → nowa generacja | nic |
+| `mods/*/assets/`, sloty w puli | nowa paczka (nowy sha1) | nowy wygląd po mrugnięciu (D11) albo bez niego (S6) |
+| nowy / usunięty mod gorący | `init` / `deactivate` | nic |
+| `hot-core` | przeładowanie | nic |
+| `native/*.hnmod`, nowe Nightly, `hot-host` | build w tle + podmiana silnika (D11) | mrugnięcie świata ≤ 1 s |
+| nowe bloki w `.hnmod`, zmiana puli | jak wyżej + nowe pliki u gracza | aplikacja pobiera pliki, gracz wchodzi ponownie |
 
-### D15. Repozytorium i narzędzia projektu
-Jeden workspace Rust `~/Developer/horizon-hot`: `crates/hot-abi`, `crates/hot-sdk`, `crates/hotd`, `bundle/hot-host` (bundle `horizon-mixin.toml`), `content/hot-slots` (`.hmod`), `examples/` (przykładowe mody). Start przez `~/engineering-standard/bin/repo-init --stack rust` i `~/.claude/tools/verify-init`. Conventional Commits, forma bezosobowa, autor Szymon Sosnowski.
+**D25. Instalacja serwera jednym poleceniem (Ubuntu na ThinkCentre, `sudo` jest).**
+`curl -fsSL <adres>/server-install.sh | sudo bash -s -- --repo <github-url>`:
+1. Sprawdzenie: Ubuntu, architektura, RAM, dysk, wolne porty 25565/8131.
+2. Użytkownik `horizon`, katalogi `/srv/horizon`.
+3. `horizon-server` oficjalnym `install.sh`; `horizon-launcher`; git.
+4. Zasoby gry: logowanie Microsoft kodem urządzenia (jedyny krok ręczny) albo `import-resources` z folderu skopiowanego z Maca.
+5. `init` świata, sekrety: `forwarding.secret`, klucz deploy, klucz weryfikacji artefaktów CI; whitelist, operatorzy.
+6. Jednostki systemd: `hotd`, `hot-proxy`, `hot-pack`, silniki a/b; slice'y D16.
+7. `ufw`: 25565 i 8131; 25566 tylko lokalnie.
+8. Kopie: co noc, retencja 7 dni, razem ze `hot-state/` i `hot-data/`.
+9. Pierwszy build silnika w tle; do tego czasu działa silnik bez modów natywnych.
+10. Autotest: bot wchodzi, testowy mod gorący ładuje się i odpowiada, `status` OK → „Działa: <adres>”.
+- Idempotentny; `--uninstall` usuwa wszystko oprócz świata i kopii.
+
+**D26. Aplikacja gracza `hot-play` — terminalowa, jedna linijka.**
+- Instalacja: macOS/Linux `curl -fsSL <adres>/install.sh | sh`, Windows `irm <adres>/install.ps1 | iex`. Bez uprawnień administratora. Skrypt sprawdza SHA-256 i tworzy skrót „Graj” na pulpicie/w menu.
+- Menu: `[1] Graj  [2] Napraw  [3] Wyjdź`, po polsku, bez innych pytań.
+- „Graj” przy każdym starcie: samoaktualizacja `hot-play` → sprawdzenie i naprawa: `horizon-launcher` (instalacja/aktualizacja), wersja zgodna z serwerem, `prepare`, instancja, `hot-slots.hmod` + `horizon-mods.txt`, adres serwera → logowanie Microsoft tylko za pierwszym razem → `play --server`.
+- „Napraw”: pełna weryfikacja i ponowne pobranie wszystkiego, potem plik z logiem do wysłania operatorowi.
+- Działa na kupionym Minecrafcie; bez obchodzenia sprawdzenia zakupu; bez plików Mojanga w aplikacji; bez logo Minecrafta, Mojanga i Horizona.
+- Budowa w CI: macOS arm64 + x86_64, Windows x86_64, Linux x86_64 (dozwolone — brak plików Mojanga).
+- HIPOTEZA: plik pobrany skryptem nie dostaje znacznika kwarantanny / Mark of the Web, więc bez podpisu nie ma ostrzeżeń. Sprawdzenie w M11; jeśli obleje — decyzja o płatnym podpisie.
 
 ---
 
-## 4. Kroki
+## 5. Kroki
 
-Każdy krok ma sprawdzenie, które obleje, jeśli zmiana nie zadziała. Odhaczaj `[x]`.
+Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie działa. Odhaczaj `[x]`.
 
-### M0 — Repo i spike'i (rozstrzygają niewiadome)
-- [ ] M0.1 `repo-init ~/Developer/horizon-hot --stack rust`, `verify-init`. Sprawdzenie: `quality-audit` uruchamia się, hook `commit-msg` odrzuca commit „test”.
-- [ ] M0.2 **S1** Czy bundle `hot-host` może mieć crate ścieżkowy (`hot-abi`) jako `[[crate]]`? Sprawdzenie: `native-build --server-output` przechodzi. Gdy nie przejdzie: `hot-abi` jako moduł kopiowany do bundla skryptem `xtask`.
-- [ ] M0.3 **S2** Czy serwer dedykowany ładuje `.hmod` (`horizon-mods/` + `horizon-mods.txt` w katalogu serwera)? Sprawdzenie: blok z testowego `.hmod` stawiany `setblock` na serwerze. **Blokuje D7 i D12** — jeśli nie ładuje, sloty idą do natywnego builda serwera, a klient dostaje ten sam `.hmod`; trzeba wtedy porównać `content_identity`.
-- [ ] M0.4 **S3** Czy `player_command` pozwala anulować nieznaną komendę? Sprawdzenie: `/sklep` obsłużone bez błędu „Unknown command”. Gdy nie: zostaje tylko `/hot …`.
-- [ ] M0.5 **S4** Czy `Host::run_command` działa z `server_tick`? Sprawdzenie: `say` z ticku widać w logu.
-- [ ] M0.6 **S5** Czy klient bez `sha1` pobiera paczkę ponownie przy każdym wejściu i po `/transfer` na ten sam serwer? Sprawdzenie: zmiana tekstury widoczna na zrzucie po transferze.
-- [ ] M0.7 **S6** Czy trait mod może wysłać pakiet `ResourcePackPush` w trakcie gry? Sprawdzenie: zmiana tekstury bez transferu. Wynik opcjonalny.
-- [ ] M0.8 **S7** Czy model z paczki serwera nadpisuje model bloku z `.hmod`? Sprawdzenie: zrzut ekranu.
-- [ ] M0.85 **S8** Mapa stanu sesji gracza i świata w `native-game` + prototyp: eksport i import jednego chunka i jednego gracza między dwoma procesami. Sprawdzenie: gracz przeniesiony między procesami zostaje w tym samym miejscu z tym samym ekwipunkiem, bez ekranu ładowania. **Blokuje D12 w wersji ≤ 50 ms**; jeśli obleje, wracamy do wariantu z zapisem na dysk i mierzymy.
-- [ ] M0.86 **S9** `native-build --server-output` i `cargo build` modu gorącego na runnerze GitHub Actions (Linux x86_64), bez okna i bez konta. Sprawdzenie: artefakt uruchamia się na Linuksie x86_64.
-- [ ] M0.87 **S10** Profil ThinkCentre: przydział (VM, kontener czy konto), rdzenie, RAM, system; pomiar RAM i MSPT pustego serwera i serwera z 10 botami. Sprawdzenie: liczby zapisane w `docs/sprzet.md`, z nich wartości `AllowedCPUs`, `MemoryLow`, `MemoryMax` dla D20.
-- [ ] M0.88 **S11** Historia ostatnich 10 wydań Horizona: które zmieniły `content_identity`, protokół, format świata, API haków. Sprawdzenie: tabela w `docs/aktualizacje.md`; z niej domyślne okno zgodności w D22.
-- [ ] M0.9 Zapis wyników S1–S11 jako `docs/adr/0001-spikes.md`; korekta D5–D9, jeśli trzeba.
+### M0 — Spike'i (rozstrzygają niewiadome)
+- [x] M0.1 Repo: `repo-init --stack rust`, `verify-init`, CI Rust (`fmt`, `clippy -D warnings`, `test`). Sprawdzenie: hook odrzucił commit „test”; `cargo test` zielone (`f788091`).
+- [ ] M0.2 S1: `hot-abi` jako crate ścieżkowy (`[[crate]]`) w bundlu `hot-host`. Sprawdzenie: `native-build --server-output` przechodzi. Gdy nie: `xtask` kopiuje moduł do bundla.
+- [ ] M0.3 S2: serwer dedykowany ładuje testowy `.hmod` (R11) i klient bez niego dostaje rozłączenie, a z nim wchodzi. Sprawdzenie: `setblock` bloku z moda + oba wejścia klienta.
+- [ ] M0.4 S3: `/sklep` przez anulowany `player_command` bez „Unknown command”. Sprawdzenie: odpowiedź na czacie klienta.
+- [ ] M0.5 S4: `Host::run_command` z `server_tick`. Sprawdzenie: `say` w logu.
+- [ ] M0.6 S5: blok z puli z modelem z paczki serwera (sha1 ustawiony). Sprawdzenie: zrzut ekranu z poprawnym modelem.
+- [ ] M0.7 S6: proxy-prototyp wysyła `ResourcePackPush` w trakcie gry. Sprawdzenie: zmiana tekstury bez mrugnięcia. Wynik opcjonalny (D9).
+- [ ] M0.8 S7: rozmiar puli 4096/8192: czas startu klienta i serwera, RAM. Sprawdzenie: liczby w `docs/sloty.md`; start klienta wolniejszy o < 2 s, inaczej mniejsza pula.
+- [ ] M0.9 S8: prototyp podmiany wariantu A: proxy + dwa silniki na jednym świecie, „usuń encje / zapomnij chunki”, mapowanie id gracza; pomiar pauzy; czy da się rozgrzać nowy silnik przed zwolnieniem świata; ile czasu klient czeka bez pakietów, zanim się rozłączy. Sprawdzenie: prawdziwy klient zostaje połączony, bez ekranu ładowania, pauza zmierzona (`docs/podmiana.md`). **Blokuje D11 i D13.** Jeśli pauza > 1 s — decyzja użytkownika przed M8.
+- [ ] M0.10 S9: `native-build` na Ubuntu x86_64 bez okna, z zasobami z `prepare`. Sprawdzenie: eksport startuje.
+- [ ] M0.11 S10: ThinkCentre: model, CPU, RAM, wersja Ubuntu, architektura; pomiar pustego serwera i 10 botów. Sprawdzenie: `docs/sprzet.md` z wartościami `AllowedCPUs`, `MemoryLow`, `MemoryMax`.
+- [ ] M0.12 S11: ostatnie 10 Nightly — co zmieniło `content_identity`, kanały `horizon:*`, API haków, `Cargo.lock` (`libloading`). Sprawdzenie: `docs/aktualizacje.md`.
+- [ ] M0.13 S12: `horizon-server` ze światem poza swoim katalogiem i na porcie 25566. Sprawdzenie: dwa supervisory naprzemiennie na tym samym świecie.
+- [ ] M0.14 Wyniki S1–S12 jako `docs/adr/0002-spike.md`; korekta D1–D29, jeśli trzeba. Sprawdzenie: każda NIEWIADOMA w planie zamieniona na FAKT albo nową decyzję.
 
-### M1 — Rdzeń przeładowania (`hot-abi`, `hot-sdk`, `hot-host`)
-- [ ] M1.1 `hot-abi`: VTable z wersją, `init`, `deactivate`, `server_tick`, `player_chat`; testy układu pamięci (`size_of`/`align_of`).
-- [ ] M1.2 `hot-sdk`: makro `hot_mod!`, `HostCtx<'call>`, `catch_unwind` na każdym wejściu, serializacja stanu.
-- [ ] M1.3 `hot-host`: komenda konsoli `hot load <ścieżka>`, ładowanie poza wątkiem serwera, przełączenie na granicy ticku, kopia pliku pod unikalną nazwą.
-- [ ] M1.4 Przykład `examples/licznik`: liczy ticki i odpowiada na czacie; stan przechodzi między generacjami.
-- Sprawdzenie M1 (wszystkie muszą przejść):
-  - przeładowanie zmienia odpowiedź na czacie, PID silnika bez zmian;
-  - stan licznika przechodzi przez przeładowanie;
-  - 100 przeładowań z 10 botami (`horizon-bots`): MSPT p95 wzrasta < 2 ms, a pamięć rośnie liniowo o ≤ rozmiar `.dylib` na generację;
-  - mod z `panic!()` w `server_tick` zostaje wyłączony, serwer działa, wraca poprzednia generacja.
+### M0.5 — Diagnostyka (przed każdym innym kodem, D27–D29)
+- [ ] M0.15 `AGENTS.md` z opisem projektu, słownikiem i zasadami (D29); uzupełniany w każdym kolejnym kroku. Sprawdzenie końcowe w M12.
+- [ ] M0.16 `hot-diag`: typ błędu z polami D27, zapis JSONL, rotacja, maskowanie sekretów, przechwytywanie paniki z backtrace. Sprawdzenie: testy jednostkowe — wpis bez `code`, `what` lub `fix` nie kompiluje się (builder z wymaganymi polami); znany sekret w kontekście zamaskowany.
+- [ ] M0.17 Katalog `docs/bledy/` + test zgodności kodów w CI. Sprawdzenie: kod bez wpisu → CI czerwone.
+- [ ] M0.18 Szkielet `hot report`. Sprawdzenie: raport ze sztucznego błędu zawiera wszystkie 5 części D28 i < 200 KB.
 
-### M2 — Daemon `hotd`: git → build → apply
-- [ ] M2.1 Polling `git fetch` i webhook, weryfikacja podpisu commita.
-- [ ] M2.2 Klasyfikacja zmian według D14 (testy jednostkowe na diffach).
-- [ ] M2.3 `cargo build` modów z limitem CPU i RAM, logi buildu do `hot-state/builds/`.
-- [ ] M2.4 `hot apply` przez `horizon-server cmd`, odczyt `status.json`, oznaczanie złych commitów (D13).
-- Sprawdzenie M2: push do lokalnego repo → zmiana działa w ≤ 60 s; repo bez `mods/` → serwer czysty; niepodpisany commit odrzucony z wpisem w logu; commit z błędem kompilacji → poprzednia wersja dalej działa.
+Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a sprawdzenie kroku obejmuje wywołanie co najmniej jednego błędu i obejrzenie wpisu w logu.
 
-### M3 — Dane
-- [ ] M3.1 Kopia `data/` do `datapacks/hot-<id>/` + `reload`; usunięcie moda usuwa paczkę.
-- Sprawdzenie: nowy przepis działa po pushu, PID bez zmian.
+### M1 — Rdzeń przeładowania (`hot-abi`, `hot-sdk`, `hot-host`, `hot-core`)
+- [ ] M1.1 `hot-abi`: VTable z wersją, `init`, `deactivate`, `server_tick`, `player_chat`; testy `size_of`/`align_of`.
+- [ ] M1.2 `hot-sdk`: makro `hot_mod!`, `HostCtx<'call>`, `catch_unwind` w każdym eksporcie, stan między generacjami.
+- [ ] M1.3 `hot-host`: tylko ładowanie `hot-core` i przekazywanie haków (D2).
+- [ ] M1.4 `hot-core`: `hot load <ścieżka>`, ładowanie poza wątkiem serwera, przełączenie na granicy ticku, unikalne nazwy plików, ostatnie dobre generacje (D13).
+- [ ] M1.5 `examples/licznik`: liczy ticki, odpowiada na czacie, stan przechodzi przez przeładowanie.
+- Sprawdzenie M1:
+  - przeładowanie zmienia odpowiedź, PID silnika ten sam, licznik zachowany;
+  - 100 przeładowań przy 10 botach: p95 MSPT rośnie < 2 ms; pamięć rośnie ≤ rozmiar `.so` na generację;
+  - `panic!()` w `server_tick` → mod wyłączony, poprzednia generacja, serwer działa;
+  - przeładowanie samego `hot-core` → PID ten sam, mody działają dalej.
 
-### M4 — Pełna lista haków v1 (D5) i funkcje gospodarza (D6)
-- [ ] M4.1 Haki bloków i graczy, `/hot <mod> …`.
-- [ ] M4.2 Przykład `examples/teleport-blok`: kliknięcie bloku teleportuje gracza.
+### M2 — CI modów i `hotd` (git → artefakt → załadowanie)
+- [ ] M2.1 Workflow `hot.yml` dla repo serwera: budowa `.so`, podpis, artefakt (D14).
+- [ ] M2.2 `hotd`: polling repo co 10 s, pobranie artefaktu, weryfikacja podpisu.
+- [ ] M2.3 Klasyfikacja zmian D24 (testy jednostkowe na przykładowych diffach).
+- [ ] M2.4 `hot apply` przez `horizon-server cmd`, odczyt `hot-state/status.json`, oznaczanie złych commitów (D13).
+- [ ] M2.5 `hot status` (terminal) i `/hot status` (gra) (D21).
+- Sprawdzenie: push → zmiana na serwerze ≤ 3 min; repo bez `mods/` → czysty serwer; artefakt z błędnym podpisem odrzucony; commit niekompilujący się → serwer bez zmian, `hot status` mówi dlaczego.
+
+### M3 — Dane (D7)
+- [ ] M3.1 Kopia `data/` + `reload`; usunięcie moda usuwa paczkę.
+- Sprawdzenie: nowy przepis działa, PID ten sam; zmierzony skok ticka przy `reload` zapisany w `docs/sprzet.md`.
+
+### M4 — Haki i funkcje v1 (D5, D6)
+- [ ] M4.1 Pozostałe haki D5 i funkcje D6.
+- [ ] M4.2 `examples/teleport-blok`, `examples/sklep` (komenda `/sklep`).
 - Sprawdzenie: test integracyjny z botem dla każdego haka (zdarzenie → widoczny efekt).
 
-### M5 — Sloty i wygląd
-- [ ] M5.1 `hot-slots.hmod` (256 bloków, 512 przedmiotów), przydział tylko dopisywany.
-- [ ] M5.2 Budowa paczki z `assets/`, serwowanie na `:8131`, `/hot refresh`.
-- Sprawdzenie: nowy blok z repo stawiany bez restartu serwera; po `/hot refresh` ma swój model (zrzut); restart serwera nie zmienia przydziału slotów.
+### M5 — Sloty i wygląd (D8, D9)
+- [ ] M5.1 `hot-slots.hmod` w rozmiarze z S7; przydział tylko dopisywany.
+- [ ] M5.2 `hot-pack`: budowa paczki z `assets/`, sha1, serwowanie na 8131.
+- Sprawdzenie: nowy blok z repo stawiany bez restartu; po następnym wejściu ma swój model (zrzut); podmiana silnika nie zmienia przydziału.
 
-### M6 — `hot-proxy` i przeszczep silnika (D12)
-- [ ] M6.1 Proxy przezroczyste: logowanie, szyfrowanie, kompresja, forwarding Velocity do silnika. Sprawdzenie: gracz gra przez proxy; `ping` i MSPT bez istotnej różnicy.
-- [ ] M6.2 Przytrzymanie gracza w konfiguracji (`StartConfiguration`) i powrót do tego samego silnika. Sprawdzenie: 10 botów i jeden prawdziwy klient przeżywają pętlę 50 razy bez rozłączenia.
-- [ ] M6.3 Migracja na żywo (D12, D19): rozgrzanie, kopia wstępna, zamrożenie na jeden tick, przełączenie strumieni, powrót przy błędzie. Sprawdzenie: dodanie `.hnmod` w trakcie gry → mod działa, nikt nie został rozłączony (log proxy), **najdłuższy tick w oknie migracji ≤ 50 ms** (`horizon-server report`), klient nie pokazał ekranu ładowania (zrzut co 100 ms); celowo zepsuty silnik → migracja przerwana, gracze nic nie widzą.
-- [ ] M6.4 Automatyczna aktualizacja (D22): wykrycie, przeniesienie forka, test w CI, okno zgodności, migracja, powrót. Sprawdzenie: symulowane wydanie (lokalny tag na starszym i nowszym commicie) → serwer sam przechodzi na nową wersję, gracze połączeni; wydanie z celowo zepsutą łatką → serwer zostaje na starej wersji i jest zgłoszenie.
+### M6 — Serwer na ThinkCentre: instalator i priorytety (D16, D25)
+- [ ] M6.1 `server-install.sh` kroki 1–8 i 10 (bez proxy i podmiany — dochodzą w M8).
+- [ ] M6.2 Slice'y i hamulec MSPT w `hotd`.
+- [ ] M6.3 Idempotencja i `--uninstall`.
+- Sprawdzenie: czysta maszyna wirtualna Ubuntu (multipass, wersja jak na ThinkCentre) → jedno polecenie → „Działa”; drugie uruchomienie bez zmian; `stress-ng` w `horizon-bg.slice` + 10 botów → p99 MSPT < 50 ms; potem to samo na ThinkCentre.
 
-### M8 — Konwerter `.hmod` → sloty (D17)
-- [ ] Sprawdzenie: testowy `.hmod` z laboratorium (`projects/horizon-test-mod`) działa na serwerze bez restartu silnika i bez instalacji u klienta.
+### M7 — Samonaprawa (D13, D20)
+- [ ] M7.1 Segfault w module testowym → ostatnie dobre generacje, brak pętli.
+- [ ] M7.2 Pełny dysk (sztucznie zapełniony) → sprzątanie i komunikat.
+- [ ] M7.3 Uszkodzony świat → komunikat i polecenie przywrócenia; przywrócenie po potwierdzeniu.
+- Sprawdzenie: każdy wiersz tabeli D20 ma test, który wywołuje błąd i obserwuje reakcję.
 
-### M9 — Aktualizacja samego proxy przez przekazanie gniazd (`SCM_RIGHTS`)
-- [ ] Sprawdzenie: nowa wersja proxy, gracze połączeni, zero rozłączeń.
+### M8 — `hot-proxy` i podmiana silnika (D10–D12)
+- [ ] M8.1 Proxy przezroczyste: logowanie online, szyfrowanie, kompresja, forwarding. Sprawdzenie: gra przez proxy; ping i MSPT bez istotnej różnicy.
+- [ ] M8.2 Mapowanie id encji i trzymanie keep-alive. Sprawdzenie: 50 sztucznych przełączeń na ten sam silnik bez rozłączenia (10 botów + prawdziwy klient).
+- [ ] M8.3 Podmiana na nowy silnik według D11, z powrotem przy błędzie. Sprawdzenie: dodanie `.hnmod` w trakcie gry → mod działa, nikt nie rozłączony, brak ekranu ładowania (zrzuty co 100 ms), pauza ≤ 1 s; celowo zepsuty silnik → gracze zostają na starym.
+- [ ] M8.4 Wznowienie po awarii silnika z przytrzymaniem graczy (D13). Sprawdzenie: `kill -9` silnika → gracze połączeni, wracają do gry po starcie.
+- [ ] M8.5 Odzyskanie pamięci generacji przez podmianę (D4). Sprawdzenie: po 200 przeładowaniach RSS spada do poziomu startowego bez restartu.
 
-### M11 — Launcher serwera (D23)
-- [ ] M11.1 Pierwsze uruchomienie: instalacja, logowanie raz, `prepare`, instancja, `hot-slots.hmod`, adres serwera.
-- [ ] M11.2 Przycisk „Graj” i tryb offline pod nickiem.
-- [ ] M11.3 Skrypty `install.sh` i `install.ps1` (D24), build launchera w CI, samoaktualizacja, przycisk „Coś nie działa”.
-- Sprawdzenie: na czystej maszynie wirtualnej macOS, Windows 11 i Ubuntu Desktop jedna linijka → skrót na pulpicie → wejście na serwer, bez ostrzeżenia systemu; drugi start bez logowania; przerwana w połowie instalacja + ponowne uruchomienie → działa.
+### M9 — Aktualizacja Horizona (D18)
+- [ ] M9.1 Wykrycie Nightly, przygotowanie wersji, build w tle, test na kopii świata, podmiana, obserwacja, powrót.
+- Sprawdzenie: przejście ze starszego Nightly na nowsze na działającym serwerze z graczami; Nightly z celowo usuniętym `libloading` (lokalna kopia) → serwer zostaje, `hot status` mówi dlaczego.
 
-### M12 — Skrypt instalacji serwera (D25)
-- [ ] M12.1 `server-install.sh`: sprawdzenie systemu, użytkownik, instalacja, zasoby, `init`, sekrety, systemd, slice'y, zapora, kopie, autotest.
-- [ ] M12.2 Idempotencja i `--uninstall`.
-- Sprawdzenie: czysta maszyna wirtualna Ubuntu Server 24.04 (multipass) → jedno polecenie → autotest „✅ Działa” i gracz wchodzi; drugie uruchomienie → bez zmian i bez błędów; `--uninstall` → świat i kopie zostają.
+### M10 — Aktualizacja naszego systemu (D19)
+- [ ] M10.1 Wydania `horizon-hot`, sprawdzanie raz na dobę, aktualizacja `hot-core`, `hotd`, `hot-pack`; `hot-proxy` przy braku graczy.
+- Sprawdzenie: nowa wersja każdego składnika wchodzi sama; gracze w grze nie zauważają (poza proxy, które czeka).
 
-### M10 — Fork klienta: nowa treść przy rekonfiguracji (D18)
-- [ ] Sprawdzenie: blok spoza puli slotów pojawia się u połączonego gracza bez restartu klienta i serwera.
+### M11 — Aplikacja gracza `hot-play` (D26)
+- [ ] M11.1 Menu terminalowe, „Graj” z pełnym sprawdzeniem i naprawą, logowanie raz, `play --server`.
+- [ ] M11.2 „Napraw” i plik z logiem.
+- [ ] M11.3 `install.sh`, `install.ps1`, build w CI, samoaktualizacja, skrót „Graj”.
+- Sprawdzenie: czyste maszyny macOS, Windows 11, Ubuntu Desktop → jedna linijka → skrót → wejście na serwer bez ostrzeżeń systemu; usunięty `hot-slots.hmod` lub uszkodzony plik launchera → naprawione przy starcie; przerwana instalacja + ponowna → działa.
 
-### M7 — Utwardzenie i dokumentacja
-- [ ] M7.1 Ochrona przed pętlą awarii (D13): test z modem, który robi segfault.
-- [ ] M7.2 `horizon-server service install` + usługa `hotd` (launchd/systemd), opcjonalny restart nocny.
-- [ ] M7.3 README, ARCHITECTURE, ADR 0002–0015 (D1–D15), przewodnik „pierwszy mod gorący”.
-- Sprawdzenie: `quality-audit` ≥ 120/125; segfault → serwer wstaje z ostatnią dobrą generacją, bez pętli.
+### M12 — Dokumentacja i jakość
+- [ ] M12.1 Przeniesienie D1–D29 do `docs/adr/`, `docs/operator.md`, przewodniki z D29.
+- [ ] M12.2 Test „nowej osoby w zespole” (kryterium 13): repo bez `PLAN.md`; świeży agent (a) odpowiada na pytania: co to za projekt, jak dodać mod, jak wydać wersję, czego nie wolno; (b) dodaje prosty mod gorący; (c) naprawia po jednym błędzie z każdej kategorii D27, mając tylko `hot report`. Transkrypt w `docs/testy/nowa-osoba.md`; każde potknięcie = poprawka dokumentacji i powtórka.
+- [ ] M12.3 README, ARCHITECTURE, ADR 0002–0030 (D1–D29), przewodnik „pierwszy mod gorący”, instrukcja operatora (`hot status`, przywracanie z kopii).
+- Sprawdzenie: `quality-audit` ≥ 120/125; każdy ADR ma kontekst, decyzję, konsekwencje (skrypt w CI sprawdza nagłówki).
+
+### M13 — Aktualizacja proxy bez rozłączeń (D19)
+- [ ] M13.1 Przekazanie gniazd i stanu szyfrowania (`SCM_RIGHTS`).
+- Sprawdzenie: nowa wersja proxy w trakcie gry, zero rozłączeń.
 
 ---
 
-## 5. Przewidywane problemy
+## 6. Przewidywane problemy
 
 | Problem | Co wtedy |
 |---|---|
-| S2: serwer nie ładuje `.hmod` | sloty w natywnym buildzie serwera + identyczny `.hmod` u klienta; test zgodności `content_identity` |
-| S5 i S6 obleją | wygląd po ponownym wejściu gracza; logika i dane dalej bez restartu |
-| Aktualizacja Horizona zmienia sygnatury haków | `hot-host` przypięty do commita; aktualizacja = ścieżka zimna + rebuild; `hot-abi` się nie zmienia, więc mody gorące działają dalej |
-| Wspólny `native/stage` (R17) | blokada pliku; nie budować w czasie prac w laboratorium |
-| Mod trzyma wątek po `deactivate` | wątek zostaje w pamięci; `hot-sdk` daje `HotThread`, który kończy się sam przy `deactivate` |
-| Wyciek pamięci przez generacje | pomiar w M1; restart nocny w M7 |
-| Przeszczep gubi stan gracza (otwarta skrzynia, przedmiot na kursorze, jazda na koniu) | przed zapisem świata proxy zamyka okna i zsiada graczy; ekwipunek wraca z zapisu świata; test w M6.3 |
-| Delta brudnych chunków nie mieści się w jednym ticku (np. wielka maszyna redstone) | więcej rund kopii wstępnej; zamrożenie dopiero, gdy delta < budżet; limit rund, po nim migracja odkładana na spokojniejszy moment |
-| Nowy mod zmienia format danych encji lub bloku | migracja przez mapowanie stanu (jak przy wczytaniu starego świata); bez mapowania migracja odmawia i mówi dlaczego |
-| Port 25565 lub 8131 zajęty | porty w `hot.toml`, sprawdzane przy starcie daemona |
+| S8: pauza podmiany > 1 s | decyzja użytkownika: zaakceptować zmierzoną pauzę albo rozgrzewanie silnika przez mixin na `[transfer]` (większy koszt) |
+| S8: klient rozłącza się przy długim braku pakietów | proxy wysyła klientowi keep-alive i własne pakiety podtrzymujące w czasie podmiany |
+| S2: klient bez `hot-slots.hmod` jest rozłączany | to oczekiwane; `hot-play` instaluje plik automatycznie |
+| Nightly często psuje build `hot-host` | serwer zostaje na starej wersji (D18); `hot-host` tylko na nazwanych hakach |
+| `libloading` znika z `Cargo.lock` Horizona | serwer zostaje na starej wersji; zgłoszenie do Horizona |
+| Wspólny `native/stage` (R27) | blokada pliku; na serwerze nie ma innych buildów |
+| Mod trzyma wątek po `deactivate` | `hot-sdk` daje `HotThread`, który kończy się przy `deactivate` |
+| Wyciek pamięci generacji | podmiana silnika po przekroczeniu progu (D4, M8.5) |
+| Nowy mod zmienia format danych bloku/encji | podmiana używa konwersji, którą silnik ma dla starych światów; bez niej — odmowa i komunikat |
+| ThinkCentre ma mało RAM-u na dwa silniki | podmiana czeka (D16); `hot status` pokazuje, ile brakuje |
+| `/reload` daje skok ticka na słabym CPU | pomiar w M3; przeładowanie tylko zmienionej paczki, jeśli Horizon pozwala |
+| Ostrzeżenie systemu mimo instalacji skryptem | decyzja o płatnym podpisie (D26) |
 
-## 6. Poza zakresem
-- Prawdziwe wyładowanie kodu (`dlclose`) i podmiana kodu w trakcie wywołania.
-- Mody Fabric/Forge (`.jar`) — w Horizonie nie działają.
-- Piaskownica dla kodu modów (jest tylko kontrola podpisu commita).
-- Kilka serwerów za jednym proxy (sieć serwerów); proxy obsługuje jeden świat.
-- Publikacja w rejestrze `horizon-mods` i na GitHubie.
+## 7. Poza zakresem
+- Podmiana silnika niewidoczna dla klienta w ≤ 50 ms (R19: miesiące pracy, kruche przy każdym Nightly).
+- Fork klienta Horizon dobudowujący rejestry w trakcie gry (bardzo duży koszt); nowa treść idzie przez sloty.
+- Konwersja cudzych `.hmod` na sloty (pasuje tylko do prostych bloków; wraca, jeśli będzie potrzebna).
+- Wielowątkowy tick — robi to Horizon (projekt W3 w `docs/server-next.md`); ewentualnie pomagamy PR-ami.
+- Piaskownica dla kodu modów (zabezpieczeniem jest podpis artefaktów CI i dostęp do repo).
+- Gra bez kupionego Minecrafta, konta offline omijające sprawdzenie zakupu.
+- Kilka serwerów za jednym proxy.
+- Zewnętrzne powiadomienia (Discord, mail).
 
-## 7. Stan prac (do wznowienia w innym wątku)
-- Próba z researchu: `~/Developer/horizon-mod-lab/projects/probe-hot-host` (trait mod z `libloading`), eksport w `/private/tmp/claude-501/probe-hot-host-export`. Do wykorzystania w M1.3.
-- Uwaga: w `native/stage/Cargo.toml` (members) zostało `native-api/probe_hot_host` po próbie. Launcher przepisuje tę listę przy każdym buildzie, więc prawdopodobnie nic to nie psuje — sprawdzić przy najbliższym buildzie „Drony”.
-- Następny krok: M0.1.
+## 8. Stan prac
+
+**2026-11-12 — plan v2 + diagnostyka i przekazanie zespołowi (D27–D29). Implementacja nie zaczęta: czeka na „go”.**
+- Repo: `~/Developer/horizon-hot`, commit `f788091` (M0.1).
+- Próba z researchu: `~/Developer/horizon-mod-lab/projects/probe-hot-host` — baza dla M0.2 i M1.3.
+- W `native/stage/Cargo.toml` (members) zostało `native-api/probe_hot_host`; launcher przepisuje listę przy buildzie — sprawdzić przy najbliższym buildzie „Drony Test”.
+- Następny krok: M0.2, po „go” użytkownika.

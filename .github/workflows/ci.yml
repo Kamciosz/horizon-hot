@@ -5,14 +5,39 @@ on:
     branches: [main]
   pull_request:
 
+# PL: Workflow tylko czyta repozytorium. Bez tego token dostaje domyślne, szersze uprawnienia.
+# EN: The workflow only reads the repository. Without this the token gets the default, wider permissions.
+permissions:
+  contents: read
+
 jobs:
-  build:
+  commits:
+    name: Format commitów
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v7
         with:
-          components: rustfmt, clippy
+          fetch-depth: 0
+      - name: Sprawdź każdy commit hookiem z repozytorium
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for sha in $(git rev-list "$BASE..$HEAD"); do
+            git log -1 --format=%B "$sha" > "$RUNNER_TEMP/msg"
+            sh .githooks/commit-msg "$RUNNER_TEMP/msg" || { echo "Commit $sha"; exit 1; }
+          done
+
+  build:
+    name: Build i testy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # PL: Wersję Rusta i składniki bierze z rust-toolchain.toml.
+      # EN: Rust version and components come from rust-toolchain.toml.
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all --check
       - name: Lint

@@ -1,43 +1,107 @@
-# AGENTS.md — zasady pracy w tym repo (dla ludzi i agentów AI)
+# AGENTS.md — przeczytaj najpierw (dla ludzi i agentów AI bez kontekstu)
 
-## Definition of done
-Zmiana jest gotowa dopiero, gdy **wszystkie** poniższe przechodzą (podmień komendy na właściwe dla projektu):
+Ten plik wystarcza, żeby zacząć rozwijać albo naprawiać projekt bez wcześniejszej wiedzy. Uzasadnienia decyzji: `docs/adr/`. Jak to działa: `docs/ARCHITECTURE.md`.
 
-```bash
-# build
-./gradlew build -q
-# testy
-./gradlew test -q
-# lint/format
-./gradlew spotlessCheck
+## 1. Czym jest projekt (30 sekund)
+
+Serwer gry dla małej grupy znajomych. Gra to **Horizon** — reimplementacja Minecraft Java 26.3 w Rust (wydania tylko Nightly: `nightly-<data>-<commit>`). Projekt dodaje:
+
+- **mody gorące** — biblioteki `cdylib` wczytywane do działającego serwera bez restartu;
+- **podmianę silnika** — nowa wersja Horizona albo mod natywny wchodzi bez rozłączania graczy (świat na chwilę „mruga”);
+- **samoaktualizację i samonaprawę** wszystkiego;
+- **instalator serwera** jednym poleceniem (Ubuntu) i **aplikację gracza** w terminalu (macOS, Windows, Linux).
+
+Właściciel: Szymon Sosnowski. Serwer stoi na współdzielonym ThinkCentre z Ubuntu — sprzęt słaby, gra ma zawsze pierwszeństwo.
+
+## 2. Słownik
+
+| Pojęcie | Znaczenie |
+|---|---|
+| silnik | proces serwera Horizon (`horizon-server` + skompilowana gra) |
+| `.hmod` | mod Horizona z danymi i zasobami; czytany tylko przy starcie gry |
+| `.hnmod` | mod natywny Horizona wkompilowany w silnik (`native-build`) |
+| mod gorący | nasz `cdylib` ładowany w locie przez `hot-core` |
+| generacja | kolejna załadowana wersja moda gorącego; stare zostają w pamięci, nie są wywoływane |
+| `hot-host` | stały, cienki mod natywny w silniku; ładuje `hot-core` |
+| `hot-core` | logika gospodarza: mody, sloty, komenda `/hot`; sam przeładowywalny |
+| `hotd` | demon w tle: git, CI, aktualizacje, kopie, hamulec MSPT |
+| `hot-proxy` | proxy przed silnikiem; trzyma graczy przy podmianie i awarii silnika |
+| `hot-pack` | serwer HTTP paczki zasobów |
+| `hot-play` | aplikacja gracza (terminal) |
+| `hot-diag` | wspólne logi i raporty błędów |
+| slot | z góry zarejestrowany pusty blok/przedmiot z `hot-slots.hmod`, któremu mod gorący nadaje nazwę, wygląd i zachowanie |
+| podmiana (wariant A) | przejście graczy na nowy silnik bez rozłączenia i bez ekranu ładowania |
+| MSPT | milisekundy na tick serwera; > 50 = gra laguje |
+| repo serwera | repo na GitHubie z modami (`mods/`, `native/`, `hot.toml`); to nie jest to repo |
+
+## 3. Mapa repo
+
+```
+crates/hot-abi/    granica C ABI (stabilna, wersjonowana ABI_MAJOR)
+crates/hot-diag/   logi JSONL, kody błędów, hot report        (planowany)
+crates/hot-sdk/    makro hot_mod!, bezpieczne opakowania       (planowany)
+crates/hot-core/   gospodarz modów gorących                    (planowany)
+crates/hotd/       demon w tle                                 (planowany)
+crates/hot-proxy/  proxy                                       (planowany)
+crates/hot-pack/   paczka zasobów                              (planowany)
+crates/hot-play/   aplikacja gracza                            (planowany)
+bundle/hot-host/   mod natywny dla silnika                     (planowany)
+docs/bledy/        katalog kodów błędów HOT-EXXXX              (planowany)
+docs/adr/          decyzje (jedna decyzja = jeden plik)
+docs/zmiany/       wpisy do changelogu z pull requestów
+docs/STANDARD_KODU.md  komentarze, błędy i logi, testy — obowiązuje w każdym pliku
+docs/operator.md   obsługa serwera: hot status, hot report, przywracanie z kopii   (planowany)
+PLAN.md            plan budowy (tymczasowy; po zakończeniu treść jest w docs/)
 ```
 
-Nie zgłaszaj „gotowe" bez uruchomienia tych komend i wklejenia wyniku.
+## 4. Typowe zadania
 
-## Kod
-- Małe funkcje i moduły: plik > 600 linii = sygnał do podziału, funkcja > ~50 linii = sygnał do rozbicia.
-- Żadnego martwego kodu: nie komentujemy — usuwamy (historia gita pamięta).
-- Żadnych debug-printów w kodzie produkcyjnym (logger tak).
-- Komentarze tylko tam, gdzie nie da się tego wyczytać z kodu (dlaczego, nie co). Konwencja: PL+EN, tagi `@uses/@used_by/@param` — patrz skill `code-docs-master`.
-- Nazwy po angielsku, opisowe; brak skrótów typu `tmp2`, `data1`.
+- **Coś nie działa:** weź `hot report` (serwer) albo raport z „Napraw” (gracz). Każdy błąd ma kod `HOT-EXXXX` → opis i naprawa w `docs/bledy/HOT-EXXXX.md`, miejsce w kodzie w polu `source`.
+- **Nowy mod gorący:** przewodnik `docs/przewodniki/nowy-mod.md` (planowany).
+- **Nowy hak w ABI:** `docs/przewodniki/nowy-hak.md` (planowany). Zmiana niezgodna wstecz = podbicie `ABI_MAJOR`.
+- **Nowy błąd:** nowy kod + wpis w `docs/bledy/` (sekcja 7).
+- **Zmiana decyzji architektonicznej:** najpierw nowy ADR w `docs/adr/`, potem kod.
+- **Nie wiesz, a dokumentacja nie odpowiada:** zapytaj właściciela; w sprawach z sekcji 6 nie zgaduj. Po wyjaśnieniu dopisz odpowiedź do dokumentacji.
 
-## Struktura
-- `src/main/...` — kod produkcyjny, `src/test/...` — testy, `docs/` — dokumentacja, `docs/adr/` — decyzje.
-- Nowa funkcja = nowy plik/moduł, nie doklejka do istniejącego molocha.
-- Zależności: najpierw to, co już jest w projekcie; nowa biblioteka = wpis w `docs/adr/` (dlaczego).
+## 5. Komendy
 
-## Git
-- Jeden commit = jedna logiczna zmiana; commity atomowe, opisowe (Conventional Commits). Hook `commit-msg` pilnuje formatu.
-- Gałęzie: `feat/nazwa`, `fix/nazwa`, `docs/nazwa`. Nigdy nie pushuj bezpośrednio do `main`.
-- Nie przepisuj historii wspólnych gałęzi (`--force`); na własnej gałęzi — `--force-with-lease`.
-- PR: opis co/po co/jak testowane/ryzyka (`.github/pull_request_template.md`).
-- Przed PR: `git fetch && git rebase origin/main` (nie merge z main).
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace          # oczekiwane: wszystkie „ok”
+```
 
-## Dokumentacja
-- Zmiana zachowania → aktualizacja `README.md` i `CHANGELOG.md` (sekcja `Unreleased`).
-- Decyzja architektoniczna → `docs/adr/NNNN-tytul.md`.
-- Nowy moduł → dopisz do `docs/ARCHITECTURE.md`.
+Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktualizowana dokumentacja w tym samym commicie.
 
-## Higiena repo
-- Zero plików tymczasowych w repo; `.gitignore` pokrywa artefakty stacku.
-- Nie commituj sekretów (`.env`, klucze). Sekret w historii = rotacja klucza, nie tylko usunięcie pliku.
+Środowisko testowe silnika (Mac właściciela): launcher Horizon `/Applications/Horizon.app/Contents/MacOS/horizon-launcher`, źródła wersji w `~/Library/Application Support/horizon-launcher/native/stage`. Na innej maszynie: `horizon-launcher install` + `prepare` (wymaga kupionego Minecrafta właściciela maszyny).
+
+## 6. Zasady nienaruszalne
+
+- **Bez restartu serwera** przy zmianie modów i aktualizacjach. Rozwiązanie, które wymaga restartu, jest błędne — zobacz ADR o podmianie silnika w `docs/adr/`.
+- **Kupiony Minecraft u każdego gracza.** Nie budujemy niczego, co omija sprawdzenie zakupu (konta offline jak TLauncher). Logowanie Microsoft raz, potem tryb offline Horizona — dozwolone.
+- **Żadnych plików Mojanga** w repo, w CI, w aplikacji gracza (polityka Horizona `docs/microsoft-account.md`). Silnik budujemy tylko na serwerze, z zasobami przygotowanymi z konta właściciela.
+- **Bez logo i marek** Minecrafta, Mojanga, Horizona jako naszych.
+- **Świat z kopii przywraca tylko człowiek** (operator potwierdza). Żadnych automatycznych przywróceń ani kasowania świata.
+- **Gra ma pierwszeństwo przed tłem** — praca w tle w `horizon-bg.slice`, pod hamulcem MSPT (D16).
+- Płatności, publikacja na zewnątrz, działania nieodwracalne → pytanie do właściciela.
+- Sekretów nie commitujesz. Sekret w historii = rotacja klucza.
+
+## 7. Logi i błędy (D27, D28)
+
+- Loguj **tylko przez `hot-diag`**. Każdy błąd ma kod `HOT-EXXXX`, pola `what`, `expected`, `context`, `cause`, `fix`, `doc`, `source`, `chain`, `state` — tak, żeby model bez wiedzy o projekcie naprawił błąd z samego wpisu.
+- Nowy błąd = nowy kod + plik `docs/bledy/HOT-EXXXX.md` (znaczenie, przyczyny, diagnostyka, naprawa, pliki kodu). CI sprawdza zgodność.
+- Zakazane: `unwrap()`/`expect()` poza testami, komunikaty bez kontekstu („failed”), połykanie błędów.
+- Debugujesz zgłoszenie? Zacznij od `hot report` (serwer) albo raportu z „Napraw” (gracz): mają opis systemu, wersje, błędy z wpisami z katalogu i logi.
+
+## 8. Kod i git
+
+- Rust stable (`rust-toolchain.toml`), edycja 2021. Nazwy po angielsku. Komentarze `PL:` + `EN:`, tylko „dlaczego”; na górze każdego `lib.rs`/`main.rs`: do czego crate służy, kto go używa. Szczegóły: `docs/STANDARD_KODU.md`.
+- Nowa funkcja = nowy moduł. Plik > 600 linii → podziel. Bez martwego kodu i `println!` do debugowania.
+- Nowa zależność → najpierw sprawdź, czy jest już w workspace; nowa = wpis w ADR.
+- Conventional Commits, temat w formie bezosobowej po polsku, 10–72 znaki, np. `feat(hot-core): ładowanie generacji poza wątkiem serwera`. Hook `.githooks/commit-msg` pilnuje formatu (`git config core.hooksPath .githooks`); CI sprawdza to samo.
+- Autor commitów: Szymon Sosnowski (ustawione w git). Bez stopek i dopisków o AI, bez `Co-Authored-By`.
+- Gałęzie `feat/…`, `fix/…`, `docs/…`; bez `--force` na wspólnych gałęziach.
+- Jedno zadanie = jedna gałąź = jeden pull request; ruszasz tylko swój składnik.
+- Wpis do changelogu w `docs/zmiany/<gałąź>.md` (nie w `CHANGELOG.md` — `docs/zmiany/README.md`).
+- Zmiana zachowania → `README.md`, `docs/ARCHITECTURE.md` przy nowym module, przewodniki — w tym samym PR.
+- Repo: https://github.com/Kamciosz/horizon-hot. `main` chroniony, scala właściciel po zielonym CI.

@@ -1,9 +1,8 @@
-# Właściciele (CODEOWNERS)
+# Właściciele
 
-Kto za co odpowiada — żeby wiedzieć, kogo zapytać, a nie zgadywać.
+Kogo pytać, zamiast zgadywać. Plik dla GitHuba: `.github/CODEOWNERS`.
 
-| Obszar | Osoba / zespół | Kontakt | Uwagi |
-|---|---|---|---|
-| całe repo | <imię> | <mail/discord> | |
-| <moduł> | <imię> | <kontakt> | |
-| CI / release | <imię> | <kontakt> | |
+| Obszar | Osoba | Kontakt |
+|---|---|---|
+| całe repo, decyzje, wydania | Szymon Sosnowski | `@Kamciosz` na GitHubie |
+| serwer na ThinkCentre (sprzęt, dostęp) | właściciel maszyny | przez Szymona |

@@ -1,20 +1,18 @@
+# Rust
+/target
+
+# Systemy i edytory
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/settings.json
+
+# Pliki tymczasowe i lokalne sekrety
 *.tmp
 *.bak
 *.orig
-*.swp
-*~
-.DS_Store
+*.log
 .env
 .env.*
 !.env.example
-__pycache__/
-*.pyc
-.venv/
-node_modules/
-dist/
-build/
-.gradle/
-.idea/
-.vscode/settings.json
-*.log
-/target
