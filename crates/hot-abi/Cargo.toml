@@ -1,11 +1,15 @@
+# PL: Pola wpisane wprost, bez dziedziczenia z workspace. Ten crate trafia też do paczki moda
+# natywnego `hot-host` i buduje się wewnątrz workspace Horizona, który nie ma naszych pól.
+# EN: Fields are spelled out, not inherited from the workspace. This crate is also copied into the
+# `hot-host` native mod bundle and builds inside Horizon's workspace, which lacks our fields.
 [package]
 name = "hot-abi"
 description = "Stabilna granica C ABI między hot-core a modami gorącymi"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-authors.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Szymon Sosnowski"]
+repository = "https://github.com/Kamciosz/horizon-hot"
 
 [lints]
 workspace = true
