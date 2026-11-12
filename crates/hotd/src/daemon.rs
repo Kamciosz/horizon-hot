@@ -210,6 +210,23 @@ impl<E: Engine> Daemon<E> {
             self.mark_applied(head, false);
             return Ok(());
         }
+        // PL: Silnik startuje albo wstaje po awarii: commit czeka, a nie przepada jako nieudany.
+        // EN: The engine is starting or restarting after a crash: the commit waits instead of
+        // being recorded as failed.
+        if self.engine.pid().is_none() {
+            let text = format!(
+                "czekam na silnik dla {} (horizon-server nie jest w fazie running)",
+                short(head)
+            );
+            if self.state.waiting.as_deref() != Some(&text) {
+                self.log.info(
+                    "hotd waits for the engine to run before applying the commit",
+                    json!({ "commit": head }),
+                );
+            }
+            self.state.waiting = Some(text);
+            return Ok(());
+        }
         let started = Instant::now();
         for id in &p.unload {
             self.engine

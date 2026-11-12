@@ -120,6 +120,7 @@ write_if_changed() {
 
 # --- PL: Argumenty. EN: Arguments. ----------------------------------------------------------
 
+ARGS=("$@")
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) REPO=${2:?"--repo potrzebuje adresu"}; shift 2 ;;
@@ -139,8 +140,10 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$REPO" ] || { say "Brakuje --repo." >&2; say "$USAGE" >&2; exit 2; }
 
-# PL: Ponowne uruchomienie z tymi samymi opcjami (do komunikatów). EN: The rerun command.
-RERUN="curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/main/scripts/server-install.sh | sudo bash -s -- --repo $REPO --eula${OP:+ --op $OP}"
+# PL: Ponowne uruchomienie z tymi samymi opcjami i z tej samej wersji skryptu (do komunikatów).
+# EN: The rerun command: the same options and the same version of this script.
+printf -v QUOTED ' %q' "${ARGS[@]}"
+RERUN="curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/$HOT_REF/scripts/server-install.sh | sudo bash -s --$QUOTED"
 
 # --- PL: Krok 1: sprawdzenie maszyny. EN: Step 1: checking the machine. -----------------------
 
@@ -450,7 +453,9 @@ firewall() {
   local p
   # PL: Najpierw SSH na każdym porcie, na którym słucha sshd, żeby nie odciąć operatora.
   # EN: SSH first, on every port sshd listens on, so the operator is never locked out.
-  for p in $(ss -Hltnp 2>/dev/null | awk '/"sshd"/ { n = split($4, a, ":"); print a[n] }' | sort -u) 22; do
+  # PL: Ubuntu 24.04 słucha przez ssh.socket (w ss widać systemd), więc port też z `sshd -T`.
+  # EN: Ubuntu 24.04 listens via ssh.socket (ss shows systemd), so the port also comes from `sshd -T`.
+  for p in $( { ss -Hltnp 2>/dev/null | awk '/"sshd"/ { n = split($4, a, ":"); print a[n] }'; sshd -T 2>/dev/null | awk '/^port / { print $2 }'; echo 22; } | sort -u); do
     ufw allow "$p/tcp" >/dev/null
   done
   ufw allow "$PORT/tcp" >/dev/null
@@ -459,6 +464,15 @@ firewall() {
     "see chain: often a kernel without netfilter in a container" "Run: sudo ufw status verbose; fix the cause, then rerun" \
     "the firewall rules are added but may be inactive"
   say "Otwarte: SSH, $PORT (gra), $PACK_PORT (paczka zasobów)."
+}
+
+# PL: Czeka do 120 s na fazę running silnika. EN: Waits up to 120 s for the engine's running phase.
+wait_running() {
+  for _ in $(seq 1 60); do
+    hz status --json 2>/dev/null | grep -q '"phase": *"running"' && return 0
+    sleep 2
+  done
+  return 1
 }
 
 # --- PL: Krok 10: silnik z hot-host. EN: Step 10: the engine with hot-host. ------------------
@@ -500,6 +514,12 @@ engine() {
     || fail HOT-E0110 "The server cannot switch to the new engine" "config set engine.path and restart succeed" \
       "see chain" "Run: sudo -u horizon $BIN/horizon-server --dir $SRV config set engine.path=$out/horizon-engine" \
       "the engine was built but the server may still run the old one" "out=$out"
+  # PL: hotd dopiero przy działającym silniku. EN: hotd only once the engine runs.
+  wait_running || OUTPUT=$(journalctl -u horizon-hot-server -n 60 --no-pager 2>&1) fail HOT-E0110 \
+    "The server does not run on the new engine within 120 s" "horizon-server status --json says running" \
+    "see chain (the service log); the engine with hot-host may not start" \
+    "Read journalctl -u horizon-hot-server -n 200; to go back: config set engine.path= (empty) and systemctl restart horizon-hot-server" \
+    "the server may be down; hotd is not started" "out=$out"
   systemctl enable -q --now horizon-hot-hotd
   say "Silnik z hot-host: $out."
 }
@@ -536,11 +556,7 @@ autotest() {
       "the server runs; hotd retries every 10 s" "repo=$REPO"
   fi
   if [ "$TEST_NO_HORIZON" = 0 ]; then
-    for _ in $(seq 1 60); do
-      hz status --json 2>/dev/null | grep -q '"phase": *"running"' && { ok=1; break; }
-      sleep 2
-    done
-    [ "$ok" = 1 ] || OUTPUT=$(journalctl -u horizon-hot-server -n 60 --no-pager 2>&1) fail HOT-E0111 \
+    wait_running || OUTPUT=$(journalctl -u horizon-hot-server -n 60 --no-pager 2>&1) fail HOT-E0111 \
       "The server did not reach the running phase within 120 s" "horizon-server status --json says running" \
       "see chain (the service log)" "Read journalctl -u horizon-hot-server -n 200, fix the cause, then rerun the installer" \
       "the services stay installed"

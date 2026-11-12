@@ -417,3 +417,31 @@ fn unreachable_repository_is_logged_once() {
     d.step();
     assert!(d.state().fetch_error.is_none());
 }
+
+#[test]
+fn commit_waits_while_the_engine_is_not_running() {
+    let w = World::new("engine-down");
+    let fake = Fake::new(&w.home);
+    fake.pid.set(None);
+    let mut d = w.daemon(fake.clone());
+    let sha = w.commit(&MOD_FILES, &[]);
+    w.publish(&sha, &["licznik"], true, false);
+
+    d.step();
+    assert!(
+        fake.take_commands().is_empty(),
+        "no command to a stopped engine"
+    );
+    assert!(!d.state().settled(&sha), "the commit is not lost");
+    assert!(d
+        .state()
+        .waiting
+        .as_deref()
+        .unwrap()
+        .contains("czekam na silnik"));
+
+    fake.pid.set(Some(100));
+    d.step();
+    assert!(fake.take_commands()[0].starts_with("hot load "));
+    assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
+}

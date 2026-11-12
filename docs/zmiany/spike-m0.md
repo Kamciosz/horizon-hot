@@ -30,6 +30,7 @@
 - ADR 0008: wyniki CI na gałęzi `hot-builds` i podpis `ssh-keygen` zamiast artefaktów Actions.
 - `scripts/server-install.sh`: instalator serwera na Ubuntu jednym poleceniem (D25, kroki 1–8 i 10): sprawdzenie maszyny, użytkownik `horizon` i `/srv/horizon`, Horizon z oficjalnego `install.sh`, `hotd` i `hot-core` budowane ze źródeł, klucz podpisu CI i `allowed_signers`, klucz tylko do odczytu dla prywatnego repo, `hot.yml` z przypiętą wersją horizon-hot, świat, usługi systemd, `ufw`, kopie co noc, autotest. Silnik z `hot-host` budowany dopiero po zgodzie właściciela (`--trust-native-code`). Ponowne uruchomienie robi tylko to, czego brakuje. Kody `HOT-E0101`–`HOT-E0111`.
 - Test katalogu błędów sprawdza też kody w `scripts/`.
+- `hotd`: pole `fetch_error` w `hot-state/hotd.json` (czy repo da się pobrać teraz) i linia „repo teraz niedostępne” w `hotd status`; commit czeka, gdy silnik nie działa, zamiast trafić na listę nieudanych.
 - `/hot status` w grze pokazuje też stan `hotd`: commit repo, zastosowany commit, na co czeka i dlaczego ostatni commit nie wszedł.
 
 ### Zmienione
