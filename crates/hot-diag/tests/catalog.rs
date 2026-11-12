@@ -142,6 +142,12 @@ fn embedded_catalog_matches_the_files() {
 
 #[test]
 fn scanner_ignores_templates_and_longer_tokens() {
-    let text = "HOT-EXXXX HOT-E12345 HOT-E0412x HOT-E0001, \"HOT-E0002\"";
-    assert_eq!(codes_in(text), ["HOT-E0001", "HOT-E0002"]);
+    // PL: Kody składane z części, żeby ten test nie liczył się jako „użycie” kodu z katalogu.
+    // EN: Codes built from parts, so this test does not count as a "use" of a catalog code.
+    let (a, b) = (
+        format!("{}{}", "HOT-E", "0001"),
+        format!("{}{}", "HOT-E", "0002"),
+    );
+    let text = format!("HOT-EXXXX HOT-E12345 {a}x {a}, \"{b}\"");
+    assert_eq!(codes_in(&text), [a, b]);
 }
