@@ -1,0 +1,12 @@
+[package]
+name = "s8-proxy"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# PL: Próba poza workspace repo (spikes/README.md).
+# EN: A spike outside the repo workspace (spikes/README.md).
+[workspace]
+
+[dependencies]
+horizon-protocol = { git = "https://github.com/horizon-rust/horizon", rev = "66f3981f522b24c250b21523a70080965b940424" }

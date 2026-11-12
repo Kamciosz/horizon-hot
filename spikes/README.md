@@ -14,3 +14,4 @@ horizon-launcher native-build <katalog paczki> --server-output <katalog> --versi
 | `s2-s5-pula-slotow/hmod/` | S2, M0.3 (`cargo horizon-mod build`) | `docs/spike/s2-pula-slotow-hmod.md` |
 | `s2-s5-pula-slotow/paczka/` | S5, M0.6 (paczka zasobów serwera) | `docs/spike/s5-wyglad-slotu-z-paczki-serwera.md` |
 | `s3-s4-hak-komendy-i-tick/` | S3 i S4, M0.4–M0.5 | `docs/spike/s3-…`, `docs/spike/s4-…` |
+| `s8-podmiana/proxy/` | S8, M0.9 (`cargo build --release`, proxy podmiany silnika) | `docs/spike/s8-podmiana-prototyp.md` |

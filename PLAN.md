@@ -128,21 +128,21 @@ Gracze łączą się z `hot-proxy` (Rust, na `horizon-protocol`) na porcie 25565
 - Kontekst: R17 — `StartConfiguration` pokazuje ekran; R19 — podmiana całkiem niewidoczna to miesiące pracy.
 - Kroki:
   1. Nowy silnik buduje się w tle (D15) do nowego katalogu.
-  2. Stary silnik: `player-export freeze` dla każdego gracza (R18: zamyka okna, zapisuje NBT), `save-all flush`, koniec ticków.
-  3. Nowy silnik startuje na tym samym świecie; gracze wchodzą do niego przez proxy jako ci sami (forwarding, ten sam UUID).
-  4. Proxy nie przekazuje klientowi nowego `Login`: zamiast tego wysyła „usuń encje” i „zapomnij chunki”, potem przepuszcza nowe chunki i encje, mapując identyfikator gracza na stary. Klient widzi mrugnięcie świata, bez ekranu.
-  5. Błąd nowego silnika przed przełączeniem → stary wraca do gry (świat jeszcze w pamięci); po przełączeniu → podmiana z powrotem tą samą drogą.
-- Budżet: pauza świata ≤ 1 s (zapis zmienionych chunków + start na wczytanym świecie). NIEWIADOMA: czy silnik da się uruchomić przed zwolnieniem świata przez stary (rozgrzanie) — S8.
+  2. Proxy przestaje przekazywać ruch; stary silnik dostaje `stop` (zapisuje świat i graczy, zwalnia `session.lock`). `player-export` niepotrzebny: oba silniki czytają tych samych graczy ze wspólnego świata (S8).
+  3. Nowy silnik startuje na tym samym świecie dopiero po zatrzymaniu starego (S12); `hotd` nie czeka na koniec komendy `start`, proxy loguje się, gdy port przyjmie połączenie.
+  4. Proxy loguje się do nowego silnika jako każdy gracz, odtwarza jego konfigurację, połyka nowy `Login`, wysyła klientowi „usuń encje” i zamienia id gracza (id u klienta ↔ id w silniku). „Zapomnij chunki” niepotrzebne: nowe chunki zastępują stare w miejscu (S8). Klient widzi mrugnięcie encji, bez ekranu.
+  5. Błąd nowego silnika → proxy trzyma graczy, `hotd` uruchamia z powrotem stary silnik tą samą drogą (ok. 1 s więcej).
+- Budżet: pauza świata ≤ 1 s. Zmierzone w S8 na Macu: 0,97–1,26 s (stop 0,4–0,64 s + start ok. 0,55 s, proxy < 20 ms). Rozgrzanie przed zwolnieniem świata niemożliwe (S12). Przekroczenie budżetu czeka na decyzję użytkownika (sekcja 8). Opis: `docs/podmiana.md`.
 - Wyjątek: zmiana rejestrów (nowe bloki w `.hnmod`, nowa pula) → klient potrzebuje nowych plików; wtedy aplikacja gracza je pobiera, a gracz wchodzi ponownie. Dlatego treść idzie przez sloty.
 - To samo przełączenie służy do: aktualizacji Horizona (D18), odzyskania pamięci po generacjach (D4), wznowienia po awarii silnika (D13).
 
 **D12. Dwa katalogi silnika (niebieski/zielony) pod nadzorem `hotd`.**
-`/srv/horizon/engine-a` i `engine-b`, wspólny świat w `/srv/horizon/world` (przenoszony między nimi tylko w kroku 3 D11). Każdy pod własnym `horizon-server --dir` z własnym portem. NIEWIADOMA S12: czy `horizon-server` przyjmie świat spoza swojego katalogu i drugi port.
+`/srv/horizon/engine-a` i `engine-b`, wspólny świat w `/srv/horizon/world` (przenoszony między nimi tylko w kroku 3 D11). Każdy pod własnym `horizon-server --dir` z własnym portem. Świat spoza katalogu (dowiązanie) i drugi port działają (S12); panel webowy tylko po jednej stronie albo na różnych portach.
 
 **D13. Ochrona przed pętlą awarii i wznowienie po awarii.**
 - Przy starcie `hot-core` ładuje tylko generacje oznaczone jako ostatnie dobre (przeżyły 5 min).
 - `hotd` oznacza commit jako zły, gdy silnik padł ≤ 60 s od jego załadowania; nie aplikuje go ponownie.
-- Po awarii silnika proxy trzyma połączenia graczy (ekran „Wczytywanie…” trwa, dopóki silnik nie wstanie), potem wprowadza ich jak w D11. Cel: nikt nie traci połączenia, jeśli silnik wstanie w < 30 s (limit ciszy klienta `READ_TIMEOUT` = 30 s, potwierdzone w kodzie w S8; proxy wysyła w tym czasie keep-alive, więc limit dotyczy tylko proxy).
+- Po awarii silnika proxy trzyma połączenia graczy (świat stoi, bez ekranu ładowania), potem wprowadza ich jak w D11. Cel: nikt nie traci połączenia, jeśli silnik wstanie w < 30 s (limit ciszy klienta `READ_TIMEOUT` = 30 s, potwierdzone w kodzie w S8; proxy wysyła w tym czasie keep-alive, więc limit dotyczy tylko proxy).
 
 ### Budowa i zasoby
 
@@ -304,7 +304,7 @@ Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie dz
 - [x] M0.6 S5: blok z puli z modelem z paczki serwera (sha1 ustawiony). Sprawdzenie: zrzut ekranu z poprawnym modelem.
 - [ ] M0.7 S6: proxy-prototyp wysyła `ResourcePackPush` w trakcie gry. Sprawdzenie: zmiana tekstury bez mrugnięcia. Wynik opcjonalny (D9).
 - [ ] M0.8 S7: rozmiar puli 4096/8192: czas startu klienta i serwera, RAM. Sprawdzenie: liczby w `docs/sloty.md`; start klienta wolniejszy o < 2 s, inaczej mniejsza pula.
-- [ ] M0.9 S8: prototyp podmiany wariantu A: proxy + dwa silniki na jednym świecie, „usuń encje / zapomnij chunki”, mapowanie id gracza; pomiar pauzy; czy da się rozgrzać nowy silnik przed zwolnieniem świata; ile czasu klient czeka bez pakietów, zanim się rozłączy. Sprawdzenie: prawdziwy klient zostaje połączony, bez ekranu ładowania, pauza zmierzona (`docs/podmiana.md`). **Blokuje D11 i D13.** Jeśli pauza > 1 s — decyzja użytkownika przed M8.
+- [x] M0.9 S8: prototyp podmiany wariantu A: proxy + dwa silniki na jednym świecie, „usuń encje / zapomnij chunki”, mapowanie id gracza; pomiar pauzy; czy da się rozgrzać nowy silnik przed zwolnieniem świata; ile czasu klient czeka bez pakietów, zanim się rozłączy. Sprawdzenie: prawdziwy klient zostaje połączony, bez ekranu ładowania, pauza zmierzona (`docs/podmiana.md`). **Blokuje D11 i D13.** Jeśli pauza > 1 s — decyzja użytkownika przed M8.
 - [ ] M0.10 S9: `native-build` na Ubuntu x86_64 bez okna, z zasobami z `prepare`. Sprawdzenie: eksport startuje.
 - [ ] M0.11 S10: ThinkCentre: model, CPU, RAM, wersja Ubuntu, architektura; pomiar pustego serwera i 10 botów. Sprawdzenie: `docs/sprzet.md` z wartościami `AllowedCPUs`, `MemoryLow`, `MemoryMax`.
 - [ ] M0.12 S11: ostatnie 10 Nightly — co zmieniło `content_identity`, kanały `horizon:*`, API haków, `Cargo.lock` (`libloading`). Sprawdzenie: `docs/aktualizacje.md`.
@@ -426,6 +426,10 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Zewnętrzne powiadomienia (Discord, mail).
 
 ## 8. Stan prac
+
+**2026-11-12 — M0.9 (S8) zrobione:** prototyp proxy (`spikes/s8-podmiana/proxy/`) przeniósł prawdziwego klienta 10 razy między dwoma silnikami na jednym świecie: ekran `playing` przez cały czas, połączenie zostało, chunki zostały, moby mrugnęły (ok. 0,8 s). Zamiana id gracza konieczna (próba kontrolna bez niej oblała). Pauza 0,97–1,26 s: prawie cała to stop + start silnika. Niesprawdzone, do M8: mody i paczka zasobów w odtwarzanej konfiguracji, tryb online, wielu graczy. Szczegóły: `docs/spike/s8-podmiana-prototyp.md`, `docs/podmiana.md`.
+
+**DECYZJA UŻYTKOWNIKA (przed M8): budżet pauzy.** Zmierzone 0,97–1,26 s na Macu (ThinkCentre: M0.11), budżet D11 to 1 s. Mój wybór: przyjąć „do 1,5 s” i skracać w M8 przy okazji (szybsze wykrycie zatrzymania starego silnika). Alternatywa: zostać przy 1 s i szukać skrócenia startu silnika (koszt nieznany).
 
 **2026-11-12 — M0.9 (S8) część 1, analiza kodu klienta:** `StartConfiguration`, drugi `Login` i `Respawn` zawsze pokazują ekran ładowania, więc proxy po pierwszym wejściu nie wysyła żadnego z nich. Jedyna droga: proxy samo loguje się i konfiguruje z B, połyka `Login` B, usuwa encje A i zamienia id gracza pA ↔ pB we wszystkich pakietach. Klient rozłącza się po 30 s ciszy. Bazą proxy będzie `horizon-protocol` (MIT, bez plików gry). Szczegóły: `docs/spike/s8-podmiana-analiza-klienta.md`. Dalej: prototyp proxy (część 2).
 
