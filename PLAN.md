@@ -142,7 +142,7 @@ Gracze łączą się z `hot-proxy` (Rust, na `horizon-protocol`) na porcie 25565
 **D13. Ochrona przed pętlą awarii i wznowienie po awarii.**
 - Przy starcie `hot-core` ładuje tylko generacje oznaczone jako ostatnie dobre (przeżyły 5 min).
 - `hotd` oznacza commit jako zły, gdy silnik padł ≤ 60 s od jego załadowania; nie aplikuje go ponownie.
-- Po awarii silnika proxy trzyma połączenia graczy (ekran „Wczytywanie…” trwa, dopóki silnik nie wstanie), potem wprowadza ich jak w D11. Cel: nikt nie traci połączenia, jeśli silnik wstanie w ≤ 30 s (limit czasu klienta, NIEWIADOMA S8).
+- Po awarii silnika proxy trzyma połączenia graczy (ekran „Wczytywanie…” trwa, dopóki silnik nie wstanie), potem wprowadza ich jak w D11. Cel: nikt nie traci połączenia, jeśli silnik wstanie w < 30 s (limit ciszy klienta `READ_TIMEOUT` = 30 s, potwierdzone w kodzie w S8; proxy wysyła w tym czasie keep-alive, więc limit dotyczy tylko proxy).
 
 ### Budowa i zasoby
 
@@ -426,6 +426,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Zewnętrzne powiadomienia (Discord, mail).
 
 ## 8. Stan prac
+
+**2026-11-12 — M0.9 (S8) część 1, analiza kodu klienta:** `StartConfiguration`, drugi `Login` i `Respawn` zawsze pokazują ekran ładowania, więc proxy po pierwszym wejściu nie wysyła żadnego z nich. Jedyna droga: proxy samo loguje się i konfiguruje z B, połyka `Login` B, usuwa encje A i zamienia id gracza pA ↔ pB we wszystkich pakietach. Klient rozłącza się po 30 s ciszy. Bazą proxy będzie `horizon-protocol` (MIT, bez plików gry). Szczegóły: `docs/spike/s8-podmiana-analiza-klienta.md`. Dalej: prototyp proxy (część 2).
 
 **2026-11-12 — M0.13 (S12) zrobione:** świat przez dowiązanie `world -> ../shared/world`; drugi silnik nie otworzy zajętego świata (`session.lock`), ale jego supervisor wpada w pętlę restartów 5→40 s, więc `hotd` musi najpierw zatrzymać stary; przekazanie świata ok. 1 s na Macu. Odkryta sekcja `[transfer]` w `server.toml` (proxy + zamrożenie gracza) — sprawdzić w M0.9. Szczegóły: `docs/spike/s12-dwa-serwery-jeden-swiat.md`.
 
