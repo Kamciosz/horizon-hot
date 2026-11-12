@@ -285,6 +285,7 @@ hot_build() {
   install -o horizon -g horizon -m 0755 "$SRC/target/release/hotd" "$SRC/target/release/hot-diag" "$BIN/"
   install -o horizon -g horizon -m 0644 "$SRC/target/release/libhot_core.so" "$SRV/hot-core/libhot_core.so"
   printf '%s\n' "$sha" > "$ROOT/hot-version"
+  HOT_REBUILT=1
   say "Zbudowany ${sha:0:7}: $BIN/hotd, $SRV/hot-core/libhot_core.so."
 }
 
@@ -432,7 +433,8 @@ WantedBy=timers.target" && changed=1
     #     oznaczane jako nieudane. EN: hotd starts only with a hot-host engine.
     if engine_has_hot_host || [ "$TEST_NO_HORIZON" = 1 ]; then
       systemctl enable -q horizon-hot-hotd
-      if [ "$changed" = 1 ]; then systemctl restart horizon-hot-hotd; else systemctl start horizon-hot-hotd; fi
+      # PL: Nowy plik programu działa dopiero po restarcie. EN: A new binary runs only after a restart.
+      if [ "$changed" = 1 ] || [ "$HOT_REBUILT" = 1 ]; then systemctl restart horizon-hot-hotd; else systemctl start horizon-hot-hotd; fi
     fi
   } 2>&1) || fail HOT-E0109 "systemd cannot start the horizon-hot services" "systemctl enable --now succeeds" \
     "see chain; journalctl -u horizon-hot-server -n 50 shows why a unit stopped" \
@@ -599,6 +601,7 @@ main() {
 }
 
 HOT_SHA=
+HOT_REBUILT=0
 # PL: Przy `curl | bash` skrypt płynie przez stdin; polecenia w środku nie mogą go czytać.
 # EN: With `curl | bash` the script comes through stdin; commands inside must not read it.
 main </dev/null
