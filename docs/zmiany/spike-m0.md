@@ -28,6 +28,8 @@
 - `crates/hotd`: demon, który co 10 s pobiera repo serwera, liczy zmiany od ostatniego zastosowanego commita (D24), pobiera podpisane biblioteki modów z gałęzi `hot-builds`, ładuje je w silniku i zapisuje stan w `hot-state/hotd.json`; `hotd status` w terminalu. Kody `HOT-E0201`–`HOT-E0207`.
 - `scripts/hot-build.sh`, `scripts/hot-publish.sh` i szablon `templates/server-repo/.github/workflows/hot.yml`: budowa modów w CI, podpis `ssh-keygen`, wynik na gałęzi `hot-builds`.
 - ADR 0008: wyniki CI na gałęzi `hot-builds` i podpis `ssh-keygen` zamiast artefaktów Actions.
+- `scripts/server-install.sh`: instalator serwera na Ubuntu jednym poleceniem (D25, kroki 1–8 i 10): sprawdzenie maszyny, użytkownik `horizon` i `/srv/horizon`, Horizon z oficjalnego `install.sh`, `hotd` i `hot-core` budowane ze źródeł, klucz podpisu CI i `allowed_signers`, klucz tylko do odczytu dla prywatnego repo, `hot.yml` z przypiętą wersją horizon-hot, świat, usługi systemd, `ufw`, kopie co noc, autotest. Silnik z `hot-host` budowany dopiero po zgodzie właściciela (`--trust-native-code`). Ponowne uruchomienie robi tylko to, czego brakuje. Kody `HOT-E0101`–`HOT-E0111`.
+- Test katalogu błędów sprawdza też kody w `scripts/`.
 - `/hot status` w grze pokazuje też stan `hotd`: commit repo, zastosowany commit, na co czeka i dlaczego ostatni commit nie wszedł.
 
 ### Zmienione

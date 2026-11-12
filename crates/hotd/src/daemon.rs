@@ -137,7 +137,9 @@ impl<E: Engine> Daemon<E> {
     pub fn step(&mut self) {
         self.check_crash();
         if let Err(e) = self.mirror.fetch() {
-            let key = e.fields()["chain"].to_string();
+            let f = e.fields();
+            self.state.fetch_error = Some(f["what"].as_str().unwrap_or_default().to_owned());
+            let key = f["chain"].to_string();
             if self.last_fetch_error.as_ref() != Some(&key) {
                 self.error(&e);
                 self.last_fetch_error = Some(key);
@@ -145,6 +147,7 @@ impl<E: Engine> Daemon<E> {
             self.save();
             return;
         }
+        self.state.fetch_error = None;
         if self.last_fetch_error.take().is_some() {
             self.log.info(
                 "hotd fetches the server repository again",

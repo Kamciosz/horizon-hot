@@ -41,6 +41,10 @@ pub struct State {
     /// PL: Commity, po których silnik padł (D13). EN: Commits after which the engine died (D13).
     pub bad: Vec<String>,
     pub errors: Vec<Value>,
+    /// PL: Czemu ostatnie pobranie repo się nie udało; `None` = udało się. To stan na teraz,
+    /// a `errors` to historia. EN: Why the last fetch failed; `None` = it worked. The current
+    /// state, while `errors` is the history.
+    pub fetch_error: Option<String>,
 }
 
 impl State {
@@ -89,6 +93,7 @@ impl State {
             "failed": self.failed.iter().map(|(c, r)| json!({"commit": c, "reason": r})).collect::<Vec<_>>(),
             "bad": self.bad,
             "recent_errors": self.errors,
+            "fetch_error": self.fetch_error,
         })
     }
 
@@ -129,6 +134,7 @@ impl State {
                 .unwrap_or_default(),
             bad: list("bad"),
             errors: v["recent_errors"].as_array().cloned().unwrap_or_default(),
+            fetch_error: text("fetch_error"),
         }
     }
 
@@ -193,6 +199,7 @@ mod tests {
             applied_pid: Some(42),
             waiting: Some("czekam".into()),
             deferred: vec!["x".into()],
+            fetch_error: Some("brak sieci".into()),
             ..State::default()
         };
         s.fail("c", "nie zbudował się");

@@ -45,7 +45,8 @@ crates/hot-host/   mod natywny w silniku: ładuje hot-core, przekazuje haki; poz
                    (build: crates/hot-host/build-bundle.sh + horizon-launcher native-build)
 examples/licznik/  przykładowy mod gorący: licznik ticków, stan przez przeładowanie
 crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; hotd status
-scripts/           hot-build.sh i hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)
+scripts/           server-install.sh (instalator serwera na Ubuntu, D25); hot-build.sh i
+                   hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)
 templates/server-repo/  pliki, które instalator kopiuje do repo serwera (hot.yml)
 crates/hot-proxy/  proxy                                       (planowany)
 crates/hot-pack/   paczka zasobów                              (planowany)
@@ -81,6 +82,8 @@ crates/hot-host/build-bundle.sh <katalog> && horizon-launcher native-build <kata
 ```
 
 Próba `hotd` bez GitHuba: lokalne repo z `mods/<id>/`, `HOT_SIGNING_KEY_FILE=<klucz> scripts/hot-build.sh <repo> <out>`, `scripts/hot-publish.sh <repo> <out>`, potem `hotd once --home <HOT_HOME> --repo file://<origin.git> --engine <horizon-server> --allowed-signers <plik>`. Testy `cargo test -p hotd` potrzebują `git` i `ssh-keygen`.
+
+Instalator serwera: `scripts/server-install.sh --repo URL --eula` jako root na Ubuntu x86_64 (kroki i kody `HOT-E0101`–`HOT-E0111` w nagłówku skryptu i w `docs/bledy/`). Kod wyjścia 3 = czeka na właściciela: pliki gry (`--resources DIR`) albo zgoda na kod natywny (`--trust-native-code`; tej zgody agent nie daje). Próba bez Horizona w maszynie wirtualnej: `--test-no-horizon` (pomija pobranie Horizona, świat i silnik). Nie uruchamiaj go na Macu ani na maszynie z grą: zakłada użytkownika, usługi systemd i zaporę.
 
 Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktualizowana dokumentacja w tym samym commicie.
 

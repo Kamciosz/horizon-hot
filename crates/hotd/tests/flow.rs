@@ -408,4 +408,12 @@ fn unreachable_repository_is_logged_once() {
         1,
         "{log}"
     );
+    // PL: Stan na teraz w hotd.json i w `hotd status`. EN: The current state, for the installer.
+    assert!(d.state().fetch_error.is_some());
+    assert!(hotd::status::render(&w.home).contains("repo teraz niedostępne"));
+
+    // PL: Repo wraca → błąd znika ze stanu. EN: The repository is back → the error clears.
+    git(&w.root, &["init", "-q", "--bare", "nie-ma"]);
+    d.step();
+    assert!(d.state().fetch_error.is_none());
 }

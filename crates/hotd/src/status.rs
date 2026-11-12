@@ -39,6 +39,9 @@ pub fn render(home: &Path) -> String {
                 short(&d["applied"]),
                 d["updated"].as_str().unwrap_or("?")
             );
+            if let Some(f) = d["fetch_error"].as_str() {
+                let _ = writeln!(out, "  repo teraz niedostępne: {f}");
+            }
             if let Some(w) = d["waiting"].as_str() {
                 let _ = writeln!(out, "  czeka: {w}");
             }

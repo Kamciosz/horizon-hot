@@ -1,7 +1,7 @@
-//! PL: Zgodność kodów błędów z katalogiem `docs/bledy/` (D27, M0.17). Kod użyty w `crates/` bez
-//! pliku w katalogu albo plik bez użycia w kodzie = czerwone CI.
-//! EN: Error codes match the `docs/bledy/` catalog (D27, M0.17). A code used in `crates/` without a
-//! catalog file, or a file with no use in code = red CI.
+//! PL: Zgodność kodów błędów z katalogiem `docs/bledy/` (D27, M0.17). Kod użyty w `crates/` (Rust)
+//! albo w `scripts/` (instalator) bez pliku w katalogu, albo plik bez użycia w kodzie = czerwone CI.
+//! EN: Error codes match the `docs/bledy/` catalog (D27, M0.17). A code used in `crates/` (Rust) or
+//! `scripts/` (the installer) without a catalog file, or a file with no use in code = red CI.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -20,14 +20,15 @@ fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
+/// PL: Pliki z kodem: Rust i skrypty powłoki. EN: Code files: Rust and shell scripts.
+fn source_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
         if path.is_dir() {
             if path.file_name().is_some_and(|n| n != "target") {
-                rust_files(&path, out);
+                source_files(&path, out);
             }
-        } else if path.extension().is_some_and(|e| e == "rs") {
+        } else if path.extension().is_some_and(|e| e == "rs" || e == "sh") {
             out.push(path);
         }
     }
@@ -56,7 +57,8 @@ fn codes_in(text: &str) -> Vec<String> {
 
 fn used_codes() -> BTreeMap<String, Vec<String>> {
     let mut files = Vec::new();
-    rust_files(&repo().join("crates"), &mut files);
+    source_files(&repo().join("crates"), &mut files);
+    source_files(&repo().join("scripts"), &mut files);
     let mut used: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for file in files {
         let text = fs::read_to_string(&file).unwrap_or_default();
@@ -108,7 +110,7 @@ fn every_catalog_entry_is_used_in_crates() {
         .collect();
     assert!(
         unused.is_empty(),
-        "catalog entries with no code in crates/ (use them or mark „nieużywany od wersji X”): {unused:?}"
+        "catalog entries with no code in crates/ or scripts/ (use them or mark „nieużywany od wersji X”): {unused:?}"
     );
 }
 
