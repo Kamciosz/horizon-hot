@@ -13,4 +13,3 @@
 /// EN: Major ABI version. The host rejects a mod that reports a different value.
 /// Any backwards-incompatible change in this crate bumps this number.
 pub const ABI_MAJOR: u32 = 1;
-
