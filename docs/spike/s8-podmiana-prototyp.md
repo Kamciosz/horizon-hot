@@ -31,6 +31,7 @@ Silniki: `a` i `b` z S12 (wspólny świat przez dowiązanie, bez modów, offline
 - Chunki: 0,15 s po starcie podmiany klient niszczy trawę przed sobą (`horizon-ctl break -23 70 20`); u klienta znika od razu, a proxy odrzuca pakiet. Po podmianie `horizon-ctl block` musi znowu pokazać trawę, jeśli chunk od B zastąpił kopię klienta.
 - Ruch: 0,15 s po starcie podmiany `horizon-ctl move back 0.6`, potem pozycja klienta i `data get entity kamciosz Pos` na B.
 - Komunikat „joined”: `horizon-ctl messages` po każdej podmianie.
+- Później, w S6 (`s6-paczka-w-trakcie-gry.md`): pole `screen` nie pokazuje nakładki ładowania, więc podmianę sprawdzono też serią 80 zrzutów klatki (co ok. 70 ms przez 5,4 s, podmiana 1,08 s). Na każdym zrzucie widać świat.
 - Próba kontrolna z wyłączoną zamianą (`S8_NO_REMAP=1`): po podmianie `effect clear` z B **nie** dociera do gracza. Efekt zostaje, a czas trwania spada dalej (590 → 579 ticków), zamiast zacząć się od nowa. Test zamiany potrafi więc oblać.
 
 ## Wynik

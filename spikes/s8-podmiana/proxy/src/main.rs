@@ -12,6 +12,10 @@
 //!
 //! Creating `<swap-file>` stops the active engine, starts the other one and
 //! moves the player over; the file is removed when the swap starts.
+//!
+//! S6 (M0.7): with `--pack-file <path>`, a file holding `<url> <sha1>` makes the
+//! proxy push that resource pack to the client in play; the client's answers
+//! are logged as `PACK RESULT` and not passed to the engine.
 
 use horizon_protocol::{
     buf::write_varint,
@@ -55,11 +59,13 @@ struct Args {
     server_bin: PathBuf,
     backends: [Backend; 2],
     swap_file: PathBuf,
+    pack_file: Option<PathBuf>,
 }
 
 fn parse_args() -> R<Args> {
     let mut a = std::env::args().skip(1);
-    let (mut listen, mut bin, mut ba, mut bb, mut swap) = (None, None, None, None, None);
+    let (mut listen, mut bin, mut ba, mut bb, mut swap, mut pack) =
+        (None, None, None, None, None, None);
     let backend = |s: String| -> R<Backend> {
         let (port, dir) = s.split_once(':').ok_or("backend must be PORT:DIR")?;
         Ok(Backend {
@@ -75,6 +81,7 @@ fn parse_args() -> R<Args> {
             "--a" => ba = Some(backend(v)?),
             "--b" => bb = Some(backend(v)?),
             "--swap-file" => swap = Some(PathBuf::from(v)),
+            "--pack-file" => pack = Some(PathBuf::from(v)),
             _ => return Err(format!("unknown argument {k}").into()),
         }
     }
@@ -83,6 +90,7 @@ fn parse_args() -> R<Args> {
         server_bin: bin.ok_or("--server-bin missing")?,
         backends: [ba.ok_or("--a missing")?, bb.ok_or("--b missing")?],
         swap_file: swap.ok_or("--swap-file missing")?,
+        pack_file: pack,
     })
 }
 
@@ -146,6 +154,8 @@ struct Shared {
     entities: Mutex<HashSet<i32>>,
     recorded: Mutex<Recorded>,
     timeline: Mutex<Timeline>,
+    /// S6: id paczki wysłanej przez proxy i czas wysłania (ms).
+    pack_push: Mutex<Option<(u128, f64)>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -322,6 +332,9 @@ fn client_loop(mut r: ConnReader, sh: Arc<Shared>) {
             {
                 log!("client: could not remap {}", name(true, false, id));
             }
+            if id == ids::play::serverbound::RESOURCE_PACK && pack_answer(&sh, &p) {
+                continue;
+            }
             if id == ids::play::serverbound::ACCEPT_TELEPORTATION {
                 let mut t = lock(&sh.timeline);
                 if let (Some(swap), Some(_), None) =
@@ -350,6 +363,47 @@ fn client_loop(mut r: ConnReader, sh: Arc<Shared>) {
             None => lock(&sh.timeline).dropped_serverbound += 1,
         }
     }
+}
+
+/// S6: wysyła klientowi w grze paczkę zasobów `<url> <sha1>` (wymaganą, bez pytania).
+fn push_pack(sh: &Shared, line: &str) -> R<()> {
+    let mut parts = line.split_whitespace();
+    let (url, hash) = (
+        parts.next().ok_or("no url")?,
+        parts.next().ok_or("no sha1")?,
+    );
+    // Każde wysłanie ma nowe id, żeby klient traktował je jak nową paczkę.
+    let id = 0x5106_u128 << 64 | ms() as u128;
+    let push = play::Clientbound::ResourcePackPush(cfg::ResourcePackPush {
+        id,
+        url: url.to_owned(),
+        hash: hash.to_owned(),
+        required: true,
+        prompt: None,
+    });
+    *lock(&sh.pack_push) = Some((id, ms()));
+    lock(&sh.client).send(&push.encode())?;
+    log!("pack push: {url} sha1 {hash}");
+    Ok(())
+}
+
+/// S6: odpowiedź klienta na paczkę wysłaną przez proxy. Zwraca `true`, gdy to ta paczka
+/// (wtedy silnik jej nie dostaje, bo o niej nie wie).
+fn pack_answer(sh: &Shared, p: &[u8]) -> bool {
+    let Some((pushed, at)) = *lock(&sh.pack_push) else {
+        return false;
+    };
+    let Ok(play::Serverbound::ResourcePack(r)) =
+        play::Serverbound::decode(ids::play::serverbound::RESOURCE_PACK, p)
+    else {
+        log!("client: could not decode resource_pack answer");
+        return false;
+    };
+    if r.id != pushed {
+        return false;
+    }
+    log!("PACK RESULT: action {} after {:.0} ms", r.action, ms() - at);
+    true
 }
 
 fn record(sh: &Shared, id: i32, p: &[u8]) {
@@ -736,12 +790,20 @@ fn session(stream: TcpStream, args: &Args, active: &mut usize) -> R<()> {
             ..Recorded::default()
         }),
         timeline: Mutex::new(Timeline::default()),
+        pack_push: Mutex::new(None),
     });
     let sh_b = Arc::clone(&sh);
     thread::spawn(move || backend_loop(backend_r, sh_b, 0, true));
     let sh_c = Arc::clone(&sh);
     let client_thread = thread::spawn(move || client_loop(client_r, sh_c));
     while !client_thread.is_finished() {
+        if let Some(f) = args.pack_file.as_ref().filter(|f| f.exists()) {
+            let line = std::fs::read_to_string(f).unwrap_or_default();
+            let _ = std::fs::remove_file(f);
+            if let Err(e) = push_pack(&sh, &line) {
+                log!("pack push FAILED: {e}");
+            }
+        }
         if args.swap_file.exists() {
             let _ = std::fs::remove_file(&args.swap_file);
             if let Err(e) = swap(&sh, args, active) {

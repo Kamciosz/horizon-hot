@@ -39,4 +39,4 @@ Razem: 0,96–1,07 s w prototypie bez modów. Z pulą slotów start nowego silni
 
 - `hot status`: aktywny silnik, czas ostatniej podmiany, pauza.
 - W logu proxy na każdą podmianę jest jedna linia z pauzą, liczbą usuniętych encji i liczbą odrzuconych pakietów. Błąd zamiany id ma osobną linię: `could not remap <pakiet>`.
-- Po stronie gracza ekran `playing` przez cały czas (`horizon-ctl status`, `horizon-ctl events`).
+- Po stronie gracza ekran `playing` przez cały czas (`horizon-ctl status`, `horizon-ctl events`). To pole nie widzi nakładki ładowania (S6), więc w testach podmiany potrzebne są też zrzuty klatki (`horizon-ctl screenshot`) w czasie podmiany.
