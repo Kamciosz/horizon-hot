@@ -44,7 +44,7 @@ Parts and flow:
 - Engine: the Horizon dedicated server (`horizon-server`). Two folders, engine-a and engine-b, take
   turns on one shared world; only one runs at a time.
 - hot-proxy: players connect to it on port 25565. It forwards traffic to the running engine and keeps
-  players connected while the engine is replaced (the world freezes for 1-4 s, no loading screen).
+  players connected while the engine is replaced (the world freezes; target under 1 s, no loading screen).
 - hot-host: a tiny native mod compiled into the engine. It loads hot-core.
 - hot-core: loads hot mods (cdylib) into the running engine without a restart, manages block and
   item slots (hot-slots.hmod) and the /hot command.

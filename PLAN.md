@@ -13,7 +13,7 @@ Serwer Horizon (Minecraft Java 26.3 napisany w Rust), który bierze mody z repoz
 | # | Wymaganie |
 |---|---|
 | W1 | Serwer Horizon; mody z podpiętego repo na GitHubie; repo może nie mieć modów. |
-| W2 | Zmiana modów **bez restartu serwera**, z możliwie najkrótszą pauzą (1,5 s to za długo). |
+| W2 | Zmiana modów **bez restartu serwera**, z możliwie najkrótszą pauzą (1,5 s to za długo). Decyzja z 2026-11-12: świat przy podmianie silnika stoi krócej niż 1 s w każdym przypadku. |
 | W3 | Działa na współdzielonym ThinkCentre kolegi (Ubuntu, `sudo` jest); słaby sprzęt nie może przerywać gry — ciężka praca idzie w tle. |
 | W4 | Wszystko aktualizuje się samo: mody, Horizon, nasz system, aplikacja gracza. |
 | W5 | Wszystko samo się naprawia po błędzie; przywrócenie świata z kopii tylko po potwierdzeniu operatora. |
@@ -30,7 +30,7 @@ Każdy punkt ma obserwację, która by oblała:
 2. Push zmiany w kodzie moda gorącego → nowe zachowanie w ≤ 3 min (z budową w CI), PID silnika ten sam, gracz połączony bez przerwy (W1, W2).
 3. Push zmiany w `data/` → nowy przepis działa, PID ten sam (W2).
 4. Push nowego bloku z puli slotów → blok w grze bez restartu (W2).
-5. Push moda natywnego `.hnmod` → działa po podmianie silnika; nikt nie rozłączony; pauza świata zmierzona i w budżecie (B) z sekcji 8 (do decyzji użytkownika); gracz bez ekranu ładowania (W2, wariant A).
+5. Push moda natywnego `.hnmod` → działa po podmianie silnika; nikt nie rozłączony; pauza świata zmierzona i krótsza niż 1 s (D11); gracz bez ekranu ładowania (W2, wariant A).
 6. Nowe Nightly Horizona → serwer sam przechodzi na nie jak w punkcie 5; wydanie, którego nie da się zbudować → serwer zostaje na starym, `hot status` mówi dlaczego (W4).
 7. Mod z paniką → wyłączony, wraca poprzednia generacja, serwer działa (W5).
 8. Mod z segfaultem → silnik wstaje z ostatnią dobrą generacją bez pętli awarii; gracze przytrzymani przez proxy i wprowadzeni z powrotem (W5).
@@ -134,7 +134,12 @@ Gracze łączą się z `hot-proxy` (Rust, na `horizon-protocol`) na porcie 25565
   3. Nowy silnik startuje na tym samym świecie dopiero po zatrzymaniu starego (S12); `hotd` nie czeka na koniec komendy `start`, proxy loguje się, gdy port przyjmie połączenie.
   4. Proxy loguje się do nowego silnika jako każdy gracz, odtwarza jego konfigurację, połyka nowy `Login`, wysyła klientowi „usuń encje” i zamienia id gracza (id u klienta ↔ id w silniku). „Zapomnij chunki” niepotrzebne: nowe chunki zastępują stare w miejscu (S8). Klient widzi mrugnięcie encji, bez ekranu.
   5. Błąd nowego silnika → proxy trzyma graczy, `hotd` uruchamia z powrotem stary silnik tą samą drogą (ok. 1 s więcej).
-- Budżet: pauza świata ≤ 1 s. Zmierzone w S8 na Macu: 0,96–1,07 s (stop ok. 0,4 s + start ok. 0,55 s, proxy < 20 ms), gdy `hotd` czeka na zniknięcie procesu silnika, a nie na komendy. Rozgrzanie przed zwolnieniem świata niemożliwe (S12). Z pulą slotów (S7): 1,16–1,34 s przy 1024/2048, 1,45–1,82 s przy 4096/8192. Nowy plik silnika (mod natywny, `hot-host`, Horizon) unieważnia cache treści modów, więc taka podmiana trwa z pełną pulą ok. 3,9 s. Budżet i rozmiar puli: decyzja użytkownika (sekcja 8). Opis: `docs/podmiana.md`.
+- Budżet: pauza świata **krótsza niż 1 s w każdym przypadku**, czyli dla tego samego silnika i dla nowego pliku silnika (decyzja użytkownika 2026-11-12). Zmierzone w S8 na Macu: 0,96–1,07 s (stop ok. 0,4 s + start ok. 0,55 s, proxy < 20 ms), gdy `hotd` czeka na zniknięcie procesu silnika, a nie na komendy. Zwykłym startem nie da się rozgrzać nowego silnika przed zwolnieniem świata (S12). Z pulą slotów (S7): 1,16–1,34 s przy 1024/2048, 1,45–1,82 s przy 4096/8192. Nowy plik silnika (mod natywny, `hot-host`, Horizon) unieważnia cache treści modów, więc taka podmiana trwa z pełną pulą ok. 3,9 s. Kolejność „stop, potem start” nie mieści się więc w budżecie nawet bez puli. Opis: `docs/podmiana.md`.
+- Rozgrzany silnik (HIPOTEZA, próba S13 w M0.19): wszystko, co nie wymaga świata, dzieje się przed zamrożeniem.
+  1. Zimny cache: `hotd` uruchamia nowy silnik raz przed podmianą, bez supervisora. Silnik buduje cache treści modów i paczkę, a potem kończy pracę na zajętym świecie. FAKT z kodu: cache i paczka powstają przed zajęciem świata (`game.rs:22214` → `game/mods.rs:152`, potem `run_dedicated`; zajęcie świata w `game/world_loading.rs:142`, po „Preparing level”). Klucz cache zawiera ścieżki bezwzględne i czas zmiany pliku (S7), więc rozgrzewa się katalog, w którym silnik potem ruszy.
+  2. Start bez świata: mixin w `hot-host` zatrzymuje start nowego silnika tuż przed zajęciem świata i czeka na sygnał od `hotd`. Zamrożenie obejmuje wtedy tylko zapis i zatrzymanie starego silnika, wczytanie świata przez nowy i logowanie proxy.
+  3. `save-all flush` na starym silniku tuż przed zamrożeniem, żeby `stop` miał mniej do zapisania (dziś ok. 0,4 s).
+  Gdy S13 nie zejdzie poniżej 1 s: mniejsza pula; gdy nadal nie: wracam do użytkownika z liczbami.
 - Wyjątek: zmiana rejestrów (nowe bloki w `.hnmod`, nowa pula) → klient potrzebuje nowych plików; wtedy aplikacja gracza je pobiera, a gracz wchodzi ponownie. Dlatego treść idzie przez sloty.
 - To samo przełączenie służy do: aktualizacji Horizona (D18), odzyskania pamięci po generacjach (D4), wznowienia po awarii silnika (D13).
 
@@ -160,7 +165,7 @@ Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je 
 - Gra (silnik, `hot-proxy`, `hot-pack`): slice systemd `horizon-game.slice`, `CPUWeight=10000`, `MemoryLow=` (z S10), `AllowedCPUs=` na poziomie procesu.
 - Tło (`hotd`: git, pobieranie, budowa silnika, kopie zapasowe): `horizon-bg.slice`, `CPUWeight=1`, `MemoryMax=`, `IOWeight=1`, `nice 19`, `ionice -c3`, `SCHED_IDLE`.
 - Hamulec MSPT: `hotd` co sekundę czyta `status --json` (R25). p95 > 35 ms → zatrzymuje swoje procesy potomne (`SIGSTOP` na grupie budowy, wstrzymanie kopii); p95 < 25 ms przez 10 s → wznawia. Sam `hotd`, `hot-pack` i hamulec nigdy nie są zatrzymywane. Opóźnienie reakcji 1–5 s (okno 100 ticków, R25).
-- Podmiana silnika (D11) nie potrzebuje pamięci na dwa silniki: stary kończy pracę, zanim wystartuje nowy (S12). Drugi silnik działa równolegle tylko przy teście aktualizacji (D18). Ten test rusza tylko wtedy, gdy wolna pamięć mieści drugi silnik z zapasem ponad `MemoryLow` gry; inaczej czeka. Po zimnym starcie silnik zajmuje ok. 700 MB, po ciepłym 290–540 MB zależnie od puli (S7: RSS procesu `horizon-server`, pusty świat bez graczy, 10 s po starcie, Mac). R28 (1,4–1,5 GB) mierzy co innego: pełną grę `horizon-client --dedicated` z zasięgiem 10 (`docs/server.md` Horizona). Z graczami i wczytanymi chunkami będzie więcej niż w S7; wartości do `MemoryLow` i `MemoryMax` daje dopiero M0.11 (S10).
+- Dwa silniki nigdy nie trzymają świata naraz (S12). Rozgrzany silnik (D11) to jednak drugi proces, który przez czas przygotowania podmiany działa bez świata. Ile zajmuje pamięci, zmierzy S13; czy ThinkCentre to mieści, powie M0.11. Podmiana rusza tylko wtedy, gdy wolna pamięć to mieści; inaczej idzie bez rozgrzania i trwa dłużej (zapis w logu z kodem błędu). Drugi silnik działa równolegle tylko przy teście aktualizacji (D18). Ten test rusza tylko wtedy, gdy wolna pamięć mieści drugi silnik z zapasem ponad `MemoryLow` gry; inaczej czeka. Po zimnym starcie silnik zajmuje ok. 700 MB, po ciepłym 290–540 MB zależnie od puli (S7: RSS procesu `horizon-server`, pusty świat bez graczy, 10 s po starcie, Mac). R28 (1,4–1,5 GB) mierzy co innego: pełną grę `horizon-client --dedicated` z zasięgiem 10 (`docs/server.md` Horizona). Z graczami i wczytanymi chunkami będzie więcej niż w S7; wartości do `MemoryLow` i `MemoryMax` daje dopiero M0.11 (S10).
 
 ### Aktualizacje i naprawy (W4, W5, W8)
 
@@ -265,7 +270,7 @@ Prywatne repo → klucz tylko do odczytu (deploy key) generowany przez instalato
 | `mods/*/assets/`, sloty w puli | nowa paczka (nowy sha1) | nowy wygląd od razu z nakładką ładowania ok. 1,3 s albo przy następnym wejściu (D9, decyzja użytkownika) |
 | nowy / usunięty mod gorący | `init` / `deactivate` | nic |
 | `hot-core` | przeładowanie | nic |
-| `native/*.hnmod`, nowe Nightly, `hot-host` | build w tle + podmiana silnika (D11) | świat stoi bez ekranu ładowania: ok. 2,2 s przy puli 1024/2048, ok. 3,9 s przy 4096/8192 (Mac, S7) |
+| `native/*.hnmod`, nowe Nightly, `hot-host` | build w tle + podmiana silnika (D11) | świat stoi bez ekranu ładowania krócej niż 1 s (D11, do potwierdzenia w S13); dziś bez rozgrzania: ok. 2,2 s przy puli 1024/2048, ok. 3,9 s przy 4096/8192 (Mac, S7) |
 | nowe bloki w `.hnmod`, zmiana puli | jak wyżej + nowe pliki u gracza | aplikacja pobiera pliki, gracz wchodzi ponownie |
 
 **D25. Instalacja serwera jednym poleceniem (Ubuntu na ThinkCentre, `sudo` jest).**
@@ -312,6 +317,7 @@ Każdy krok: konkretna zmiana + sprawdzenie, które obleje, jeśli zmiana nie dz
 - [x] M0.12 S11: ostatnie 10 Nightly — co zmieniło `content_identity`, kanały `horizon:*`, API haków, `Cargo.lock` (`libloading`). Sprawdzenie: `docs/aktualizacje.md`. Wynik: używane haki i pliki bez zmian od 11-03; D18 potrzebuje `--ignore-pins`.
 - [x] M0.13 S12: `horizon-server` ze światem poza swoim katalogiem i na porcie 25566. Sprawdzenie: dwa supervisory naprzemiennie na tym samym świecie.
 - [x] M0.14 Wyniki S1–S12 jako `docs/adr/0002-spike.md`; korekta D1–D29, jeśli trzeba. Sprawdzenie: każda NIEWIADOMA w planie zamieniona na FAKT albo nową decyzję. Wynik: poprawione D6, D8, D9, D16, D18, D24; w planie nie ma już NIEWIADOMEJ poza definicją; S9 i S10 czekają na ThinkCentre (M0.10, M0.11).
+- [ ] M0.19 S13: rozgrzany silnik (D11): rozgrzanie cache przed podmianą, mixin wstrzymujący start przed zajęciem świata, `save-all flush` przed zamrożeniem. Sprawdzenie: prototyp z S8 z pulą 1024/2048, po 6 podmian na ten sam silnik i na nowy plik silnika, każda pauza krótsza niż 1 s na Macu; pamięć czekającego silnika zmierzona. Gdy nie: mniejsza pula, potem decyzja użytkownika z liczbami. Na ThinkCentre powtórka w M0.11. Decyzja: `docs/adr/0004-pauza-podmiany-ponizej-1-s.md`.
 
 ### M0b — Diagnostyka (przed każdym innym kodem, D27–D29)
 - [x] M0.15 `AGENTS.md` z opisem projektu, słownikiem i zasadami (D29); uzupełniany w każdym kolejnym kroku. Sprawdzenie końcowe w M12. Wynik: `AGENTS.md` z mapą repo, zasadami pracy na maszynie z grą i odesłaniem do wyników M0.
@@ -370,7 +376,7 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 ### M8 — `hot-proxy` i podmiana silnika (D10–D12)
 - [ ] M8.1 Proxy przezroczyste: logowanie online, szyfrowanie, kompresja, forwarding. Sprawdzenie: gra przez proxy; ping i MSPT bez istotnej różnicy.
 - [ ] M8.2 Mapowanie id encji i trzymanie keep-alive. Sprawdzenie: 50 sztucznych przełączeń na ten sam silnik bez rozłączenia (10 botów + prawdziwy klient).
-- [ ] M8.3 Podmiana na nowy silnik według D11, z powrotem przy błędzie. Sprawdzenie: dodanie `.hnmod` w trakcie gry → mod działa, nikt nie rozłączony, brak ekranu ładowania (zrzuty co 100 ms), pauza w budżecie (B) z sekcji 8; celowo zepsuty silnik → gracze zostają na starym.
+- [ ] M8.3 Podmiana na nowy silnik według D11, z powrotem przy błędzie. Sprawdzenie: dodanie `.hnmod` w trakcie gry → mod działa, nikt nie rozłączony, brak ekranu ładowania (zrzuty co 100 ms), pauza krótsza niż 1 s (D11); celowo zepsuty silnik → gracze zostają na starym.
 - [ ] M8.4 Wznowienie po awarii silnika z przytrzymaniem graczy (D13). Sprawdzenie: `kill -9` silnika → gracze połączeni, wracają do gry po starcie.
 - [ ] M8.5 Odzyskanie pamięci generacji przez podmianę (D4). Sprawdzenie: po 200 przeładowaniach RSS spada do poziomu startowego bez restartu.
 
@@ -404,7 +410,7 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 
 | Problem | Co wtedy |
 |---|---|
-| S8: pauza podmiany > 1 s | decyzja użytkownika: zaakceptować zmierzoną pauzę albo rozgrzewanie silnika przez mixin na `[transfer]` (większy koszt) |
+| S8: pauza podmiany > 1 s | użytkownik nie akceptuje (2026-11-12); rozgrzany silnik (D11, S13); gdy nie wystarczy: mniejsza pula, potem decyzja użytkownika z liczbami |
 | S8: klient rozłącza się przy długim braku pakietów | proxy wysyła klientowi keep-alive i własne pakiety podtrzymujące w czasie podmiany |
 | S2: klient bez `hot-slots.hmod` jest rozłączany | to oczekiwane; `hot-play` instaluje plik automatycznie |
 | Nightly często psuje build `hot-host` | serwer zostaje na starej wersji (D18); `hot-host` tylko na nazwanych hakach |
@@ -447,7 +453,7 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 
 **DECYZJA UŻYTKOWNIKA (przed M5): kiedy nowy wygląd trafia do graczy.** (a) od razu: `hot-proxy` wysyła paczkę w grze, wszyscy gracze widzą ok. 1,3 s nakładki ładowania; (b) przy następnym wejściu: bez przerwy, ale do tego czasu nowe bloki mają wygląd zastępczy. Mój wybór: (a), bo nowy wygląd pojawia się tylko z nowym modem, czyli rzadko, a twórca moda od razu widzi efekt. Zastrzeżenie: 1,3 s zmierzono na Macu z paczką 2 KB; czas dla pełnej paczki i na ThinkCentre nieznany (M0.11).
 
-**DECYZJA UŻYTKOWNIKA (przed M5.1): rozmiar puli a budżet pauzy D11 (1 s).** Na Macu: pula 1024/2048 → pauza 1,16–1,34 s, ok. 2,2 s z nowym silnikiem; pula 4096/8192 → 1,45–1,82 s, ok. 3,9 s z nowym silnikiem. Mniejsza pula: po jej zapełnieniu nowy plik u każdego gracza (aplikacja pobierze go sama) i ponowne wejście. Potrzebne są dwa budżety: **(A)** podmiana na ten sam silnik (odzyskanie pamięci D4, wznowienie po awarii D13) i **(B)** podmiana na nowy plik silnika (mod natywny, aktualizacja Horizona, nowy `hot-host`; zimny cache). Mój wybór: pula 1024/2048, budżet (A) do 1,5 s, budżet (B) do 3 s. (B) zdarza się rzadko, a na ThinkCentre będzie wolniej niż 2,2 s z Maca. Do czasu decyzji pracuję dalej; liczby z ThinkCentre (M0.11) mogą oba przesunąć.
+**DECYZJA UŻYTKOWNIKA (2026-11-12): świat przy podmianie silnika stoi krócej niż 1 s w każdym przypadku** (ten sam silnik i nowy plik silnika). Dziś na Macu, bez rozgrzania: bez puli 0,96–1,07 s; pula 1024/2048 → 1,16–1,34 s, ok. 2,2 s z nowym silnikiem; pula 4096/8192 → 1,45–1,82 s, ok. 3,9 s z nowym silnikiem. Obecna kolejność tego nie spełnia. Droga: rozgrzany silnik (D11), próba S13 w M0.19, ADR 0004. Rozmiar puli: największa, przy której S13 mieści się poniżej 1 s; do tego czasu 1024/2048. Pamięć na czekający silnik czyni pytanie o RAM ThinkCentre (M0.11) pilnym.
 
 **2026-11-12 — M0.9 (S8) część 1, analiza kodu klienta:** `StartConfiguration`, drugi `Login` i `Respawn` zawsze pokazują ekran ładowania, więc proxy po pierwszym wejściu nie wysyła żadnego z nich. Jedyna droga: proxy samo loguje się i konfiguruje z B, połyka `Login` B, usuwa encje A i zamienia id gracza pA ↔ pB we wszystkich pakietach. Klient rozłącza się po 30 s ciszy. Bazą proxy będzie `horizon-protocol` (MIT, bez plików gry). Szczegóły: `docs/spike/s8-podmiana-analiza-klienta.md`. Dalej: prototyp proxy (część 2).
 

@@ -7,7 +7,7 @@ Ten plik wystarcza, żeby zacząć rozwijać albo naprawiać projekt bez wcześn
 Serwer gry dla małej grupy znajomych. Gra to **Horizon** — reimplementacja Minecraft Java 26.3 w Rust (wydania tylko Nightly: `nightly-<data>-<commit>`). Projekt dodaje:
 
 - **mody gorące** — biblioteki `cdylib` wczytywane do działającego serwera bez restartu;
-- **podmianę silnika** — nowa wersja Horizona albo mod natywny wchodzi bez rozłączania graczy: świat stoi ok. 1–4 s (zależnie od puli slotów i tego, czy silnik jest nowy), ale gracz nie widzi ekranu ładowania;
+- **podmianę silnika** — nowa wersja Horizona albo mod natywny wchodzi bez rozłączania graczy: świat stoi krótko (cel: krócej niż 1 s, decyzja użytkownika; dziś bez rozgrzania silnika 1–4 s, zależnie od puli slotów i tego, czy silnik jest nowy), ale gracz nie widzi ekranu ładowania;
 - **samoaktualizację i samonaprawę** wszystkiego;
 - **instalator serwera** jednym poleceniem (Ubuntu) i **aplikację gracza** w terminalu (macOS, Windows, Linux).
 

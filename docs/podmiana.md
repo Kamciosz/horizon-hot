@@ -26,6 +26,8 @@ Przez ok. 1 s świat stoi. Gracz może chodzić i niszczyć bloki, ale po przerw
 
 Razem: 0,96–1,07 s w prototypie bez modów. Z pulą slotów start nowego silnika trwa dłużej: 1,16–1,82 s, a z nowym plikiem silnika (zimny cache treści modów) ok. 3,9 s przy pełnej puli (`docs/sloty.md`). Nowy silnik musi startować dopiero po zatrzymaniu starego. Inaczej nie otworzy świata i wpadnie w pętlę restartów (S12).
 
+Decyzja użytkownika (2026-11-12): pauza krótsza niż 1 s w każdym przypadku. Ta kolejność tego nie spełnia. Droga do budżetu, czyli rozgrzany silnik, jest w `PLAN.md` (D11) i w `docs/adr/0004-pauza-podmiany-ponizej-1-s.md`; sprawdza ją próba S13.
+
 ## Zasady dla `hot-proxy`
 
 1. Po pierwszym wejściu gracza proxy **nigdy** nie wysyła klientowi `Login`, `Respawn` ani `StartConfiguration`. Każdy z nich pokazuje ekran ładowania.
