@@ -97,6 +97,7 @@
 - `hot-proxy`: gracz w przerwie przy każdej próbie loguje się pod bieżący adres silnika, więc zmiana adresu w trakcie przerwy zabiera go na nowy silnik.
 - `hotd`: zamierzona podmiana silnika w oknie po nowej wersji nie oznacza commita jako złego.
 - Instalator i kontener uruchamiają silnik przez `hotd engine` zamiast `horizon-server run` (usługa `horizon-hot-server` z `KillMode=mixed`); instalator sprawdza też port drugiej strony silnika (port silnika + 1).
+- `hot-core`: gdy świat trzyma inny silnik (rozgrzany silnik przy podmianie), stan z `hot-state` czyta dopiero przy pierwszym zdarzeniu po zajęciu świata, a zatrzymany przed nim niczego nie zapisuje. Wcześniej nowy silnik brał podmianę za awarię: wczytywał ostatnią sprawdzoną generację modów, a po dwóch podmianach włączyłby tryb bezpieczny.
 
 ### Uwagi
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.

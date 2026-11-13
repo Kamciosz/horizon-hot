@@ -1214,3 +1214,46 @@ fn full_disk_start_keeps_hot_mods_running() -> TestResult {
     s.stop();
     Ok(())
 }
+
+/// PL: Podmiana silnika (D11): rozgrzany silnik startuje, gdy stary jeszcze trzyma świat i jego
+/// `mods.json` mówi `clean_stop = false`. Nowy rdzeń nie może tego uznać za awarię (wróciłaby
+/// starsza generacja, a po dwóch podmianach tryb bezpieczny), ani nic zapisać, gdy podmiana
+/// zostanie przerwana. EN: Engine swap (D11): the warm engine starts while the old one still
+/// holds the world and its `mods.json` says `clean_stop = false`. The new core must not take that
+/// for a crash, nor write anything when the swap is aborted.
+#[test]
+fn a_warm_engine_reads_hot_state_only_after_the_old_one_stops() -> TestResult {
+    let home = Server::home("warm-swap");
+    let mut old = Server::start(&home)?;
+    old.load_and_wait(&mod_file("licznik_v1")?, |st| {
+        generation(st, "licznik") == Some(1)
+    })?;
+    old.load_and_wait(&mod_file("licznik_v2")?, |st| {
+        generation(st, "licznik") == Some(2)
+    })?;
+    let before = count_of(&old.chat("ile"), "v2").ok_or("v2 did not answer")?;
+    // PL: Stary silnik trzyma świat. EN: The old engine holds the world.
+    fs::create_dir_all(home.join("world"))?;
+    let lock = fs::File::create(home.join("world/session.lock"))?;
+    lock.try_lock()?;
+    assert!(hot_core::world_in_use(&home));
+    let mods = fs::read(home.join("hot-state/mods.json"))?;
+    // PL: Przerwana podmiana: nowy silnik staje, zanim zajmie świat. EN: An aborted swap.
+    let aborted = Server::start(&home)?;
+    aborted.stop();
+    assert_eq!(fs::read(home.join("hot-state/mods.json"))?, mods);
+    let mut new = Server::start(&home)?;
+    assert_eq!(fs::read(home.join("hot-state/mods.json"))?, mods);
+    old.stop();
+    lock.unlock()?;
+    drop(lock);
+    assert!(!hot_core::world_in_use(&home));
+    // PL: Pierwsze zdarzenie po zajęciu świata wczytuje stan. EN: The first event reads the state.
+    let after = count_of(&new.chat("ile"), "v2").ok_or("v2 did not come back")?;
+    assert_eq!(after, before);
+    let status = new.status()?;
+    assert_eq!(generation(&status, "licznik"), Some(2), "{status:#}");
+    assert!(status["safe_mode"].is_null(), "{status:#}");
+    new.stop();
+    Ok(())
+}

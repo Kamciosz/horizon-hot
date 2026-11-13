@@ -94,6 +94,11 @@ pub struct Core {
     dormant: Vec<ModRecord>,
     started_ms: u64,
     crash_starts: u32,
+    /// PL: Świat trzyma inny silnik (rozgrzany silnik przy podmianie, D11): stan z `hot-state`
+    /// czyta dopiero pierwsze zdarzenie, a wszystkie przychodzą po zajęciu świata.
+    /// EN: Another engine holds the world (a warm engine during a swap, D11): the first event
+    /// reads the `hot-state` state, and every event comes after the world is taken.
+    restore_pending: bool,
 }
 
 impl HotMod for Core {
@@ -130,14 +135,31 @@ impl HotMod for Core {
             dormant: Vec::new(),
             started_ms: 0,
             crash_starts: 0,
+            restore_pending: false,
         };
         core.read_slots();
-        core.restore(host.raw());
+        if world_in_use(&core.paths.home) {
+            // PL: `hot-state` należy jeszcze do działającego silnika: jego `mods.json` ma
+            // `clean_stop = false`, więc odczyt teraz policzyłby podmianę jako awarię.
+            // EN: `hot-state` still belongs to the running engine: its `mods.json` says
+            // `clean_stop = false`, so reading it now would count the swap as a crash.
+            core.restore_pending = true;
+            core.log.info(
+                "hot-core waits for the world: another engine holds it (engine swap, D11)",
+                json!({ "home": core.paths.home.display().to_string() }),
+            );
+        } else {
+            core.restore(host.raw());
+        }
         core
     }
 
     fn on_raw_event(&mut self, host: &mut Host<'_>, event: &hot_abi::Event) -> Flow {
         let api = host.raw();
+        if self.restore_pending {
+            self.restore_pending = false;
+            self.restore(api);
+        }
         if event.kind == kind::CONSOLE_COMMAND {
             // PL: Serwer bez graczy stoi w pauzie i nie woła ticku, ale komendy konsoli działają;
             // przełączenie tutaj też jest między tickami, więc `hot status` domyka wczytanie.
@@ -185,6 +207,15 @@ impl HotMod for Core {
     }
 
     fn save(&mut self, host: &mut Host<'_>) -> Vec<u8> {
+        if self.restore_pending {
+            // PL: Przerwana podmiana: ten silnik nie zajął świata, `hot-state` zostaje bez zmian.
+            // EN: An aborted swap: this engine never took the world; `hot-state` stays as it is.
+            self.log.info(
+                "hot-core stopped before its engine took the world; hot-state is left to the running engine",
+                json!({}),
+            );
+            return Vec::new();
+        }
         let api = host.raw();
         for i in 0..self.mods.len() {
             let state = self.deactivate(api, i);
@@ -1070,6 +1101,37 @@ pub fn crash_starts(file: &ModsFile, now_ms: u64) -> u32 {
         file.crash_starts.saturating_add(1)
     } else {
         1
+    }
+}
+
+/// PL: Czy świat serwera z `home` (`level-name` z `server.properties`, inaczej `world`) trzyma
+/// inny silnik: blokada `session.lock` jak `SessionLock` w Horizonie. Brak pliku: wolny.
+/// EN: Whether another engine holds the server world in `home` (`level-name` from
+/// `server.properties`, else `world`): the `session.lock` lock, like Horizon's `SessionLock`.
+/// No file: free.
+#[must_use]
+pub fn world_in_use(home: &std::path::Path) -> bool {
+    let name = std::fs::read_to_string(home.join("server.properties"))
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find_map(|l| l.strip_prefix("level-name=").map(|v| v.trim().to_owned()))
+        })
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "world".to_owned());
+    let Ok(file) = std::fs::OpenOptions::new()
+        .write(true)
+        .open(home.join(name).join("session.lock"))
+    else {
+        return false;
+    };
+    match file.try_lock() {
+        Ok(()) => {
+            let _ = file.unlock();
+            false
+        }
+        Err(std::fs::TryLockError::WouldBlock) => true,
+        Err(std::fs::TryLockError::Error(_)) => false,
     }
 }
 

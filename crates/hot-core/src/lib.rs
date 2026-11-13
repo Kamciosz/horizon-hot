@@ -22,7 +22,7 @@ pub mod store;
 mod wrap;
 
 pub use crate::core::{
-    crash_starts, Core, CRASH_LOOP_WINDOW_MS, GOOD_AFTER_TICKS, SAFE_MODE_AFTER,
+    crash_starts, world_in_use, Core, CRASH_LOOP_WINDOW_MS, GOOD_AFTER_TICKS, SAFE_MODE_AFTER,
 };
 
 /// PL: Wersja z `Cargo.toml`. EN: The version from `Cargo.toml`.
