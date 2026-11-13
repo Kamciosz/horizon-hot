@@ -432,6 +432,10 @@ impl Server {
     ) -> Result<Value, Box<dyn Error>> {
         let (flow, replies) = self.console(&format!("hot load {}", file.display()));
         assert_eq!(flow, flow::CANCEL, "{replies:?}");
+        assert!(
+            replies.iter().any(|r| r.starts_with("Ładuję")),
+            "hot load did not start: {replies:?}"
+        );
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             self.tick();
@@ -440,7 +444,16 @@ impl Server {
                 return Ok(status);
             }
             if Instant::now() > deadline {
-                return Err(format!("timeout; status: {status:#}").into());
+                let log = log_entries(Path::new(&self.fake.home))
+                    .iter()
+                    .rev()
+                    .take(6)
+                    .map(|e| e["what"].to_string())
+                    .collect::<Vec<_>>();
+                return Err(format!(
+                    "timeout after {replies:?}; last log entries {log:?}; status: {status:#}"
+                )
+                .into());
             }
             std::thread::sleep(Duration::from_millis(2));
         }
