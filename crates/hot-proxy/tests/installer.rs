@@ -123,3 +123,20 @@ fn installer_and_image_build_the_same_horizon_revision_from_source() {
         assert!(script.contains("--no-default-features --bin horizon-client"));
     }
 }
+
+#[test]
+fn the_engine_service_runs_hotd_engine_for_swaps() {
+    let unit = &INSTALLER[position(INSTALLER, "horizon-hot-server.service \"[Unit]")..];
+    let unit = &unit[..position(unit, "[Install]")];
+    assert!(unit.contains("ExecStart=$BIN/hotd engine --home $SRV --engine $BIN/horizon-server"));
+    // PL: SIGTERM tylko do `hotd engine`; ten zatrzymuje silnik, który zapisuje świat.
+    // EN: SIGTERM only to `hotd engine`; it stops the engine, which saves the world.
+    assert!(unit.contains("KillMode=mixed"));
+    assert!(!INSTALLER.contains("horizon-server run"));
+    assert!(CONTAINER.contains(
+        "CMD[engine]=\"$HOTBIN/hotd engine --home $SRV --engine $HZBIN/horizon-server\""
+    ));
+    // PL: Strona `b` (port silnika + 1) też tylko lokalnie. EN: Side `b` (engine port + 1) is local too.
+    assert!(INSTALLER.contains("\"$ENGINE_PORT_B:horizon-hot-server\""));
+    assert!(INSTALLER.contains("sport = :$ENGINE_PORT_B"));
+}

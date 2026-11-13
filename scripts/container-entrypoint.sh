@@ -2,7 +2,7 @@
 # PL: Start serwera horizon-hot w kontenerze (M8.1c, ADR 0011). Przy każdym starcie robi to, co
 #     instalator na Ubuntu (scripts/server-install.sh), ale tylko kroki, które dotyczą danych
 #     w wolumenie /srv/horizon: klucze, świat, pula slotów, silnik za proxy. Potem pilnuje
-#     procesów zamiast systemd: silnik (horizon-server run), hot-proxy na porcie graczy,
+#     procesów zamiast systemd: silnik (hotd engine), hot-proxy na porcie graczy,
 #     serwer paczki i hotd; każdy po awarii wraca po kilku sekundach. SIGTERM (docker stop)
 #     zatrzymuje najpierw hotd, potem silnik, który zapisuje świat, na końcu resztę.
 #     Ustawienia przychodzą w zmiennych środowiska (compose.yaml). Błędy idą w formacie D27
@@ -10,7 +10,7 @@
 # EN: Starts the horizon-hot server in a container (M8.1c, ADR 0011). On every start it does what
 #     the Ubuntu installer does (scripts/server-install.sh), limited to data in the /srv/horizon
 #     volume: keys, the world, the slot pool, the engine behind the proxy. Then it watches the
-#     processes instead of systemd: the engine (horizon-server run), hot-proxy on the players'
+#     processes instead of systemd: the engine (hotd engine), hot-proxy on the players'
 #     port, the pack server and hotd; each comes back a few seconds after a crash. SIGTERM
 #     (docker stop) stops hotd first, then the engine, which saves the world, then the rest.
 #     Settings come from environment variables (compose.yaml). Errors go in the D27 format to
@@ -296,7 +296,7 @@ shutdown() {
 }
 
 supervise() {
-  CMD[engine]="$HZBIN/horizon-server run --dir $SRV"
+  CMD[engine]="$HOTBIN/hotd engine --home $SRV --engine $HZBIN/horizon-server"
   CMD[proxy]="$HOTBIN/hot-proxy --listen 0.0.0.0:$PORT --engine 127.0.0.1:$ENGINE_PORT --secret $SRV/forwarding.secret --home $SRV"
   CMD[pack]="$HOTBIN/hotd serve-pack --home $SRV --port $PACK_PORT"
   local git_ssh=""

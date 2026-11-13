@@ -50,7 +50,33 @@ Błędy:
 
 ## Sterowanie
 
-`hot-proxy` słucha komend na gnieździe Unix `<HOT_HOME>/hot-proxy.sock` (tylko właściciel, 0600). Jedna komenda na połączenie, odpowiedź to jedna linia JSON:
+### Podmiana silnika: `hotd swap`
+
+Na serwerze silnik prowadzi `hotd engine` (usługa `horizon-hot-server`, w kontenerze proces `engine`). Silnik ma dwie strony:
+
+- `a` — katalog serwera (`/srv/horizon/server`), port silnika (25566);
+- `b` — `/srv/horizon/server/engine-b`, port o jeden wyżej (25567). Ma własny `server.toml` (kopia strony `a` przed każdą podmianą na `b`, bez panelu i API), a świat, `backups/`, `horizon-mods/`, `config/`, `resources/`, `forwarding.secret` i listy graczy (`ops.json`, `whitelist.json`, bany, `usercache.json`) to dowiązania do strony `a`.
+
+Aktywną stronę zapisuje `hot-state/engine.json`. Czytają go `hotd engine` po restarcie, `hotd run` (komendy do silnika) i `hot-proxy` przy starcie (zamiast `--engine`).
+
+```sh
+sudo -u horizon /srv/horizon/bin/hotd swap --home /srv/horizon/server                      # ten sam plik silnika
+sudo -u horizon /srv/horizon/bin/hotd swap --to <nowy plik silnika> --home /srv/horizon/server
+# {"ok":true,"report":{"from":"a","to":"b","warm_ms":4210,"stop_ms":512,"freeze_ms":590,"proxy":{...}}}
+```
+
+`hotd swap` wysyła komendę do `<HOT_HOME>/hot-engine.sock` i czeka na koniec podmiany (do ok. 2,5 min). Kod wyjścia 1, gdy podmiana się nie udała; błąd ma pola D27:
+
+- `HOT-E0606` — nowa strona nie doszła do linii czekania albo proxy odmówiło; gracze zostali na starym silniku, nic nie stanęło;
+- `HOT-E0607` — nowa strona nie zajęła świata w 10 s po zatrzymaniu starej; `hotd` zatrzymuje nową, przestawia proxy (`engine ADRES`) i uruchamia starą, a gracze trzymani w przerwie logują się już na nią.
+
+Nowy plik silnika musi mieć `hot-host` (linię czekania pisze jego mixin) i własną ścieżkę (zob. „Błędy” wyżej). Sygnał „held” od proxy (`{"held":N}`) przychodzi, gdy proxy przestało już przekazywać pakiety starego silnika; dopiero wtedy `hotd` wysyła mu `stop`, bo inaczej `Disconnect` ze `stop` zakończyłby sesje graczy.
+
+Ograniczenie (do sprawdzenia na prawdziwym silniku): jeśli silnik zapisuje listy graczy przez zapis do nowego pliku i zamianę nazwy, na stronie `b` zastąpi dowiązanie zwykłym plikiem i zmiana (np. `/op`) zostanie tylko na tej stronie.
+
+### Proxy: `hot-proxy switch`
+
+`hot-proxy` słucha komend na gnieździe Unix `<HOT_HOME>/hot-proxy.sock` (tylko właściciel, 0600). Jedna komenda na połączenie; odpowiedź to linie JSON, ostatnia jest wynikiem (`hot-proxy switch` wypisuje tylko ją):
 
 ```sh
 hot-proxy status --home /srv/horizon            # {"engine":"127.0.0.1:25566","players":["Dev"]}
@@ -59,7 +85,7 @@ hot-proxy switch 127.0.0.1:25567 --home /srv/horizon
 # {"engine":"127.0.0.1:25567","players":1,"moved":1,"failed":[],"pause_ms":512}
 ```
 
-`switch` najpierw u wszystkich graczy w grze zamyka stary silnik (krok 3), potem każdego loguje do nowego równolegle, więc pauza nie rośnie z liczbą graczy. Na nowy silnik czeka do 25 s. Kod wyjścia 1, gdy choć jeden gracz nie przeszedł. Druga podmiana czeka, aż skończy się pierwsza.
+`switch` najpierw u wszystkich graczy w grze zamyka stary silnik (krok 3) i wysyła linię `{"held":N}`, potem każdego loguje do nowego równolegle, więc pauza nie rośnie z liczbą graczy. Każda próba logowania idzie pod bieżący adres, więc `engine ADRES` w trakcie przerwy kieruje trzymanych graczy gdzie indziej. Na nowy silnik czeka do 25 s. Kod wyjścia 1, gdy choć jeden gracz nie przeszedł. Druga podmiana czeka, aż skończy się pierwsza.
 
 ## Jak sprawdzić, że podmiana zadziałała
 

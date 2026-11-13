@@ -157,8 +157,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$REPO" ] || [ "$UNINSTALL" = 1 ] || { say "Brakuje --repo." >&2; say "$USAGE" >&2; exit 2; }
+# PL: Strona `b` silnika (podmiana, D11) słucha na porcie silnika + 1. EN: Engine side `b` uses the engine port + 1.
+ENGINE_PORT_B=$((ENGINE_PORT + 1))
 [ "$PORT" != "$ENGINE_PORT" ] && [ "$PORT" != "$PACK_PORT" ] && [ "$ENGINE_PORT" != "$PACK_PORT" ] \
-  || { say "--port, --engine-port i port paczki ($PACK_PORT) muszą być różne." >&2; exit 2; }
+  && [ "$PORT" != "$ENGINE_PORT_B" ] && [ "$PACK_PORT" != "$ENGINE_PORT_B" ] \
+  || { say "--port, --engine-port, port silnika + 1 ($ENGINE_PORT_B) i port paczki ($PACK_PORT) muszą być różne." >&2; exit 2; }
 
 # PL: Ponowne uruchomienie z tymi samymi opcjami i z tej samej wersji skryptu (do komunikatów).
 # EN: The rerun command: the same options and the same version of this script.
@@ -200,7 +203,7 @@ preflight() {
   local p units owner ours u
   # PL: Port gracza zajmował silnik przed proxy (M8.1b), więc przy aktualizacji należy do niego.
   # EN: The engine held the players' port before the proxy (M8.1b), so on an update it owns it.
-  for p in "$PORT:horizon-hot-proxy horizon-hot-server" "$ENGINE_PORT:horizon-hot-server" "$PACK_PORT:horizon-hot-pack"; do
+  for p in "$PORT:horizon-hot-proxy horizon-hot-server" "$ENGINE_PORT:horizon-hot-server" "$ENGINE_PORT_B:horizon-hot-server" "$PACK_PORT:horizon-hot-pack"; do
     units=${p#*:} p=${p%%:*}
     owner=$(port_owner "$p")
     # PL: Port zajęty przez naszą własną usługę przy ponownym uruchomieniu jest w porządku.
@@ -214,7 +217,7 @@ preflight() {
         "nothing was changed" "port=$p"
     fi
   done
-  say "Ubuntu $ver, $arch, ${mem_gb} GB RAM, ${disk_gb} GB wolnego miejsca, porty $PORT, $ENGINE_PORT i $PACK_PORT wolne."
+  say "Ubuntu $ver, $arch, ${mem_gb} GB RAM, ${disk_gb} GB wolnego miejsca, porty $PORT, $ENGINE_PORT, $ENGINE_PORT_B i $PACK_PORT wolne."
 }
 
 # --- PL: Krok 2: użytkownik i katalogi. EN: Step 2: user and folders. -----------------------
@@ -586,7 +589,7 @@ Description=horizon-hot: background work (hotd, copies)
 CPUWeight=100
 IOWeight=1" && changed=1
   write_if_changed /etc/systemd/system/horizon-hot-server.service "[Unit]
-Description=Horizon server with horizon-hot (horizon-server run)
+Description=Horizon server with horizon-hot (hotd engine: the engine and its swaps)
 After=network-online.target
 Wants=network-online.target
 
@@ -596,10 +599,11 @@ User=horizon
 Group=horizon
 WorkingDirectory=$SRV
 Environment=HOT_HOME=$SRV
-ExecStart=$BIN/horizon-server run --dir $SRV
+ExecStart=$BIN/hotd engine --home $SRV --engine $BIN/horizon-server
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=120
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target" && changed=1
@@ -832,7 +836,7 @@ autotest() {
     "players cannot join" "port=$PORT"
   if [ "$TEST_NO_HORIZON" = 0 ]; then
     local open
-    open=$(ss -Hltn "sport = :$ENGINE_PORT" 2>/dev/null | awk '$4 !~ /^127\.0\.0\.1:/ { print $4 }')
+    open=$(ss -Hltn "( sport = :$ENGINE_PORT or sport = :$ENGINE_PORT_B )" 2>/dev/null | awk '$4 !~ /^127\.0\.0\.1:/ { print $4 }')
     [ -z "$open" ] || OUTPUT=$open fail HOT-E0111 "The engine listens on $open, not only on 127.0.0.1" \
       "the engine port $ENGINE_PORT is bound to 127.0.0.1 only" "server.toml lost bind = \"127.0.0.1\"" \
       "Rerun the installer (step 8 sets it again)" "the engine may be reachable without the purchase check" "engine_port=$ENGINE_PORT"

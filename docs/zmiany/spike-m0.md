@@ -96,6 +96,7 @@
 - Test hamulca MSPT (`hotd`) czeka na zatrzymaną grupę procesów do 10 s zamiast stałych 300 ms; na wolnym runnerze CI grupa nie była jeszcze zapisana.
 - `hot-proxy`: gracz w przerwie przy każdej próbie loguje się pod bieżący adres silnika, więc zmiana adresu w trakcie przerwy zabiera go na nowy silnik.
 - `hotd`: zamierzona podmiana silnika w oknie po nowej wersji nie oznacza commita jako złego.
+- Instalator i kontener uruchamiają silnik przez `hotd engine` zamiast `horizon-server run` (usługa `horizon-hot-server` z `KillMode=mixed`); instalator sprawdza też port drugiej strony silnika (port silnika + 1).
 
 ### Uwagi
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.
