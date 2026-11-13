@@ -1,0 +1,18 @@
+[package]
+name = "hot-proxy"
+description = "Proxy przed silnikiem: loguje graczy online i przekazuje silnikowi ich dane (M8)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+hot-diag = { path = "../hot-diag" }
+horizon-protocol.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+ureq.workspace = true
+
+[lints]
+workspace = true

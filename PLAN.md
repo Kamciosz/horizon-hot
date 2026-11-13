@@ -418,6 +418,13 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Sprawdzenie: każdy wiersz tabeli D20 ma test, który wywołuje błąd i obserwuje reakcję.
 
 ### M8 — `hot-proxy` i podmiana silnika (D10–D12)
+Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
+- Kontrolę zakupu robi `hot-proxy`, a silniki jej nie omijają. Proxy loguje gracza online jak serwer vanilla: prośba o szyfrowanie, AES/CFB8 i `hasJoined` w usłudze sesji. Adres usługi bierze z dokumentu discovery, tak jak Horizon (`horizon-client-render/src/auth.rs`).
+- Silniki działają za proxy bez logowania online (`online_mode = false`), za to z przekazywaniem Velocity w wersji „modern” (`forwarding.secret`, `docs/velocity-forwarding.md` Horizona). Proxy podpisuje HMAC-SHA256 UUID, nazwę, adres i właściwości profilu (skórkę). Silnik odrzuca każde wejście bez podpisu tym sekretem („This server is behind a proxy”), więc bezpośrednie połączenie z silnikiem nie omija kontroli zakupu. Dodatkowo silniki słuchają tylko na 127.0.0.1 (`[server] bind`). Gracz ma w świecie swoje prawdziwe UUID, a nie offline, więc zmiana nazwy konta nie gubi ekwipunku.
+- Tryb bez logowania online (boty w M8.2, testy) proxy włącza tylko na adresie pętli zwrotnej. Instalator go nie ustawia, a test to sprawdza.
+- `[transfer]` Horizona (`player-export`, `player-expect`) nie jest potrzebny. Służy do przenoszenia gracza między serwerami z różnymi światami, a u nas świat jest jeden.
+- Kod: `crates/hot-proxy`. Pakiety, szyfrowanie, kompresja, RSA i hash serwera pochodzą z `horizon-protocol` (git, rewizja serwera), HMAC z `sha2`, a zapytanie HTTPS z `ureq`, czyli tak samo jak w Horizonie (ADR 0010). Kod próby S8 przechodzi tu po kawałku: M8.1 przekazuje ruch, M8.2 dokłada zamianę id i podmianę.
+- Test bez Mojanga: usługa sesji podstawiona lokalnym serwerem HTTP (zgoda i odmowa). CI nigdy nie łączy się z Mojangiem. Na tej maszynie jest prawdziwe konto (`kamciosz`, instancja `hot-spike`), więc logowanie online da się sprawdzić ręcznie.
 - [ ] M8.1 Proxy przezroczyste: logowanie online, szyfrowanie, kompresja, forwarding. Sprawdzenie: gra przez proxy; ping i MSPT bez istotnej różnicy.
 - [ ] M8.2 Mapowanie id encji i trzymanie keep-alive. Sprawdzenie: 50 sztucznych przełączeń na ten sam silnik bez rozłączenia (10 botów + prawdziwy klient).
 - [ ] M8.3 Podmiana na nowy silnik według D11, z powrotem przy błędzie. Sprawdzenie: dodanie `.hnmod` w trakcie gry → mod działa, nikt nie rozłączony, brak ekranu ładowania (zrzuty co 100 ms), pauza krótsza niż 1 s (D11); celowo zepsuty silnik → gracze zostają na starym.

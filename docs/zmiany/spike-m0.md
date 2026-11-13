@@ -23,6 +23,7 @@
 - `crates/hot-host`: mod natywny, który ładuje `hot-core` przy starcie serwera, przekazuje mu haki Horizona i podmienia rdzeń komendą `hot core load` bez restartu; paczkę składa `build-bundle.sh`.
 - `examples/licznik`: przykładowy mod gorący; licznik ticków przechodzi przez przeładowanie, `licznik panika` pokazuje powrót do poprzedniej generacji.
 - `hot <mod> …` przekazuje komendę konsoli tylko temu modowi.
+- `crates/hot-proxy` (M8.1): proxy loguje gracza online (szyfrowanie, `hasJoined` w usłudze sesji z dokumentu discovery), loguje się do silnika z danymi gracza podpisanymi HMAC-SHA256 (przekazywanie Velocity) i przesyła pakiety w obie strony. Tryb offline tylko na 127.0.0.1. Zależności `horizon-protocol`, `sha2`, `ureq` (ADR 0010). Kody `HOT-E0601`–`HOT-E0604`. Testy z lokalną atrapą usługi sesji i silnika, bez Mojanga.
 - Kody `HOT-E0406` (rdzeń się nie wczytał) i `HOT-E0407` (rdzeń spanikował) w `docs/bledy/`.
 - ADR 0007: logi `hot-host`, komendy modów i pauza pustego serwera.
 - `crates/hotd`: demon, który co 10 s pobiera repo serwera, liczy zmiany od ostatniego zastosowanego commita (D24), pobiera podpisane biblioteki modów z gałęzi `hot-builds`, ładuje je w silniku i zapisuje stan w `hot-state/hotd.json`; `hotd status` w terminalu. Kody `HOT-E0201`–`HOT-E0207`.

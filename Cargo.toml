@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/hot-abi", "crates/hot-core", "crates/hot-diag", "crates/hot-sdk", "crates/hotd", "examples/licznik", "examples/sklep", "examples/teleport-blok"]
+members = ["crates/hot-abi", "crates/hot-core", "crates/hot-diag", "crates/hot-proxy", "crates/hot-sdk", "crates/hotd", "examples/licznik", "examples/sklep", "examples/teleport-blok"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,9 +12,14 @@ repository = "https://github.com/Kamciosz/horizon-hot"
 # PL: Wersje zależności w jednym miejscu. Nowa zależność wymaga ADR (docs/adr/).
 # EN: Dependency versions in one place. A new dependency needs an ADR (docs/adr/).
 [workspace.dependencies]
+# PL: Protokół gry, szyfrowanie i podpis z Horizona, w rewizji silnika serwera (ADR 0010).
+# EN: The game protocol, encryption and signing from Horizon, at the server engine's revision (ADR 0010).
+horizon-protocol = { git = "https://github.com/horizon-rust/horizon", rev = "66f3981f522b24c250b21523a70080965b940424" }
 libc = "0.2.191"
 libloading = "0.8.9"
 serde_json = "1.0.151"
+sha2 = "0.10.9"
+ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
 
 # PL: Błąd ma trafić do logu z kontekstem (docs/STANDARD_KODU.md), a nie zakończyć proces paniką bez opisu.
 # EN: An error must reach the log with context (docs/STANDARD_KODU.md), not end the process with a bare panic.
