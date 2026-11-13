@@ -12,6 +12,7 @@
 //! (terminal) and `/hot status` (game, `hot-core`). Uses `hot-diag`. Talks to `git`,
 //! `ssh-keygen`, `horizon-server` and the engine's `hot-state/` files.
 
+pub mod brake;
 pub mod classify;
 pub mod codes;
 pub mod daemon;

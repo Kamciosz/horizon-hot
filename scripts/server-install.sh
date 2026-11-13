@@ -181,12 +181,13 @@ preflight() {
       "Free disk space (sudo apt clean, journalctl --vacuum-size=200M) or use a bigger disk" \
       "nothing was changed" "free_gb=$disk_gb"
   fi
-  local p owner
-  for p in "$PORT" "$PACK_PORT"; do
+  local p unit owner
+  for p in "$PORT:horizon-hot-server" "$PACK_PORT:horizon-hot-pack"; do
+    unit=${p#*:} p=${p%%:*}
     owner=$(port_owner "$p")
-    # PL: Port zajęty przez nasz własny serwer przy ponownym uruchomieniu jest w porządku.
-    # EN: A port held by our own server on a rerun is fine.
-    if [ -n "$owner" ] && ! systemctl is-active -q horizon-hot-server 2>/dev/null; then
+    # PL: Port zajęty przez naszą własną usługę przy ponownym uruchomieniu jest w porządku.
+    # EN: A port held by our own service on a rerun is fine.
+    if [ -n "$owner" ] && ! systemctl is-active -q "$unit" 2>/dev/null; then
       OUTPUT=$owner fail HOT-E0102 "TCP port $p is already in use by another program" \
         "port $p is free" "another Minecraft server or program listens on it" \
         "Stop that program (ss -ltnp 'sport = :$p' shows it) or rerun with --port N" \
@@ -262,6 +263,15 @@ hot_build() {
       || fail HOT-E0106 "rustup cannot be installed for the horizon user" "rustup ends in $ROOT/.cargo/bin" \
         "no network to static.rust-lang.org" "Check the network, then rerun the installer" \
         "nothing of horizon-hot was built" "step=rustup"
+  fi
+  # PL: `cargo horizon-mod` (krok 8) działa poza repo, gdzie nie ma rust-toolchain.toml, więc
+  #     potrzebuje domyślnego toolchainu. EN: `cargo horizon-mod` (step 8) runs outside the repo,
+  #     where there is no rust-toolchain.toml, so it needs a default toolchain.
+  if ! as_horizon rustup default > /dev/null 2>&1; then
+    OUTPUT=$(as_horizon rustup default stable 2>&1) \
+      || fail HOT-E0106 "rustup cannot set the stable toolchain as default for the horizon user" \
+        "rustup default stable succeeds" "see chain; usually no network to static.rust-lang.org" \
+        "Check the network, then rerun the installer" "nothing of horizon-hot was built" "step=rustup-default"
   fi
   if [ ! -d "$SRC/.git" ]; then
     OUTPUT=$(as_horizon git clone -q "$HOT_SOURCE" "$SRC" 2>&1) \
@@ -453,12 +463,40 @@ units() {
   step 9/12 "Usługi systemd"
   local changed=0 git_ssh=""
   ssh_repo && git_ssh="Environment=\"GIT_SSH_COMMAND=ssh -i $ROOT/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new\""
+  # PL: Gra ma pierwszeństwo, tło pracuje z resztek (D16). Myślnik w nazwie buduje drzewo:
+  #     horizon-game i horizon-bg leżą w horizon.slice, który waży więcej niż reszta systemu.
+  #     Tło ma wagę 100, nie 1: z wagą 1 hotd nie zrobi ani kroku, gdy gra zajmuje wszystkie
+  #     rdzenie; z wagą 100 pracuje, a gra dostaje około 99% CPU (M6.2). MemoryLow i MemoryMax
+  #     czekają na pomiar S10 (M0.11).
+  # EN: The game comes first, background work gets the leftovers (D16). A dash in the name
+  #     builds the tree: horizon-game and horizon-bg sit in horizon.slice, which outweighs the
+  #     rest of the system. Background weighs 100, not 1: at 1, hotd makes no step at all while
+  #     the game uses every core, at 100 it does, with the game at about 99% CPU (M6.2).
+  #     MemoryLow/MemoryMax wait for the S10 measurement (M0.11).
+  write_if_changed /etc/systemd/system/horizon.slice "[Unit]
+Description=horizon-hot: the game server and its background work
+
+[Slice]
+CPUWeight=1000" && changed=1
+  write_if_changed /etc/systemd/system/horizon-game.slice "[Unit]
+Description=horizon-hot: the game (engine, resource pack)
+
+[Slice]
+CPUWeight=10000
+IOWeight=10000" && changed=1
+  write_if_changed /etc/systemd/system/horizon-bg.slice "[Unit]
+Description=horizon-hot: background work (hotd, copies)
+
+[Slice]
+CPUWeight=100
+IOWeight=1" && changed=1
   write_if_changed /etc/systemd/system/horizon-hot-server.service "[Unit]
 Description=Horizon server with horizon-hot (horizon-server run)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
+Slice=horizon-game.slice
 User=horizon
 Group=horizon
 WorkingDirectory=$SRV
@@ -476,6 +514,9 @@ After=horizon-hot-server.service network-online.target
 Wants=network-online.target
 
 [Service]
+Slice=horizon-bg.slice
+Nice=19
+IOSchedulingClass=idle
 User=horizon
 Group=horizon
 Environment=HOT_HOME=$SRV
@@ -492,6 +533,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+Slice=horizon-game.slice
 User=horizon
 Group=horizon
 Environment=HOT_HOME=$SRV
@@ -506,6 +548,10 @@ Description=horizon-hot: copy of hot-state and hot-keys (worlds: horizon-server 
 
 [Service]
 Type=oneshot
+Slice=horizon-bg.slice
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
 User=horizon
 ExecStart=/bin/sh -c 'tar -czf $BACKUPS/hot-state-\$\$(date +%%F).tar.gz -C $SRV hot-state hot-keys && find $BACKUPS -name \"hot-state-*.tar.gz\" -mtime +7 -delete'" && changed=1
   write_if_changed /etc/systemd/system/horizon-hot-backup.timer "[Unit]

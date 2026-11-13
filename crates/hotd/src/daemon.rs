@@ -173,6 +173,7 @@ impl<E: Engine> Daemon<E> {
     /// PL: Jeden krok; błędy idą do logu i do `hotd.json`. EN: One step; errors go to the log
     /// and to `hotd.json`.
     pub fn step(&mut self) {
+        self.state.brake = crate::brake::note();
         self.check_crash();
         self.check_world();
         if self.check_disk() {

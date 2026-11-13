@@ -132,8 +132,10 @@ fn main() -> ExitCode {
     cfg.world = hotd::data::world_dir(&engine_dir);
     cfg.engine_dir.clone_from(&engine_dir);
     cfg.engine_program.clone_from(&args.engine);
+    let program = args.engine;
+    let probe_dir = engine_dir.clone();
     let engine = HorizonServer {
-        program: args.engine,
+        program: program.clone(),
         dir: engine_dir,
     };
     let mut daemon = match Daemon::open(cfg, engine) {
@@ -144,6 +146,17 @@ fn main() -> ExitCode {
         }
     };
     hot_diag::install_panic_hook(daemon.logger());
+    if args.command == "run" {
+        // PL: Hamulec MSPT we własnym wątku (D16): główny wątek czeka na procesy, które on
+        // zatrzymuje. EN: The MSPT brake on its own thread (D16): the main thread waits on the
+        // processes it stops.
+        let probe = HorizonServer {
+            program: program.clone(),
+            dir: probe_dir,
+        };
+        let log = daemon.logger();
+        std::thread::spawn(move || hotd::brake::run(|| probe.status_json(), &log));
+    }
     loop {
         daemon.step();
         if args.command == "once" {

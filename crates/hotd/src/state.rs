@@ -52,6 +52,9 @@ pub struct State {
     /// działa. EN: The world does not load: the reason and the restore command (M7.3); `None`
     /// while the engine runs.
     pub world_damage: Option<String>,
+    /// PL: Hamulec MSPT trzyma pracę w tle (M6.2); `None`, gdy nie. EN: The MSPT brake holds the
+    /// background work (M6.2); `None` when it does not.
+    pub brake: Option<String>,
 }
 
 impl State {
@@ -103,6 +106,7 @@ impl State {
             "fetch_error": self.fetch_error,
             "data_warnings": self.data_warnings,
             "world_damage": self.world_damage,
+            "brake": self.brake,
         })
     }
 
@@ -146,6 +150,7 @@ impl State {
             fetch_error: text("fetch_error"),
             data_warnings: list("data_warnings"),
             world_damage: text("world_damage"),
+            brake: text("brake"),
         }
     }
 

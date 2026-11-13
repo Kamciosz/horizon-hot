@@ -49,11 +49,7 @@ fn parse_df(text: &str) -> Option<u64> {
 pub fn usage(home: &Path, dirs: &[&str]) -> Vec<(String, u64)> {
     dirs.iter()
         .filter_map(|d| {
-            let out = Command::new("du")
-                .arg("-sk")
-                .arg(home.join(d))
-                .output()
-                .ok()?;
+            let out = crate::brake::output(Command::new("du").arg("-sk").arg(home.join(d))).ok()?;
             let kib = String::from_utf8_lossy(&out.stdout)
                 .split_whitespace()
                 .next()?

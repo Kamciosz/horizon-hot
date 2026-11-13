@@ -42,6 +42,9 @@ pub fn render(home: &Path) -> String {
             if let Some(w) = d["world_damage"].as_str() {
                 let _ = writeln!(out, "  ŚWIAT: {w}");
             }
+            if let Some(b) = d["brake"].as_str() {
+                let _ = writeln!(out, "  hamulec: {b}");
+            }
             if let Some(f) = d["fetch_error"].as_str() {
                 let _ = writeln!(out, "  repo teraz niedostępne: {f}");
             }

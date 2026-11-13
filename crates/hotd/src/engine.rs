@@ -37,6 +37,13 @@ pub struct HorizonServer {
 }
 
 impl HorizonServer {
+    /// PL: Wyjście `status --json` dla hamulca (bez interpretacji). EN: The `status --json` output
+    /// for the brake (uninterpreted).
+    #[must_use]
+    pub fn status_json(&self) -> Option<String> {
+        self.run(&["status", "--json"]).ok()
+    }
+
     fn run(&self, args: &[&str]) -> Result<String, String> {
         let out = Command::new(&self.program)
             .arg("--dir")

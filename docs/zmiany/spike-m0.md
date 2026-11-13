@@ -51,8 +51,12 @@
 - `hotd` sprawdza wolne miejsce na dysku przed każdym krokiem (M7.2). Gdy jest go mniej niż 512 MB, usuwa swoje stare artefakty i stare kopie `hot-core`. Jeśli to nie wystarczy, nie pobiera i nie stosuje commitów, zapisuje `HOT-E0211` raz i pokazuje powód w `hot status`. Gdy miejsce wróci, wznawia pracę sam.
 - Testy `hotd` i `hot-core` na prawdziwie pełnym dysku: działają tylko ze zmienną `HOT_FULL_DISK_DIR`, czyli na osobnym, małym woluminie.
 - `hotd` rozpoznaje świat, którego silnik nie wczytał (M7.3): gdy silnik nie działa, a najnowszy raport w `crash-reports/` mówi `Failed to load world`, `hot status` pokazuje wiersz „ŚWIAT” z powodem i poleceniem przywrócenia najnowszej kopii, a log dostaje `HOT-E0212`. Przywraca operator, nie `hotd`.
+- Slice'y systemd (M6.2): silnik i `hot-pack` w `horizon-game.slice`, `hotd` i kopia `hot-state` w `horizon-bg.slice` z niskim priorytetem.
+- Hamulec MSPT w `hotd` (M6.2): gdy p95 czasu ticku przekroczy 35 ms, ciężkie procesy tła `hotd` stają, a po 10 s poniżej 25 ms ruszają dalej. Mody wczytują się bez przerwy. `hot status` pokazuje wiersz „hamulec”.
 
 ### Zmienione
+- Instalator ustawia `stable` jako domyślny toolchain użytkownika `horizon`, gdy go brakuje; bez tego `cargo horizon-mod` (pula slotów) nie startował.
+- Ponowne uruchomienie instalatora nie odrzuca już portu 8131, gdy zajmuje go nasza własna usługa `horizon-hot-pack`.
 - Instalator usuwa po sobie źródła puli slotów i pakiet `hot-host` z `/srv/horizon/tmp`.
 - `hotd`: brak miejsca na dysku w trakcie commita, zanim silnik coś dostał, nie odrzuca już commita na zawsze (wcześniej `HOT-E0210` przy zapisie paczki). Commit czeka i jest ponawiany, a log dostaje `HOT-E0211` z kodem kroku, który padł. Paczka zasobów jest zapisywana przed `slots.json`, ucięte pliki tymczasowe znikają, a git działa z `LC_ALL=C`.
 - CI uruchamia się też po pushu na gałęzie `spike/**`, nie tylko na `main` i w PR-ach.
