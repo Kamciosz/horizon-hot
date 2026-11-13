@@ -25,6 +25,9 @@ on:
       - "crates/hot-diag/**"
       - "scripts/install.sh"
       - "scripts/install.ps1"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
       - ".github/workflows/hot-play.yml"
 
 permissions:
@@ -37,11 +40,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-latest
             target: aarch64-apple-darwin
             asset: hot-play-macos-arm64
             test: true
-          - os: macos-14
+          - os: macos-latest
             target: x86_64-apple-darwin
             asset: hot-play-macos-x64
             test: false

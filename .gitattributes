@@ -1,0 +1,7 @@
+# PL: Końce linii LF wszędzie, także w checkoutcie na Windows: testy katalogu błędów i ADR szukają
+# nagłówków po "\n", a raport `hot-diag` wbudowuje te pliki.
+# EN: LF line endings everywhere, also in a Windows checkout: the error catalog and ADR tests look
+# for headings after "\n", and the `hot-diag` report embeds these files.
+* text=auto eol=lf
+*.png binary
+*.zip binary
