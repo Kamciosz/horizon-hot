@@ -11,7 +11,7 @@ Bloki i przedmioty z modów gorących nie mogą dopisać się do rejestrów gry 
 
 ## Rozmiar
 
-4096 bloków i 8192 przedmioty (stałe `hotd::slots::BLOCKS` i `ITEMS`, wersja puli `4096.8192.0`, plik 7,0 MB). Rozmiar ustalił M0.20: to największa zmierzona pula, przy której podmiana silnika trwa krócej niż 1 s (ADR 0004). Większej nie mierzono. Rozgrzany silnik (D11, S13), Mac, gracz w grze, `save-all flush`, po 6 podmian w każdym wierszu:
+4096 bloków i 8192 przedmioty (stałe `hotd::slots::BLOCKS` i `ITEMS`, wersja puli `4096.8192.0`, plik 7,0 MB). Rozmiar ustalił M0.20: to największa zmierzona pula, przy której podmiana silnika trwa krócej niż 1 s (ADR 0004). Większej nie mierzono. Pomiar szedł na puli z generatora S7 (`spikes/s7-rozmiar-puli/gen.py`), która różni się od pliku z `hotd slots-source` tylko kolejnością kluczy JSON i opisem w `horizon-mod.toml`. Plik z `hotd` (SHA-256 `aca5eef0…`) sprawdzony osobno: klient z nim wchodzi na serwer z nim, `give` dla `hot_slots:item_8191` i `slot_4095` działa, blok `slot_4095` stoi w świecie. Rozgrzany silnik (D11, S13), Mac, gracz w grze, `save-all flush`, po 6 podmian w każdym wierszu:
 
 | Pula | Ten sam silnik | Nowy plik silnika, pusty cache | Rozgrzanie: ciepły / pusty cache | Czekający silnik |
 |---|---|---|---|---|

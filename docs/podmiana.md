@@ -31,7 +31,7 @@ Razem: 480–549 ms na tym samym silniku i 505–573 ms na nowym pliku silnika z
 
 Błędy:
 - `start` nowej strony z kodem różnym od 0 (wraca po 0,5–1 s) to błąd przed zamrożeniem: gracze zostają na starym silniku, `hotd` zgłasza błąd od razu.
-- Przerwana podmiana: `hotd` zatrzymuje czekający silnik przez `horizon-server stop` i jeden SIGTERM do procesu silnika. Czekający silnik nie czyta konsoli, więc samo `stop` czeka do limitu 120 s; po SIGTERM mixin przestaje czekać i silnik kończy się po ok. 0,5 s (M0.20). Bez zatrzymania silnik po 120 s idzie dalej, dostaje błąd zajętego świata i supervisor wpada w pętlę restartów (S12).
+- Przerwana podmiana: `hotd` zatrzymuje czekający silnik przez `horizon-server stop` w tle, a potem jeden SIGTERM do procesu silnika (pid z `engine_pid` w `status --json` tej strony, nie ze ścieżki programu: przy podmianie na ten sam silnik obie strony działają z tego samego pliku). Odwrotnej kolejności nie sprawdzano. Czekający silnik nie czyta konsoli, więc samo `stop` czeka do limitu 120 s; po SIGTERM mixin przestaje czekać i silnik kończy się po ok. 0,5 s (M0.20). Bez zatrzymania silnik po 120 s idzie dalej, dostaje błąd zajętego świata i supervisor wpada w pętlę restartów (S12).
 - Każdy silnik pod nową ścieżką: nadpisanie pliku, z którego działa silnik, zabija następny start (macOS, kod 137) albo się nie udaje (Linux, „Text file busy”).
 
 ## Zasady dla `hot-proxy`

@@ -97,7 +97,7 @@ Przy sprzątaniu wyszło, że `horizon-server stop` czekającego silnika trwa 2 
 - samo `stop`: po 10 s nadal czeka, silnik żyje;
 - jeden `kill -TERM` silnika A: w logu „stop requested while waiting for the world”, `stop` wraca po 0,5 s, A w stanie `Stopped`, B dalej `Running`.
 
-`hotd` przerywa więc podmianę przez `horizon-server stop` i jeden SIGTERM do procesu silnika. Zatrzymanie przez systemd (SIGTERM do całej grupy) działa bez zmian.
+Drugi przebieg z pidem z `horizon-server --dir a status --json` (`engine_pid`, faza `starting`): `stop` w tle, po 1 s SIGTERM na ten pid, wynik ten sam. `hotd` przerywa więc podmianę w tej kolejności: `horizon-server stop` w tle, potem jeden SIGTERM na `engine_pid` strony. Nie szuka silnika po ścieżce programu, bo przy podmianie na ten sam silnik obie strony działają z jednego pliku. Odwrotnej kolejności nie sprawdzano. Zatrzymanie przez systemd (SIGTERM do całej grupy) działa bez zmian.
 
 ## Powtórzenie
 
