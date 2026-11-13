@@ -64,6 +64,8 @@
 - `hot-proxy switch [ADRES]` i `hot-proxy status`: komendy przez gniazdo `<HOT_HOME>/hot-proxy.sock` (0600), odpowiedź w JSON-ie.
 - Kod `HOT-E0605` (gracza nie dało się przenieść na silnik) i `docs/bledy/HOT-E0605.md`.
 - `crates/hot-proxy/tests/switch.rs`: podmiana na ten sam i na inny silnik, awaria silnika z keep-alive od proxy, gniazdo sterujące, podmiana na martwy silnik.
+- `hotd engine` i `hotd swap [--to PLIK]`: usługa silnika uruchamia aktywną stronę (`a` albo `engine-b`) i na żądanie podmienia silnik na rozgrzany silnik drugiej strony (D11, `crates/hotd/src/swap.rs`, `keeper.rs`). Błąd przed zamrożeniem zostawia graczy na starym silniku (HOT-E0606), błąd po nim przywraca stary (HOT-E0607); HOT-E0608 to nieudany start usługi.
+- `hot-proxy`: linia `{"held":N}` w odpowiedzi na `switch` i komenda `engine ADRES`; adres silnika po restarcie z `hot-state/engine.json`.
 
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
@@ -92,6 +94,8 @@
 - Budżet pauzy podmiany silnika: krócej niż 1 s w każdym przypadku (decyzja użytkownika, ADR 0004); rozgrzany silnik w D11 i nowy krok M0.19 (S13).
 - Haki `tick_block` i `random_tick` dla bloków ze slotów przeniesione z M5 do M0.19: obecne API nie zmienia w nich całego bloku i nie podaje nazwy bloku, a włączenie losowego ticku zmienia pulę u graczy (`PLAN.md`, M5.2).
 - Test hamulca MSPT (`hotd`) czeka na zatrzymaną grupę procesów do 10 s zamiast stałych 300 ms; na wolnym runnerze CI grupa nie była jeszcze zapisana.
+- `hot-proxy`: gracz w przerwie przy każdej próbie loguje się pod bieżący adres silnika, więc zmiana adresu w trakcie przerwy zabiera go na nowy silnik.
+- `hotd`: zamierzona podmiana silnika w oknie po nowej wersji nie oznacza commita jako złego.
 
 ### Uwagi
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.

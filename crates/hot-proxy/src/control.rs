@@ -1,18 +1,23 @@
 //! PL: Gniazdo sterujące `<home>/hot-proxy.sock` (Unix, tylko właściciel, 0600). Jedna komenda na
-//! połączenie, jedna linia odpowiedzi w JSON-ie:
+//! połączenie, odpowiedź to linie JSON-a, ostatnia jest wynikiem:
 //! - `status` — aktywny silnik i gracze w grze;
-//! - `switch [ADRES]` — przenosi graczy na silnik pod `ADRES` (bez adresu: na ten sam).
+//! - `switch [ADRES]` — przenosi graczy na silnik pod `ADRES` (bez adresu: na ten sam). Najpierw
+//!   linia `{"held":N}`: od niej stary silnik nic już graczom nie wyśle, więc wolno go zatrzymać;
+//! - `engine ADRES` — tylko zmienia adres; gracze w przerwie logują się już pod nowy.
 //!
-//! Woła je `hot-proxy switch|status`, a w M8.3 `hotd` przy podmianie silnika.
+//! Woła je `hot-proxy switch|status` i `hotd` przy podmianie silnika (D11).
 //!
 //! EN: The control socket `<home>/hot-proxy.sock` (Unix, owner only, 0600). One command per
-//! connection, one JSON line in reply:
+//! connection; the reply is JSON lines, the last one is the result:
 //! - `status` — the active engine and the players in game;
 //! - `switch [ADDR]` — moves the players to the engine at `ADDR` (no address: the same one).
+//!   First a `{"held":N}` line: from then on the old engine sends the players nothing, so it may
+//!   stop;
+//! - `engine ADDR` — only changes the address; players in a gap log in at the new one.
 //!
-//! `hot-proxy switch|status` calls it, and `hotd` will in M8.3 when it swaps the engine.
+//! `hot-proxy switch|status` and `hotd` (when it swaps the engine, D11) call it.
 
-use crate::session::Proxy;
+use crate::session::{Proxy, SWITCH_WAIT};
 use serde_json::json;
 use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
@@ -76,21 +81,41 @@ fn answer(proxy: &Arc<Proxy>, switching: &Mutex<()>, mut stream: UnixStream) {
         (Some("switch"), target, None) => match target.map(str::parse::<SocketAddr>).transpose() {
             Ok(target) => {
                 let _one = switching.lock().unwrap_or_else(PoisonError::into_inner);
-                proxy.switch(target)
+                proxy.switch_reporting(target, SWITCH_WAIT, |players| {
+                    let _ = writeln!(stream, "{}", json!({ "held": players }));
+                })
             }
             Err(_) => json!({ "error": "switch needs an address like 127.0.0.1:25566" }),
         },
+        (Some("engine"), Some(target), None) => match target.parse::<SocketAddr>() {
+            Ok(target) => {
+                proxy.set_engine(target);
+                json!({ "engine": target.to_string() })
+            }
+            Err(_) => json!({ "error": "engine needs an address like 127.0.0.1:25566" }),
+        },
         _ => {
-            json!({ "error": format!("unknown command {:?}; use status or switch [ADDR]", line.trim()) })
+            json!({ "error": format!("unknown command {:?}; use status, switch [ADDR] or engine ADDR", line.trim()) })
         }
     };
     let _ = writeln!(stream, "{reply}");
 }
 
-/// PL: Wysyła komendę do działającego proxy i zwraca linię odpowiedzi. Podmiana może czekać na
-/// silnik do 25 s, więc limit odczytu jest długi.
-/// EN: Sends a command to the running proxy and returns the reply line. A switch may wait up to
-/// 25 s for the engine, so the read limit is long.
+/// PL: Adres aktywnego silnika z `<home>/hot-state/engine.json` (zapisuje go `hotd` po podmianie
+/// silnika); `None`, gdy pliku nie ma albo nie ma w nim adresu.
+/// EN: The active engine address from `<home>/hot-state/engine.json` (`hotd` writes it after an
+/// engine swap); `None` when the file or the address is missing.
+#[must_use]
+pub fn active_engine(home: &Path) -> Option<SocketAddr> {
+    let text = std::fs::read_to_string(home.join("hot-state").join("engine.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v["address"].as_str()?.parse().ok()
+}
+
+/// PL: Wysyła komendę do działającego proxy i zwraca ostatnią linię odpowiedzi (wynik). Podmiana
+/// może czekać na silnik do 25 s, więc limit odczytu jest długi.
+/// EN: Sends a command to the running proxy and returns the last reply line (the result). A switch
+/// may wait up to 25 s for the engine, so the read limit is long.
 ///
 /// # Errors
 /// PL: Proxy nie działa albo nie odpowiedziało. EN: The proxy is not running or did not answer.
@@ -98,13 +123,14 @@ pub fn request(home: &Path, command: &str) -> std::io::Result<String> {
     let mut stream = UnixStream::connect(socket_path(home))?;
     stream.set_read_timeout(Some(Duration::from_secs(60)))?;
     writeln!(stream, "{command}")?;
-    let mut reply = String::new();
-    BufReader::new(&stream).read_line(&mut reply)?;
-    if reply.is_empty() {
-        return Err(std::io::Error::new(
+    let mut last = None;
+    for line in BufReader::new(&stream).lines() {
+        last = Some(line?);
+    }
+    last.map(|l| l.trim_end().to_owned()).ok_or_else(|| {
+        std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
             "hot-proxy closed the control connection without an answer",
-        ));
-    }
-    Ok(reply.trim_end().to_owned())
+        )
+    })
 }

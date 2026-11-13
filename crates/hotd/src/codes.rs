@@ -43,3 +43,15 @@ pub const DISK_LOW: Code = Code::new("HOT-E0211");
 /// PL: Silnik nie wczytuje świata; `hotd` podaje polecenie przywrócenia, nic nie przywraca sam.
 /// EN: The engine cannot load the world; `hotd` gives the restore command and restores nothing.
 pub const WORLD_DAMAGED: Code = Code::new("HOT-E0212");
+
+/// PL: Nowy silnik nie przygotował się do podmiany; gracze zostali na starym (D11).
+/// EN: The new engine did not get ready for the swap; the players stayed on the old one (D11).
+pub const SWAP_NOT_STARTED: Code = Code::new("HOT-E0606");
+
+/// PL: Nowy silnik nie zajął świata po zamrożeniu; `hotd` wraca na stary (D11, krok 5).
+/// EN: The new engine did not take the world after the freeze; `hotd` goes back to the old one.
+pub const SWAP_FAILED: Code = Code::new("HOT-E0607");
+
+/// PL: `hotd engine` nie uruchomił silnika albo swojego gniazda. EN: `hotd engine` cannot start
+/// the engine or its socket.
+pub const ENGINE_START: Code = Code::new("HOT-E0608");

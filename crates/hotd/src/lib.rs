@@ -20,11 +20,13 @@ pub mod data;
 pub mod disk;
 pub mod engine;
 pub mod git;
+pub mod keeper;
 pub mod pack;
 pub mod sign;
 pub mod slots;
 pub mod state;
 pub mod status;
+pub mod swap;
 pub mod world;
 
 /// PL: Wersja `hotd` w logach i w `hotd.json`. EN: The `hotd` version in logs and `hotd.json`.

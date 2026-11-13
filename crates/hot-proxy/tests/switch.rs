@@ -475,18 +475,21 @@ fn the_control_socket_switches_and_reports() {
     );
     assert_eq!(mode & 0o777, 0o600);
     let mut c = first_join(&e, at);
-    let d = dir.clone();
     let target = other.address;
-    let reply = thread::spawn(move || hot_proxy::control::request(&d, &format!("switch {target}")));
+    let lines = control_lines(&dir, &format!("switch {target}"));
     let seen = read_until(&mut c, |id, _| id == pids::clientbound::PLAYER_CHAT);
     // PL: Inny silnik, logowanie 0: gracz tam ma id `PLAYER`, jak u klienta.
     // EN: Another engine, login 0: the player has id `PLAYER` there, as on the client.
     assert!(seen
         .iter()
         .any(|(id, p)| *id == pids::clientbound::ADD_ENTITY && first_varint(p) == ENTITY));
-    let reply: serde_json::Value = serde_json::from_str(&reply.join().unwrap().unwrap()).unwrap();
-    assert_eq!(reply["engine"], target.to_string());
-    assert_eq!(reply["moved"], 1);
+    let lines = lines.join().unwrap();
+    // PL: Najpierw „held” (wtedy `hotd` zatrzymuje stary silnik), potem wynik.
+    // EN: "held" first (then `hotd` stops the old engine), then the result.
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[0]["held"], 1);
+    assert_eq!(lines[1]["engine"], target.to_string());
+    assert_eq!(lines[1]["moved"], 1);
     let status: serde_json::Value =
         serde_json::from_str(&hot_proxy::control::request(&dir, "status").unwrap()).unwrap();
     assert_eq!(status["engine"], target.to_string());
@@ -516,4 +519,67 @@ fn a_switch_to_a_dead_engine_disconnects_with_a_reason_and_e0605() {
     assert!(String::from_utf8_lossy(reason).contains("restarting"));
     let log = std::fs::read_to_string(dir.join("logs/hot-proxy.jsonl")).unwrap();
     assert!(log.contains("HOT-E0605"), "{log}");
+}
+
+/// PL: Surowa rozmowa z gniazdem: wszystkie linie odpowiedzi. EN: A raw socket talk: every reply line.
+fn control_lines(
+    dir: &std::path::Path,
+    command: &str,
+) -> thread::JoinHandle<Vec<serde_json::Value>> {
+    use std::io::{BufRead, Write};
+    let mut s =
+        std::os::unix::net::UnixStream::connect(hot_proxy::control::socket_path(dir)).unwrap();
+    writeln!(s, "{command}").unwrap();
+    thread::spawn(move || {
+        std::io::BufReader::new(s)
+            .lines()
+            .map(|l| serde_json::from_str(&l.unwrap()).unwrap())
+            .collect()
+    })
+}
+
+#[test]
+fn players_held_for_a_dead_engine_go_back_with_the_engine_command() {
+    let e = fake_engine();
+    let dir = home("back");
+    let (at, proxy) = start_proxy(e.address, &dir);
+    hot_proxy::control::serve(&proxy, &dir).unwrap();
+    let mut c = first_join(&e, at);
+    let closed = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let lines = control_lines(&dir, &format!("switch {closed}"));
+    thread::sleep(Duration::from_millis(500));
+    // PL: Nowy silnik nie wstał; `hotd` kieruje graczy z powrotem na stary.
+    // EN: The new engine never came up; `hotd` sends the players back to the old one.
+    let back: serde_json::Value = serde_json::from_str(
+        &hot_proxy::control::request(&dir, &format!("engine {}", e.address)).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(back["engine"], e.address.to_string());
+    let seen = read_until(&mut c, |id, _| id == pids::clientbound::PLAYER_CHAT);
+    assert!(!seen
+        .iter()
+        .any(|(id, _)| *id == pids::clientbound::DISCONNECT));
+    let lines = lines.join().unwrap();
+    assert_eq!(lines[0]["held"], 1);
+    assert_eq!(lines[1]["engine"], e.address.to_string(), "{lines:?}");
+    assert_eq!(lines[1]["moved"], 1, "{lines:?}");
+}
+
+#[test]
+fn the_active_engine_comes_from_hotd_state() {
+    let dir = home("active");
+    assert_eq!(hot_proxy::control::active_engine(&dir), None);
+    std::fs::create_dir_all(dir.join("hot-state")).unwrap();
+    std::fs::write(
+        dir.join("hot-state/engine.json"),
+        r#"{"side":"b","address":"127.0.0.1:25567"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        hot_proxy::control::active_engine(&dir),
+        Some("127.0.0.1:25567".parse().unwrap())
+    );
 }

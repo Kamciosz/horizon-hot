@@ -19,7 +19,8 @@ Usage: hot-proxy --engine 127.0.0.1:PORT --secret FILE --home DIR
        hot-proxy switch [ENGINE] [--home DIR]
        hot-proxy status [--home DIR]
 
---engine    the engine (online_mode = false, the same forwarding.secret).
+--engine    the engine (online_mode = false, the same forwarding.secret); after an engine
+            swap <home>/hot-state/engine.json (written by hotd) names the active one instead.
 --secret    the engine's forwarding.secret.
 --home      HOT_HOME: logs go to <home>/logs/hot-proxy.jsonl (default $HOT_HOME).
 --discovery the session service discovery document (tests only; default: the game's).
@@ -153,6 +154,9 @@ fn main() -> ExitCode {
         eprintln!("hot-proxy: --engine, --secret and --home are required\n\n{USAGE}");
         return ExitCode::from(2);
     };
+    // PL: Po podmianie silnika aktywna jest druga strona; restart proxy musi trafić do niej.
+    // EN: After an engine swap the other side is active; a proxy restart must reach it.
+    let engine = hot_proxy::control::active_engine(&home).unwrap_or(engine);
     let log = match hot_diag::Logger::open(
         hot_diag::LogConfig::new("hot-proxy", hot_proxy::VERSION, home.join("logs")),
         hot_diag::Redactor::new(),

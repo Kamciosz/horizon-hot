@@ -41,7 +41,7 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// PL: Tyle gracz czeka na nowy silnik przy podmianie. EN: How long a player waits for a new engine in a swap.
-const SWITCH_WAIT: Duration = Duration::from_secs(25);
+pub(crate) const SWITCH_WAIT: Duration = Duration::from_secs(25);
 
 /// PL: Tyle gracz czeka, gdy silnik padł: supervisor wznawia go po 5–40 s, a start trwa kilka sekund.
 /// EN: How long a player waits after an engine crash: the supervisor restarts it after 5–40 s, and a
@@ -188,21 +188,47 @@ impl Proxy {
         target: Option<SocketAddr>,
         wait: Duration,
     ) -> serde_json::Value {
-        let target = {
+        self.switch_reporting(target, wait, |_| {})
+    }
+
+    /// PL: Ustawia adres silnika bez przenoszenia graczy. Gracze w przerwie (podmiana albo awaria)
+    /// logują się już pod nowy adres; tak `hotd` wraca na stary silnik, gdy nowy padł po zamrożeniu.
+    /// EN: Sets the engine address without moving anybody. Players in a gap (a switch or a crash)
+    /// log in at the new address from now on; this is how `hotd` goes back to the old engine when
+    /// the new one failed after the freeze.
+    pub fn set_engine(&self, target: SocketAddr) {
+        *lock(&self.engine) = target;
+        self.log.info(
+            "Engine address set",
+            json!({ "engine": target.to_string() }),
+        );
+    }
+
+    /// PL: `switch`, który woła `held(liczba graczy)`, gdy już nikt nie dostaje pakietów starego
+    /// silnika. Dopiero wtedy wolno go zatrzymać: jego `Disconnect` nie dojdzie do graczy.
+    /// EN: A `switch` that calls `held(player count)` once nobody gets the old engine's packets.
+    /// Only then may the old engine stop: its `Disconnect` never reaches the players.
+    pub fn switch_reporting(
+        self: &Arc<Self>,
+        target: Option<SocketAddr>,
+        wait: Duration,
+        held: impl FnOnce(usize),
+    ) -> serde_json::Value {
+        {
             let mut engine = lock(&self.engine);
             if let Some(t) = target {
                 *engine = t;
             }
-            *engine
-        };
+        }
         let links: Vec<Arc<Link>> = self.live().into_iter().filter(|l| l.in_game()).collect();
         for link in &links {
             link.begin_gap();
         }
+        held(links.len());
         let results: Vec<Rejoin> = thread::scope(|s| {
             let handles: Vec<_> = links
                 .iter()
-                .map(|l| s.spawn(move || l.rejoin(self, target, wait)))
+                .map(|l| s.spawn(move || l.rejoin(self, wait)))
                 .collect();
             handles
                 .into_iter()
@@ -219,13 +245,13 @@ impl Proxy {
                 Rejoin::Moved(p) => pause = pause.max(p),
                 Rejoin::Superseded => {}
                 Rejoin::Failed(why) => {
-                    self.lost(link, &why, target);
+                    self.lost(link, &why, self.engine());
                     failed.push(json!({ "player": link.name, "reason": why }));
                 }
             }
         }
         let summary = json!({
-            "engine": target.to_string(),
+            "engine": self.engine().to_string(),
             "players": links.len(),
             "moved": links.len() - failed.len(),
             "failed": failed,
@@ -256,8 +282,8 @@ impl Proxy {
             json!({ "player": link.name, "engine": target.to_string(), "reason": why }),
         );
         link.begin_gap();
-        if let Rejoin::Failed(why) = link.rejoin(self, target, ENGINE_LOST_WAIT) {
-            self.lost(link, &why, target);
+        if let Rejoin::Failed(why) = link.rejoin(self, ENGINE_LOST_WAIT) {
+            self.lost(link, &why, self.engine());
         }
     }
 

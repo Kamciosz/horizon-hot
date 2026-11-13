@@ -30,13 +30,25 @@ pub trait Engine {
     fn log_file(&self) -> PathBuf;
 }
 
-/// PL: `horizon-server` z katalogiem serwera. EN: `horizon-server` with a server folder.
+/// PL: `horizon-server` z katalogiem serwera. Po podmianie silnika (D11) aktywna może być strona
+/// `b` (`<dir>/engine-b`); każde wywołanie idzie do strony z `hot-state/engine.json`.
+/// EN: `horizon-server` with a server folder. After an engine swap (D11) side `b`
+/// (`<dir>/engine-b`) may be active; every call goes to the side in `hot-state/engine.json`.
 pub struct HorizonServer {
     pub program: PathBuf,
     pub dir: PathBuf,
 }
 
 impl HorizonServer {
+    /// PL: Katalog aktywnej strony. EN: The active side's folder.
+    #[must_use]
+    pub fn side_dir(&self) -> PathBuf {
+        crate::swap::Layout {
+            home: self.dir.clone(),
+        }
+        .active_dir()
+    }
+
     /// PL: Wyjście `status --json` dla hamulca (bez interpretacji). EN: The `status --json` output
     /// for the brake (uninterpreted).
     #[must_use]
@@ -47,7 +59,7 @@ impl HorizonServer {
     fn run(&self, args: &[&str]) -> Result<String, String> {
         let out = Command::new(&self.program)
             .arg("--dir")
-            .arg(&self.dir)
+            .arg(self.side_dir())
             .args(args)
             .output()
             .map_err(|e| format!("{} cannot be started: {e}", self.program.display()))?;
@@ -75,7 +87,7 @@ impl Engine for HorizonServer {
             )
             .expected("horizon-server cmd delivers the command to the running engine")
             .context("program", self.program.display().to_string())
-            .context("dir", self.dir.display().to_string())
+            .context("dir", self.side_dir().display().to_string())
             .context("command", line.to_owned())
             .chain_line(output)
             .state("The commit was not applied; the server keeps the mods it had")
@@ -94,6 +106,6 @@ impl Engine for HorizonServer {
     /// PL: Nadzorca `horizon-server` zapisuje tu wyjście błędów silnika.
     /// EN: The `horizon-server` supervisor writes the engine's error output here.
     fn log_file(&self) -> PathBuf {
-        self.dir.join("logs").join("supervisor.log")
+        self.side_dir().join("logs").join("supervisor.log")
     }
 }

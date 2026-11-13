@@ -775,8 +775,13 @@ impl<E: Engine> Daemon<E> {
             }
             return;
         }
+        // PL: Raport pisze aktywna strona; świat i `backups/` są strony `a` (strona `b` ma do nich
+        // dowiązania), więc przywracanie idzie przez stronę `a`.
+        // EN: The active side writes the report; the world and `backups/` belong to side `a` (side
+        // `b` links to them), so the restore goes through side `a`.
         let dir = self.cfg.engine_dir.clone();
-        let Some(failure) = world::load_failure(&dir, self.seen_running) else {
+        let active = crate::swap::Layout { home: dir.clone() }.active_dir();
+        let Some(failure) = world::load_failure(&active, self.seen_running) else {
             return;
         };
         let backup = world::newest_backup(&dir);
@@ -894,6 +899,18 @@ impl<E: Engine> Daemon<E> {
         }
         let now = self.engine.pid();
         if now == Some(pid) {
+            return;
+        }
+        // PL: Podmiana silnika (D11) po zastosowaniu zmienia PID celowo; okno pilnuje nowego.
+        // EN: An engine swap (D11) after the apply changes the PID on purpose; the window watches
+        // the new one.
+        let layout = crate::swap::Layout {
+            home: self.cfg.engine_dir.clone(),
+        };
+        if layout.swapped_at_ms() >= self.state.applied_at_ms {
+            if now.is_some() {
+                self.state.applied_pid = now;
+            }
             return;
         }
         let Some(commit) = self.state.applied.clone() else {

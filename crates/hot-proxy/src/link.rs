@@ -28,7 +28,7 @@ use horizon_protocol::{
 };
 use serde_json::json;
 use std::collections::{HashSet, VecDeque};
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
@@ -406,28 +406,26 @@ impl Link {
         true
     }
 
-    /// PL: Wejście na silnik `target` w miejsce starego; wołać po `begin_gap`. Powtarza logowanie
-    /// co 20 ms do `wait` (nowy silnik przyjmuje graczy dopiero ze światem).
-    /// EN: Joins the engine `target` in place of the old one; call after `begin_gap`. Retries the
-    /// login every 20 ms until `wait` (a new engine takes players only once it has the world).
-    pub fn rejoin(
-        self: &Arc<Self>,
-        proxy: &Arc<Proxy>,
-        target: SocketAddr,
-        wait: Duration,
-    ) -> Rejoin {
+    /// PL: Wejście na aktywny silnik proxy w miejsce starego; wołać po `begin_gap`. Powtarza
+    /// logowanie co 20 ms do `wait` (nowy silnik przyjmuje graczy dopiero ze światem), za każdym
+    /// razem pod bieżący adres, więc `set_engine` w trakcie kieruje gracza gdzie indziej.
+    /// EN: Joins the proxy's active engine in place of the old one; call after `begin_gap`. Retries
+    /// the login every 20 ms until `wait` (a new engine takes players only once it has the world),
+    /// each time at the current address, so `set_engine` meanwhile sends the player elsewhere.
+    pub fn rejoin(self: &Arc<Self>, proxy: &Arc<Proxy>, wait: Duration) -> Rejoin {
         let generation = self.generation.load(Ordering::SeqCst);
         let superseded = || {
             self.generation.load(Ordering::SeqCst) != generation
                 || self.ended.load(Ordering::SeqCst)
         };
         let deadline = Instant::now() + wait;
-        let mut conn = loop {
+        let (mut conn, target) = loop {
             if superseded() {
                 return Rejoin::Superseded;
             }
+            let target = proxy.engine();
             let last = match proxy.engine_login(target, &self.intent, &self.profile, self.address) {
-                EngineLogin::Joined(c, _) => break *c,
+                EngineLogin::Joined(c, _) => break (*c, target),
                 EngineLogin::Refused(reason) => format!("the engine refused the player: {reason}"),
                 EngineLogin::Failed(e) => e.to_string(),
             };

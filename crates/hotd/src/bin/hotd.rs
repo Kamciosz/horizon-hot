@@ -1,9 +1,11 @@
 //! PL: Program `hotd`: `run` (usługa systemd, krok co 10 s), `once` (jeden krok, do testów
 //! i ręcznej naprawy), `status` (to samo co `hot status`), `serve-pack` (paczka zasobów dla
-//! graczy, osobna usługa, D9) i `slots-source` (źródło `hot-slots.hmod`, M5.1).
+//! graczy, osobna usługa, D9), `slots-source` (źródło `hot-slots.hmod`, M5.1), `engine` (proces
+//! usługi silnika, podmiana D11) i `swap` (zleca podmianę).
 //! EN: The `hotd` program: `run` (systemd service, a step every 10 s), `once` (a single step, for
 //! tests and manual repair), `status` (same as `hot status`), `serve-pack` (the resource pack for
-//! players, a separate service, D9) and `slots-source` (the `hot-slots.hmod` source, M5.1).
+//! players, a separate service, D9), `slots-source` (the `hot-slots.hmod` source, M5.1), `engine`
+//! (the engine service process, the D11 swap) and `swap` (requests a swap).
 
 #![allow(clippy::print_stdout, clippy::print_stderr)] // PL: program wiersza poleceń. EN: a CLI program.
 
@@ -21,11 +23,17 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
        hotd status [--home DIR]
        hotd serve-pack [--home DIR] [--port 8131]
        hotd slots-source DIR   (then: cd DIR && cargo horizon-mod build)
+       hotd engine [--home DIR] [--engine horizon-server]
+       hotd swap [--to FILE] [--home DIR]
 
 --home is the engine's HOT_HOME (hot-state/ and logs/ live there; default $HOT_HOME).
 --engine-dir is the horizon-server --dir of the engine (default: --home); mod data packs go
 to the world folder named in its server.toml.
---allowed-signers defaults to <home>/hot-keys/allowed_signers.";
+--allowed-signers defaults to <home>/hot-keys/allowed_signers.
+engine runs the engine of the active side (the main process of the engine service, instead of
+horizon-server run) and swaps it on request (D11); logs go to <home>/logs/hotd-engine.jsonl.
+swap asks it to swap to the engine file --to (default: the same engine) with the players in
+game; prints a JSON report, exit 1 when the players stayed on or went back to the old engine.";
 
 struct Args {
     command: String,
@@ -37,6 +45,7 @@ struct Args {
     allowed_signers: Option<PathBuf>,
     interval: u64,
     port: u16,
+    to: Option<PathBuf>,
 }
 
 fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -51,6 +60,7 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         allowed_signers: None,
         interval: 10,
         port: 8131,
+        to: None,
     };
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or(format!("{flag} needs a value"));
@@ -60,6 +70,7 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--branch" => a.branch = value()?,
             "--engine" => a.engine = value()?.into(),
             "--engine-dir" => a.engine_dir = Some(value()?.into()),
+            "--to" => a.to = Some(value()?.into()),
             "--allowed-signers" => a.allowed_signers = Some(value()?.into()),
             "--port" => a.port = value()?.parse().map_err(|e| format!("--port: {e}"))?,
             "--interval" => {
@@ -114,6 +125,35 @@ fn main() -> ExitCode {
     }
     if args.command == "serve-pack" {
         return serve_pack(&home, args.port);
+    }
+    if args.command == "engine" {
+        return engine(&home, &args.engine);
+    }
+    if args.command == "swap" {
+        let to = args.to.map(|f| std::path::absolute(&f).unwrap_or(f));
+        let command = match &to {
+            Some(f) => format!("swap {}", f.display()),
+            None => "swap".to_owned(),
+        };
+        return match hotd::keeper::request(&home, &command) {
+            Ok(reply) => {
+                println!("{reply}");
+                let ok = serde_json::from_str::<serde_json::Value>(&reply)
+                    .is_ok_and(|v| v["ok"] == true);
+                if ok {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "hotd: hotd engine does not answer on {}: {e} (is the engine service running?)",
+                    hotd::keeper::socket_path(&home).display()
+                );
+                ExitCode::FAILURE
+            }
+        };
     }
     if args.command != "run" && args.command != "once" {
         eprintln!("hotd: unknown command {}\n\n{USAGE}", args.command);
@@ -202,4 +242,31 @@ fn serve_pack(home: &std::path::Path, port: u16) -> ExitCode {
     );
     hotd::pack::serve(&listener, home, &log);
     ExitCode::SUCCESS
+}
+
+/// PL: `hotd engine`: kod 0 po SIGTERM albo zatrzymaniu silnika, 1 po błędzie albo gdy supervisor
+/// przestał wznawiać silnik (systemd wtedy go uruchamia ponownie).
+/// EN: `hotd engine`: exit 0 after SIGTERM or an engine stop, 1 after an error or when the
+/// supervisor stopped restarting the engine (systemd then starts it again).
+fn engine(home: &std::path::Path, program: &std::path::Path) -> ExitCode {
+    let log = match hot_diag::Logger::open(
+        hot_diag::LogConfig::new("hotd-engine", hotd::VERSION, home.join("logs")),
+        hot_diag::Redactor::new(),
+    ) {
+        Ok(l) => std::sync::Arc::new(l),
+        Err(e) => {
+            eprintln!("hotd: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    hot_diag::install_panic_hook(std::sync::Arc::clone(&log));
+    match hotd::keeper::run(home, program, &log) {
+        Ok(hotd::keeper::End::Stopped) => ExitCode::SUCCESS,
+        Ok(hotd::keeper::End::GaveUp) => ExitCode::FAILURE,
+        Err(e) => {
+            log.error(&e);
+            eprintln!("hotd: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }

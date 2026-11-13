@@ -457,6 +457,37 @@ fn engine_crash_right_after_apply_marks_the_commit_bad() {
 }
 
 #[test]
+fn an_engine_swap_right_after_apply_is_not_a_crash() {
+    let w = World::new("swap");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let v1 = w.commit(&MOD_FILES, &[]);
+    w.publish(&v1, &["licznik"], true, false);
+    d.step();
+    assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
+    // PL: `hotd engine` zapisuje podmianę (D11), silnik ma nowy PID. EN: A swap, a new PID.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    fs::write(
+        w.home.join("hot-state/engine.json"),
+        format!(r#"{{"side":"a","address":"127.0.0.1:25566","swapped_at_ms":{now}}}"#),
+    )
+    .unwrap();
+    fake.pid.set(Some(300));
+    d.step();
+    assert!(d.state().bad.is_empty(), "{:?}", d.state().errors);
+    assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
+    // PL: Okno pilnuje teraz nowego PID: awaria nowego silnika to nadal zły commit.
+    // EN: The window now watches the new PID: a crash of the new engine is still a bad commit.
+    fs::remove_file(w.home.join("hot-state/engine.json")).unwrap();
+    fake.pid.set(Some(301));
+    d.step();
+    assert_eq!(d.state().bad, std::slice::from_ref(&v1));
+}
+
+#[test]
 fn mod_id_different_from_its_folder_is_reported() {
     let w = World::new("id");
     let fake = Fake::new(&w.home);
