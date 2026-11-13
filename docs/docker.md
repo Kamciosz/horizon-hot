@@ -40,7 +40,9 @@ Silnik z `hot-host` to kod natywny bez piaskownicy. Buduje go launcher Horizona 
 2. połóż launcher Horizona dla Linux x86-64 w wolumenie, np. `/srv/horizon/launcher/horizon-launcher`;
 3. odkomentuj `HOT_TRUST_NATIVE_CODE` i `HOT_LAUNCHER` w `compose.yaml`, potem `docker compose up -d`.
 
-Bez tego serwer działa, a w logu jest ostrzeżenie `HOT-E0110`. Ta ścieżka w kontenerze nie była jeszcze sprawdzona. Znany problem: launcher pobiera wersję Horizona po tagu Nightly, a datowane tagi znikają z GitHuba po kilku dniach (do rozwiązania w M9).
+Bez tego serwer działa, a w logu jest ostrzeżenie `HOT-E0110`. Ta ścieżka w kontenerze nie była jeszcze sprawdzona. Silnik budowany jest z pełnej rewizji Horizona, więc znikające datowane wydania mu nie przeszkadzają (ADR 0012).
+
+Nowe Nightly Horizona: kontener sprawdza je co godzinę i pokazuje w `hot status`. Żeby sam je budował, testował na kopii świata i podmieniał, odkomentuj dodatkowo `HOT_AUTO_UPDATE_HORIZON` (ADR 0013, opis kroków w `docs/aktualizacje.md`).
 
 ## Codzienna obsługa
 

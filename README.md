@@ -26,6 +26,8 @@ Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtó
 1. Pliki gry. Na komputerze z Minecraftem i launcherem Horizon przygotuj wersję 26.3, skopiuj jej folder na serwer (`scp -r`) i uruchom polecenie jeszcze raz z `--resources <folder>`. Pliki gry nie są w tym repo i nikt ich za Ciebie nie pobiera.
 2. Kod natywny. Przeczytaj `crates/hot-host/` i, jeśli mu ufasz, dodaj `--trust-native-code`. Tę zgodę daje tylko właściciel serwera.
 
+Nowe wersje Horizona serwer sprawdza sam co godzinę. Domyślnie tylko pokazuje je w `hot status`. Z `--trust-native-code --auto-update-horizon` sam je buduje, testuje na kopii świata z botami, podmienia, gdy nikt nie gra (najpóźniej po 24 h), i wraca na starą wersję, gdy nowa padnie albo zwolni (`docs/aktualizacje.md`).
+
 `--address` to adres, który gracze wpisują w grze. Z niego gra pobiera paczkę zasobów z wyglądem bloków modów (port 8131).
 
 Gracze łączą się z portem 25565 (`--port`). Słucha na nim `hot-proxy`: sprawdza w usłudze sesji Microsoftu, czy gracz ma kupioną grę, i dopiero wtedy wpuszcza go do silnika. Silnik słucha tylko na `127.0.0.1:25566` (`--engine-port`; druga strona silnika przy podmianie na 25567), więc z sieci nie da się go ominąć. Zapora otwiera tylko SSH, 25565 i 8131.

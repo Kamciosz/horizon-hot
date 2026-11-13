@@ -34,8 +34,10 @@ RUN --mount=type=cache,target=/opt/cargo/registry --mount=type=cache,target=/opt
     --mount=type=cache,target=/horizon/target \
     cargo build --release -q --locked -p horizon-client --no-default-features --bin horizon-client \
  && cargo build --release -q --locked -p horizon-server --bin horizon-server \
+ && cargo build --release -q --locked -p horizon-bots --bin horizon-bots \
  && mkdir -p /out \
- && cp target/release/horizon-client /out/horizon-engine && cp target/release/horizon-server /out/
+ && cp target/release/horizon-client /out/horizon-engine \
+ && cp target/release/horizon-server target/release/horizon-bots /out/
 
 FROM rust AS build
 ARG HORIZON_REV

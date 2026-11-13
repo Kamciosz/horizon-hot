@@ -144,6 +144,9 @@ pub fn render(home: &Path) -> String {
             let _ = writeln!(out, "  {name} = hot_slots:slot_{slot}");
         }
     }
+    if let Some(horizon) = crate::update::status_lines(home) {
+        out.push_str(&horizon);
+    }
     out
 }
 

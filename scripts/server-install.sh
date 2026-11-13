@@ -37,6 +37,7 @@ HORIZON_REV=66f3981f522b24c250b21523a70080965b940424
 RESOURCES=
 LAUNCHER=
 TRUST_NATIVE=0
+AUTO_HORIZON=0
 EULA=0
 PORT=25565
 ENGINE_PORT=25566
@@ -54,6 +55,8 @@ USAGE="Użycie: server-install.sh --repo URL --eula [opcje]
   --eula                  akceptujesz EULA Minecrafta: https://aka.ms/MinecraftEULA
   --resources DIR         folder 26.3 z plikami gry przygotowanymi z Twojego Minecrafta
   --trust-native-code     przeczytałeś kod crates/hot-host i ufasz mu: buduje silnik z hot-host
+  --auto-update-horizon   razem z --trust-native-code: nowe Nightly Horizona budują się
+                          i wchodzą same (hotd horizon, D18); bez tej flagi czekają na zgodę
   --launcher PATH         horizon-launcher dla Linuxa x86-64 (domyślnie z PATH)
   --op NAME               pierwszy operator; włącza whitelistę z tym graczem
   --port N                port dla graczy: tu słucha hot-proxy (domyślnie 25565)
@@ -140,6 +143,7 @@ while [ $# -gt 0 ]; do
     --eula) EULA=1; shift ;;
     --resources) RESOURCES=${2:?"--resources potrzebuje folderu"}; shift 2 ;;
     --trust-native-code) TRUST_NATIVE=1; shift ;;
+    --auto-update-horizon) AUTO_HORIZON=1; shift ;;
     --launcher) LAUNCHER=${2:?"--launcher potrzebuje ścieżki"}; shift 2 ;;
     --op) OP=${2:?"--op potrzebuje nazwy gracza"}; shift 2 ;;
     --port) PORT=${2:?"--port potrzebuje numeru"}; shift 2 ;;
@@ -268,7 +272,7 @@ horizon() {
   step 4/13 "Horizon $HORIZON_VERSION (${HORIZON_REV:0:12}) ze źródeł"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
   local release=$HZ/releases/$HORIZON_VERSION
-  if [ "$(readlink "$HZ/current" 2>/dev/null)" = "$release" ] && [ -x "$release/horizon-engine" ] && [ -x "$BIN/horizon-server" ]; then
+  if [ "$(readlink "$HZ/current" 2>/dev/null)" = "$release" ] && [ -x "$release/horizon-engine" ] && [ -x "$BIN/horizon-server" ] && [ -x "$BIN/horizon-bots" ]; then
     say "Już jest."; return
   fi
   rust_ready
@@ -279,9 +283,9 @@ horizon() {
     && as_horizon git -C "$HZ_SRC" fetch -q --depth 1 https://github.com/horizon-rust/horizon "$HORIZON_REV" 2>&1 \
     && as_horizon git -C "$HZ_SRC" checkout -q --force FETCH_HEAD 2>&1 \
     && [ "$(as_horizon git -C "$HZ_SRC" rev-parse HEAD)" = "$HORIZON_REV" ] \
-    && as_horizon sh -c "cd '$HZ_SRC' && nice -n 10 cargo build --release -q --locked -p horizon-client --no-default-features --bin horizon-client && nice -n 10 cargo build --release -q --locked -p horizon-server --bin horizon-server" 2>&1) \
+    && as_horizon sh -c "cd '$HZ_SRC' && nice -n 10 cargo build --release -q --locked -p horizon-client --no-default-features --bin horizon-client && nice -n 10 cargo build --release -q --locked -p horizon-server --bin horizon-server && nice -n 10 cargo build --release -q --locked -p horizon-bots --bin horizon-bots" 2>&1) \
     || fail HOT-E0105 "Horizon $HORIZON_REV cannot be built from source" \
-      "cargo build writes horizon-client and horizon-server in $HZ_SRC/target/release" \
+      "cargo build writes horizon-client, horizon-server and horizon-bots in $HZ_SRC/target/release" \
       "see chain: no network to GitHub or crates.io, a wrong --horizon-rev, or too little memory for the compiler" \
       "Check the network and free memory (free -h), then rerun the installer; --horizon-rev must be a full commit hash" \
       "the Horizon release already in use (if any) stays" "rev=$HORIZON_REV"
@@ -289,11 +293,15 @@ horizon() {
   mkdir -p "$release/.local"
   install -m 0755 "$HZ_SRC/target/release/horizon-client" "$release/horizon-engine"
   install -m 0755 "$HZ_SRC/target/release/horizon-server" "$release/horizon-server"
+  install -m 0755 "$HZ_SRC/target/release/horizon-bots" "$release/horizon-bots"
   ln -sfn "$HZ/game-files/horizon-client" "$release/.local/horizon-client"
   chown -R horizon:horizon "$release"
   ln -sfn "$release" "$HZ/current"
   printf '#!/bin/sh\nexec "%s/current/horizon-server" "$@"\n' "$HZ" > "$BIN/horizon-server"
   chmod 0755 "$BIN/horizon-server"
+  # PL: Boty testują nowe Nightly na kopii świata (D18). EN: Bots try a new Nightly on a world copy (D18).
+  printf '#!/bin/sh\nexec "%s/current/horizon-bots" "$@"\n' "$HZ" > "$BIN/horizon-bots"
+  chmod 0755 "$BIN/horizon-bots"
   say "Zbudowany w $release."
 }
 
@@ -788,7 +796,41 @@ engine() {
     "Read journalctl -u horizon-hot-server -n 200; to go back: config set engine.path= (empty) and systemctl restart horizon-hot-server" \
     "the server may be down; hotd is not started" "out=$out"
   systemctl enable -q --now horizon-hot-hotd
+  horizon_updates "$bundle"
   say "Silnik z hot-host: $out."
+}
+
+# PL: Usługa aktualizacji Horizona (D18, `hotd horizon`). Zgoda na budowę kodu natywnego bez
+#     człowieka tylko z --trust-native-code i --auto-update-horizon; bez niej nowe Nightly czeka
+#     w `hot status` na zgodę. Działa w horizon-bg.slice: budowa i drugi silnik testu nie zabierają
+#     pamięci grze (MemoryLow w horizon-game.slice).
+# EN: The Horizon update service (D18, `hotd horizon`). Consent to build native code with nobody
+#     watching only with --trust-native-code and --auto-update-horizon; otherwise a new Nightly
+#     waits in `hot status` for consent. Runs in horizon-bg.slice: the build and the trial's second
+#     engine do not take the game's memory (MemoryLow in horizon-game.slice).
+horizon_updates() {
+  local trust=
+  [ "$TRUST_NATIVE" = 1 ] && [ "$AUTO_HORIZON" = 1 ] && trust=" --trust-native-code"
+  write_if_changed /etc/systemd/system/horizon-hot-horizon.service "[Unit]
+Description=horizon-hot: Horizon Nightly updates (hotd horizon, D18)
+After=horizon-hot-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+Slice=horizon-bg.slice
+Nice=19
+IOSchedulingClass=idle
+User=horizon
+Group=horizon
+Environment=HOT_HOME=$SRV
+ExecStart=$BIN/hotd horizon --home $SRV --launcher $LAUNCHER --bundle $1 --engines $ENGINES --engine $BIN/horizon-server --bots $BIN/horizon-bots$trust
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target" && systemctl daemon-reload && systemctl enable -q horizon-hot-horizon \
+    && systemctl restart horizon-hot-horizon
+  systemctl enable -q --now horizon-hot-horizon
 }
 
 # --- PL: Krok 12: autotest. EN: Step 12: self test. -----------------------------------------
@@ -920,7 +962,7 @@ main() {
 #     prints the plan. Running it again breaks nothing.
 uninstall() {
   [ "$(id -u)" = 0 ] || { say "Uruchom przez sudo: … | sudo bash -s -- --uninstall" >&2; exit 2; }
-  local units="horizon-hot-hotd.service horizon-hot-proxy.service horizon-hot-pack.service horizon-hot-server.service horizon-hot-backup.timer horizon-hot-backup.service"
+  local units="horizon-hot-horizon.service horizon-hot-hotd.service horizon-hot-proxy.service horizon-hot-pack.service horizon-hot-server.service horizon-hot-backup.timer horizon-hot-backup.service"
   local slices="horizon-bg.slice horizon-game.slice horizon.slice"
   local game_port pack_port path u left=""
   pack_port=$(sed -n 's/.*serve-pack .*--port \([0-9]*\).*/\1/p' /etc/systemd/system/horizon-hot-pack.service 2>/dev/null || true)

@@ -26,6 +26,9 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
        hotd engine [--home DIR] [--engine horizon-server] [--reclaim-mb 256]
        hotd swap [--to FILE] [--home DIR]
        hotd build-engine --launcher FILE --bundle DIR --rev HASH --out DIR [--trust-native-code]
+       hotd horizon --home DIR --launcher FILE --bundle DIR --engines DIR [--engine horizon-server]
+                    [--bots horizon-bots] [--trial-bots 10] [--trial-seconds 300]
+                    [--horizon-repo URL] [--trust-native-code] [--once]
 
 --home is the engine's HOT_HOME (hot-state/ and logs/ live there; default $HOT_HOME).
 --engine-dir is the horizon-server --dir of the engine (default: --home); mod data packs go
@@ -39,7 +42,12 @@ swap asks it to swap to the engine file --to (default: the same engine) with the
 game; prints a JSON report, exit 1 when the players stayed on or went back to the old engine.
 build-engine builds the engine with hot-host for Horizon commit --rev into --out (the launcher's
 native-build; the bundle's pin chooses the commit, any installed release or Nightly gives the game
-files); prints the engine file. Native code runs only with --trust-native-code (the owner's word).";
+files); prints the engine file. Native code runs only with --trust-native-code (the owner's word).
+horizon is the Horizon update (D18): once an hour it checks the newest Nightly (libloading gate),
+builds it into --engines, tries it on a copy of the world with horizon-bots, swaps the engine within
+24 h (sooner when nobody plays), watches it for 10 minutes and goes back when it is worse. State:
+<home>/hot-state/horizon.json; logs: <home>/logs/hotd-horizon.jsonl. Without --trust-native-code it
+stops before the build and says so in hot status.";
 
 struct Args {
     command: String,
@@ -118,6 +126,9 @@ fn main() -> ExitCode {
     }
     if argv.peek().map(String::as_str) == Some("build-engine") {
         return build_engine(argv.skip(1));
+    }
+    if argv.peek().map(String::as_str) == Some("horizon") {
+        return horizon(argv.skip(1));
     }
     let args = match parse(argv) {
         Ok(a) => a,
@@ -256,6 +267,120 @@ fn build_engine(mut it: impl Iterator<Item = String>) -> ExitCode {
             eprintln!("hotd: {}", serde_json::Value::Object(e.fields()));
             ExitCode::FAILURE
         }
+    }
+}
+
+/// PL: `hotd horizon`: aktualizacja Horizona (`update.rs`), krok co 60 s, hamulec MSPT we własnym
+/// wątku jak w `hotd run` (budowa i git to praca w tle). EN: `hotd horizon`: the Horizon update
+/// (`update.rs`), a step every 60 s, the MSPT brake on its own thread as in `hotd run` (the build and
+/// git are background work).
+fn horizon(mut it: impl Iterator<Item = String>) -> ExitCode {
+    let mut home = std::env::var_os("HOT_HOME").map(PathBuf::from);
+    let (mut launcher, mut bundle, mut engines) = (None, None, None);
+    let mut server = PathBuf::from("horizon-server");
+    let mut bots = PathBuf::from("horizon-bots");
+    let mut repo = hotd::update_env::HORIZON_REPO.to_owned();
+    let (mut trust, mut once) = (false, false);
+    let (mut bot_count, mut trial_seconds) = (10_u32, 300_u64);
+    while let Some(flag) = it.next() {
+        let value = match flag.as_str() {
+            "--trust-native-code" => {
+                trust = true;
+                continue;
+            }
+            "--once" => {
+                once = true;
+                continue;
+            }
+            _ => it.next(),
+        };
+        let Some(value) = value else {
+            eprintln!("hotd: {flag} needs a value\n\n{USAGE}");
+            return ExitCode::from(2);
+        };
+        match flag.as_str() {
+            "--home" => home = Some(value.into()),
+            "--launcher" => launcher = Some(PathBuf::from(value)),
+            "--bundle" => bundle = Some(PathBuf::from(value)),
+            "--engines" => engines = Some(PathBuf::from(value)),
+            "--engine" => server = value.into(),
+            "--bots" => bots = value.into(),
+            "--horizon-repo" => repo = value,
+            "--trial-bots" | "--trial-seconds" => {
+                let parsed = value.parse::<u32>();
+                let Ok(n) = parsed else {
+                    eprintln!("hotd: {flag}: not a number\n\n{USAGE}");
+                    return ExitCode::from(2);
+                };
+                if flag == "--trial-bots" {
+                    bot_count = n;
+                } else {
+                    trial_seconds = u64::from(n);
+                }
+            }
+            other => {
+                eprintln!("hotd: unknown option {other}\n\n{USAGE}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let (Some(home), Some(launcher), Some(bundle), Some(engines)) =
+        (home, launcher, bundle, engines)
+    else {
+        eprintln!("hotd: horizon needs --home, --launcher, --bundle and --engines\n\n{USAGE}");
+        return ExitCode::from(2);
+    };
+    let abs = |p: PathBuf| std::path::absolute(&p).unwrap_or(p);
+    let home = abs(home);
+    let log = match hot_diag::Logger::open(
+        hot_diag::LogConfig::new("hotd-horizon", hotd::VERSION, home.join("logs")),
+        hot_diag::Redactor::new(),
+    ) {
+        Ok(l) => std::sync::Arc::new(l),
+        Err(e) => {
+            eprintln!("hotd: {}", serde_json::Value::Object(e.fields()));
+            return ExitCode::FAILURE;
+        }
+    };
+    hot_diag::install_panic_hook(std::sync::Arc::clone(&log));
+    let cfg = hotd::update::Config {
+        trust,
+        ..hotd::update::Config::default()
+    };
+    let mut env = hotd::update_env::Real {
+        home: home.clone(),
+        server: server.clone(),
+        launcher: abs(launcher),
+        bundle: abs(bundle),
+        engines: abs(engines),
+        repo,
+        trust,
+        bots,
+        bot_count,
+        trial_seconds,
+        log: std::sync::Arc::clone(&log),
+    };
+    if !once {
+        let probe = HorizonServer {
+            program: server,
+            dir: home.clone(),
+        };
+        let brake_log = std::sync::Arc::clone(&log);
+        std::thread::spawn(move || hotd::brake::run(|| probe.status_json(), &brake_log));
+    }
+    let mut update = hotd::update::Update::load(&home);
+    loop {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        update.step(&mut env, &cfg, now);
+        if let Err(e) = update.save(&home) {
+            log.error(&e);
+        }
+        if once {
+            return ExitCode::SUCCESS;
+        }
+        std::thread::sleep(Duration::from_secs(60));
     }
 }
 

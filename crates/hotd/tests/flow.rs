@@ -586,13 +586,33 @@ fn a_commit_waits_for_an_engine_swap() {
         .contains("podmiana silnika"));
 
     drop(swap);
+    assert!(lock_comes_back(&w.home));
     d.step();
     assert!(fake.take_commands()[0].starts_with("hot load "));
     assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
-    assert!(matches!(
-        hotd::swap::try_swap_lock(&w.home),
-        hotd::swap::SwapLock::Held(_)
-    ));
+    assert!(
+        lock_comes_back(&w.home),
+        "hotd releases the swap lock after the commit"
+    );
+}
+
+/// PL: Inne testy w tym procesie uruchamiają programy. Dziecko na chwilę dostaje kopię
+/// deskryptorów (fork, na macOS także wewnątrz posix_spawn) i trzyma flock aż do `exec`, który
+/// zamyka pliki CLOEXEC. Zwolniona blokada wraca więc po kilku–kilkudziesięciu ms, nie od razu.
+/// EN: Other tests in this process start programs. A child briefly gets a copy of the descriptors
+/// (fork, on macOS also inside posix_spawn) and keeps the flock until `exec` closes CLOEXEC files.
+/// So a released lock comes back after a few to a few dozen ms, not at once.
+fn lock_comes_back(home: &Path) -> bool {
+    (0..100).any(|_| {
+        let held = matches!(
+            hotd::swap::try_swap_lock(home),
+            hotd::swap::SwapLock::Held(_)
+        );
+        if !held {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        held
+    })
 }
 
 const DATA_V1: (&str, &str) = (

@@ -49,6 +49,22 @@ pub const WORLD_DAMAGED: Code = Code::new("HOT-E0212");
 /// `hot-host` cannot be built (`native-build`, D15).
 pub const ENGINE_BUILD_FAILED: Code = Code::new("HOT-E0301");
 
+/// PL: Nowa rewizja Horizona odrzucona przed budową (brak `libloading`, D18).
+/// EN: A new Horizon revision refused before the build (no `libloading`, D18).
+pub const HORIZON_REFUSED: Code = Code::new("HOT-E0701");
+
+/// PL: Nowy silnik nie przeszedł testu na kopii świata (D18). EN: The new engine failed the trial
+/// on a copy of the world (D18).
+pub const HORIZON_TRIAL_FAILED: Code = Code::new("HOT-E0702");
+
+/// PL: Po podmianie na nowy Horizon było gorzej; powrót na stary (D18).
+/// EN: Worse after the swap to the new Horizon; back to the old one (D18).
+pub const HORIZON_ROLLED_BACK: Code = Code::new("HOT-E0703");
+
+/// PL: Nie da się sprawdzić nowej rewizji Horizona (`git ls-remote`, `Cargo.lock`).
+/// EN: The new Horizon revision cannot be checked (`git ls-remote`, `Cargo.lock`).
+pub const HORIZON_CHECK_FAILED: Code = Code::new("HOT-E0704");
+
 /// PL: Nowy silnik nie przygotował się do podmiany; gracze zostali na starym (D11).
 /// EN: The new engine did not get ready for the swap; the players stayed on the old one (D11).
 pub const SWAP_NOT_STARTED: Code = Code::new("HOT-E0606");

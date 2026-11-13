@@ -467,6 +467,18 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 ### M9 — Aktualizacja Horizona (D18)
 - [ ] M9.1 Wykrycie Nightly, przygotowanie wersji, build w tle, test na kopii świata, podmiana, obserwacja, powrót.
 - Sprawdzenie: przejście ze starszego Nightly na nowsze na działającym serwerze z graczami; Nightly z celowo usuniętym `libloading` (lokalna kopia) → serwer zostaje, `hot status` mówi dlaczego.
+  - Zrobione (2026-11-13): `hotd horizon` (`crates/hotd/src/update.rs` z logiką za cechą `Env`, `update_env.rs` z prawdziwym światem, `trial.rs` z testem na kopii świata), usługa `horizon-hot-horizon` w instalatorze, proces `horizon` w kontenerze, `horizon-bots` w instalatorze i obrazie, kody `HOT-E0701`–`HOT-E0704`, opis w `docs/aktualizacje.md`, osobna zgoda na samodzielne budowanie (ADR 0013). Testy: `crates/hotd/tests/update.rs` (11), `trial.rs` (werdykt), `update_env.rs` (tagi, stan silnika), strażnik zgody w `crates/hot-proxy/tests/installer.rs` (mutacja go czerwieni).
+  - Na Macu, FAKT. Stanowisko: lokalne repo z dwoma tagami `nightly-source/…`, atrapa launchera (budowa = kopia działającego silnika z `hot-host`), prawdziwy `horizon-server`, `horizon-bots`, `hotd engine`. Wyniki:
+    - rewizja bez `libloading` → `HOT-E0701`, nic się nie buduje, `hot status` podaje powód;
+    - bez `--trust-native-code` launcher nie startuje, a `hot status` mówi, że czeka na zgodę;
+    - test na kopii świata z 5 botami: stary silnik p95 11,0 ms, nowy 10,1 ms, po 10 próbek, 5 z 5 botów weszło, 1 mod, zero błędów → faza `waiting` i ogłoszenie;
+    - nowy silnik spowolniony z zewnątrz (`SIGSTOP`/`SIGCONT` w pętli) → `HOT-E0702`, rewizja odrzucona;
+    - zepsuty sam test → `HOT-E0704`, rewizja nie jest odrzucana, a gotowy silnik jest użyty ponownie przy następnej próbie;
+    - podmiana przez `hotd engine`: strona `b` z silnikiem `update-08b23f8846d4`, faza `observing`;
+    - `kill -9` nowego silnika w czasie obserwacji → `HOT-E0703` i powrót na stronę `a` ze starym silnikiem, który działa dalej.
+  - `--trust-native-code` padło w tych próbach tylko z atrapą launchera (skrypt sh). Prawdziwej budowy nowego Nightly agent nie uruchamiał: to zgoda właściciela.
+  - Nie sprawdzone: prawdziwa budowa nowego Nightly i przejście na nie na serwerze z graczami (zgoda właściciela, ThinkCentre, brak maszyny); klient na starszym Nightly z serwerem na nowszym (`content_identity`, D18); czy nowe Nightly wymaga też nowego `horizon-server` (dziś zostaje ten z instalacji).
+  - Luki do wiedzy właściciela: pusty serwer jest w pauzie, więc bez graczy obserwacja łapie tylko awarię, nie spowolnienie; pamięć na drugi silnik w teście chroni tylko `horizon-bg.slice` (D16), bez osobnego sprawdzenia wolnej pamięci.
 
 ### M10 — Aktualizacja naszego systemu (D19)
 - [ ] M10.1 Wydania `horizon-hot`, sprawdzanie raz na dobę, aktualizacja `hot-core`, `hotd`, `hot-pack`; `hot-proxy` przy braku graczy.
@@ -584,6 +596,8 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 **2026-11-13 — M6.3 zrobione (maszyna wirtualna):** `server-install.sh --uninstall [--yes]` usuwa horizon-hot i Horizona, a zostawia świat, kopie, logi i użytkownika `horizon`; przedtem pakuje stan modów do `backups/`. Szczegóły w M6.3. Dalej: M0.19.
 
 **2026-11-13 — M0.20 zrobione na Macu: pula 4096/8192.** Z rozgrzanym silnikiem pula prawie nie zmienia pauzy: 480–549 ms na tym samym silniku, 505–573 ms na nowym pliku silnika z pustym cache; rośnie rozgrzanie (do 4,4 s, przed zamrożeniem) i pamięć czekającego silnika (ok. 515 MB). `hotd::slots` ma 4096/8192, bez slotów z tickiem (`docs/sloty.md`). Mixin `wait_for_world` kończy czekanie po SIGTERM, bo samo `stop` czekało 120 s; `hotd` przerywa podmianę przez `stop` + SIGTERM. Nie sprawdzone: ThinkCentre (M0.11). Dalej: M8.
+
+**2026-11-13 — M9.1: serwer sam przechodzi na nowe Nightly (bez prawdziwej budowy).** `hotd horizon` wykrywa nowe Nightly, odrzuca je bez `libloading`, po zgodzie właściciela buduje silnik, testuje go na kopii świata z botami, podmienia w oknie klientów i wraca na stary silnik, gdy nowy padnie albo zwolni. Na Macu z atrapą launchera sprawdzone wszystkie gałęzie: przejście, spowolniony silnik (`HOT-E0702`), zepsuty test (`HOT-E0704`, ponowienie), awaria po podmianie (`HOT-E0703`, powrót). Samodzielne budowanie wymaga osobnej zgody (ADR 0013). Przy okazji: niestabilny test `swap.lock` (deskryptor dziedziczony przez dziecko innego wątku do `exec`). M9.1 nie jest odhaczone: prawdziwa budowa i przejście z graczami czekają na właściciela. Dalej: M10.1.
 
 **2026-11-13 — M8.5: pamięć starych generacji wraca przez podmianę.** `hot-core` podaje, ile bajtów zajmują nieużywane generacje modów w procesie silnika, a `hotd engine` po przekroczeniu progu sam podmienia silnik na ten sam plik. Na Macu po 200 przeładowaniach RSS wrócił do poziomu startowego (574 → 505 MB) bez restartu i bez rozłączenia graczy. Dalej: M9.1.
 

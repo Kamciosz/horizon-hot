@@ -35,6 +35,7 @@ ADDRESS=${HOT_ADDRESS:-}
 EULA=${HOT_EULA:-}
 OP=${HOT_OP:-}
 TRUST_NATIVE=${HOT_TRUST_NATIVE_CODE:-0}
+AUTO_HORIZON=${HOT_AUTO_UPDATE_HORIZON:-0}
 LAUNCHER=${HOT_LAUNCHER:-}
 PORT=25565
 ENGINE_PORT=25566
@@ -286,6 +287,7 @@ shutdown() {
   STOPPING=1
   say "Zatrzymuję."
   stop_one hotd 20
+  stop_one horizon 20
   stop_one engine 100
   stop_one proxy 10
   stop_one pack 10
@@ -306,6 +308,16 @@ supervise() {
   if engine_has_hot_host; then
     CMD[hotd]="$HOTBIN/hotd run --home $SRV --repo $REPO --engine $HZBIN/horizon-server --engine-dir $SRV"
     names+=(hotd)
+  fi
+  # PL: Aktualizacja Horizona (D18). Budowa bez człowieka tylko z HOT_TRUST_NATIVE_CODE=1
+  #     i HOT_AUTO_UPDATE_HORIZON=1; bez tego nowe Nightly czeka w `hot status` na zgodę.
+  # EN: The Horizon update (D18). Building with nobody watching only with
+  #     HOT_TRUST_NATIVE_CODE=1 and HOT_AUTO_UPDATE_HORIZON=1; otherwise a new Nightly waits.
+  if engine_has_hot_host && [ -n "$LAUNCHER" ] && [ -x "$LAUNCHER" ]; then
+    local trust=""
+    [ "$TRUST_NATIVE" = 1 ] && [ "$AUTO_HORIZON" = 1 ] && trust=" --trust-native-code"
+    CMD[horizon]="$HOTBIN/hotd horizon --home $SRV --launcher $LAUNCHER --bundle $HOT/hot-host-bundle --engines $ENGINES --engine $HZBIN/horizon-server --bots $HZBIN/horizon-bots$trust"
+    names+=(horizon)
   fi
   trap shutdown TERM INT
   local name done_pid

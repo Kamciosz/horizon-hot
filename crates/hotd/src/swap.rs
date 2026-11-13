@@ -245,7 +245,7 @@ impl Layout {
 
 /// PL: Wartość klucza z sekcji `server.toml` (bez cudzysłowów i komentarza).
 /// EN: A key's value from a `server.toml` section (no quotes, no comment).
-fn toml_value(text: &str, section: &str, key: &str) -> Option<String> {
+pub(crate) fn toml_value(text: &str, section: &str, key: &str) -> Option<String> {
     let mut inside = false;
     for line in text.lines().map(str::trim) {
         if line.starts_with('[') {

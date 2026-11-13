@@ -40,6 +40,9 @@ services:
       #     on, after reading crates/hot-host. Without it the server runs, but without hot mods.
       # HOT_TRUST_NATIVE_CODE: "1"
       # HOT_LAUNCHER: /srv/horizon/launcher/horizon-launcher
+      # PL: Razem z HOT_TRUST_NATIVE_CODE: nowe Nightly Horizona budują się i wchodzą same (D18).
+      # EN: With HOT_TRUST_NATIVE_CODE: new Horizon Nightlies are built and go in by themselves (D18).
+      # HOT_AUTO_UPDATE_HORIZON: "1"
     volumes:
       - horizon-hot:/srv/horizon
       # PL: Folder 26.3 przygotowany z gry właściciela (launcher Horizon, „prepare”). Tylko do odczytu.

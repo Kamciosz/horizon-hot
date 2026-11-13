@@ -70,6 +70,9 @@
 - `hotd engine --reclaim-mb N` (M8.5, D4): po przekroczeniu progu bajtów nieużywanych generacji modów (domyślnie 256 MiB) usługa silnika sama podmienia silnik na ten sam plik i oddaje ich pamięć. `hot-core` podaje te liczby w polu `libraries` w `status.json` i w `hot-state/libraries.json`.
 - `hotd build-engine` (ADR 0012): buduje silnik z `hot-host` dla podanej rewizji Horizona przez przypięcie w kopii paczki. Bazą jest dowolne zainstalowane wydanie albo Nightly. Kod błędu `HOT-E0301`.
 
+- `hotd horizon` (M9.1, D18): serwer sam sprawdza co godzinę najnowsze Nightly (`nightly-source/…`), odrzuca rewizję bez `libloading`, buduje silnik po zgodzie właściciela, testuje go na kopii świata z botami, podmienia w oknie klientów i wraca na stary silnik, gdy nowy padnie albo zwolni (`crates/hotd/src/update.rs`, `update_env.rs`, `trial.rs`, `docs/aktualizacje.md`). Kody `HOT-E0701`–`HOT-E0704` i `docs/bledy/HOT-E0701.md`–`HOT-E0704.md`.
+- Instalator: opcja `--auto-update-horizon` (razem z `--trust-native-code`) i usługa `horizon-hot-horizon`; kontener: `HOT_AUTO_UPDATE_HORIZON=1`. Instalator i obraz budują też `horizon-bots` do testu na kopii świata.
+
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
 - Mixin `wait_for_world` przestaje czekać po pierwszym SIGTERM, więc przerwaną podmianę kończy `stop` i SIGTERM do silnika w 0,5 s zamiast 120 s.
@@ -103,6 +106,8 @@
 - Instalator i kontener uruchamiają silnik przez `hotd engine` zamiast `horizon-server run` (usługa `horizon-hot-server` z `KillMode=mixed`); instalator sprawdza też port drugiej strony silnika (port silnika + 1).
 - `hot-core`: gdy świat trzyma inny silnik (rozgrzany silnik przy podmianie), stan z `hot-state` czyta dopiero przy pierwszym zdarzeniu po zajęciu świata, a zatrzymany przed nim niczego nie zapisuje. Wcześniej nowy silnik brał podmianę za awarię: wczytywał ostatnią sprawdzoną generację modów, a po dwóch podmianach włączyłby tryb bezpieczny.
 - Instalator i obraz budują silnik przez `hotd build-engine` zamiast `horizon-launcher install <tag>`: wydanie `nightly-2026-11-05-66f3981` zniknęło z GitHuba, więc czysta instalacja padłaby na kroku 13. Folder silnika nazywa się od rewizji Horizona, a paczka `hot-host` zostaje w `/srv/horizon/hot-host-bundle`.
+- `hot status` pokazuje stan aktualizacji Horizona (faza, powód, kod błędu) z `hot-state/horizon.json`.
+- Test `a_commit_waits_for_an_engine_swap` czeka do 2 s na zwolnienie `swap.lock`. Przy równoległych testach dziecko innego wątku trzyma kopię deskryptora aż do `exec`, więc zwolniona blokada wracała po kilkunastu ms, a test padał w mniej więcej co drugim przebiegu.
 
 ### Uwagi
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.

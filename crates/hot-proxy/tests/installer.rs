@@ -140,3 +140,29 @@ fn the_engine_service_runs_hotd_engine_for_swaps() {
     assert!(INSTALLER.contains("\"$ENGINE_PORT_B:horizon-hot-server\""));
     assert!(INSTALLER.contains("sport = :$ENGINE_PORT_B"));
 }
+
+/// PL: Samodzielne budowanie nowych Nightly wymaga drugiej, osobnej zgody (ADR 0013).
+/// EN: Building new Nightlies on its own needs a second, separate consent (ADR 0013).
+#[test]
+fn new_horizon_versions_build_on_their_own_only_with_both_consents() {
+    let both =
+        "[ \"$TRUST_NATIVE\" = 1 ] && [ \"$AUTO_HORIZON\" = 1 ] && trust=\" --trust-native-code\"";
+    assert!(INSTALLER.contains(both));
+    assert!(CONTAINER.contains(both));
+    assert!(INSTALLER.contains("AUTO_HORIZON=0\n"));
+    assert!(CONTAINER.contains("AUTO_HORIZON=${HOT_AUTO_UPDATE_HORIZON:-0}"));
+    let unit = &INSTALLER[position(INSTALLER, "horizon-hot-horizon.service")..];
+    let exec = &unit[position(unit, "ExecStart=")..];
+    let exec = &exec[..position(exec, "\n")];
+    assert!(exec.ends_with("$trust"), "{exec}");
+    assert!(!exec.contains("--trust-native-code"), "{exec}");
+    let enabled = COMPOSE
+        .lines()
+        .filter(|l| l.contains("HOT_AUTO_UPDATE_HORIZON"))
+        .all(|l| l.trim_start().starts_with('#'));
+    assert!(
+        enabled,
+        "compose.yaml must keep HOT_AUTO_UPDATE_HORIZON commented out"
+    );
+    assert!(!DOCKERFILE.contains("HOT_AUTO_UPDATE_HORIZON"));
+}

@@ -120,11 +120,40 @@ Ryzyko i szansa, HIPOTEZA: Horizon może dojść do przeładowania modów na ser
 3. Okno zgodności klientów (D18): protokół stały, kanały się dopisuje. Niewiadomą pozostaje `content_identity` między Nightly (punkt 2).
 4. R23: między `v0.2.97` a `nightly-2026-11-01` było 6255 commitów.
 
+## Jak serwer sam przechodzi na nowe Nightly (`hotd horizon`, M9.1)
+
+Usługa `horizon-hot-horizon` (instalator) albo proces `horizon` w kontenerze uruchamia:
+
+```bash
+hotd horizon --home /srv/horizon --launcher horizon-launcher --bundle /srv/horizon/hot-host-bundle \
+  --engines /srv/horizon/engines --engine horizon-server --bots horizon-bots [--trust-native-code]
+```
+
+Kroki co godzinę (`crates/hotd/src/update.rs`, stan w `hot-state/horizon.json`, `hot status` pokazuje go w dwóch wierszach):
+
+1. **Wykrycie:** `git ls-remote --tags` na repo Horizona, najnowszy tag `nightly-source/<data>-<skrót>`. Tagi źródeł nie znikają, w przeciwieństwie do datowanych wydań (R29).
+2. **Bramka `libloading`:** `Cargo.lock` tej rewizji z częściowego klonu (`hot-state/horizon.git`, bez treści plików poza jednym). Brak → `HOT-E0701`, rewizja na liście odrzuconych, serwer zostaje.
+3. **Miejsce:** co najmniej 8 GiB wolne w folderze silników, inaczej czeka.
+4. **Zgoda:** bez `--trust-native-code` nic się nie buduje; `hot status` pisze, na co czeka. Instalator dodaje flagę tylko przy `--trust-native-code --auto-update-horizon`, a kontener tylko przy `HOT_TRUST_NATIVE_CODE=1` i `HOT_AUTO_UPDATE_HORIZON=1`. Zgoda na budowę silnika przy instalacji nie oznacza zgody na samodzielne budowanie nowych wersji.
+5. **Budowa:** `hotd build-engine` (ADR 0012) do `engines/update-<12 znaków rewizji>`. Silnik już zbudowany dla tej rewizji jest używany ponownie.
+6. **Test na kopii świata** (`crates/hotd/src/trial.rs`): najnowsza kopia z `backups/` (gdy jej brak, własna, kasowana po teście) rozpakowana w `hot-trial/` na porcie lokalnym, bez trybu online. Najpierw stary silnik, potem nowy, każdy z `horizon-bots` (domyślnie 10 botów, 300 s, `nice`). Nowy silnik odpada (`HOT-E0702`, rewizja odrzucona), gdy: weszło mniej botów, liczba wczytanych modów jest inna, `hot-core` zgłosił błąd albo p95 MSPT jest gorsze o więcej niż 20 % i 5 ms. Gdy test nie odbył się z naszej winy (brak kopii, stary silnik nie wstał), daje `HOT-E0704`: rewizja nie jest odrzucana, krok wraca za godzinę.
+7. **Okno klientów:** podmiana, gdy nikt nie gra, najpóźniej po 24 h. Czat dostaje ogłoszenie od razu i 10 minut przed terminem.
+8. **Podmiana** przez `hotd engine` (D11), z zamrożeniem jak przy podmianie z M8.3.
+9. **Obserwacja** przez 10 minut: silnik padł albo zmienił pid → `HOT-E0703` i powrót na stary silnik tą samą podmianą; p95 gorsze niż przed podmianą o 20 % i 5 ms → także powrót. Gdy wszystko w porządku, `hotd` usuwa foldery `update-*` poza nowym i poprzednim silnikiem.
+
+Ograniczenia, o których trzeba wiedzieć:
+
+- Pusty serwer Horizona jest w pauzie i nie liczy ticków, więc bez graczy p95 przed i po podmianie może nie mieć próbek. Wtedy obserwacja łapie tylko awarię silnika, nie spowolnienie.
+- Pamięć na drugi silnik w teście chroni tylko `horizon-bg.slice` (D16). Osobnego sprawdzenia wolnej pamięci przed testem nie ma.
+- Binaria `horizon-server` i `horizon-bots` zostają w wersji z instalacji. Czy nowe Nightly wymaga też nowego `horizon-server`, nie wiadomo.
+
 ## Czego nie sprawdzono
 
 - Kompilacji `hot-host` ani próby S3/S4 z `fdc87ae`. Porównanie dotyczy katalogu i sygnatur, nie całego builda.
 - `content_identity` w praktyce między dwoma Nightly.
 - Przełączania modów z #10217 na serwerze dedykowanym.
+- `hotd horizon` na prawdziwej budowie nowego Nightly: wymaga `--trust-native-code`, więc agent jej nie uruchamia. Na Macu sprawdzone z atrapą launchera (silnik `update-*` to kopia działającego silnika).
+- Klienta na starszym Nightly z serwerem na nowszym (`content_identity`, D18).
 
 ## Powtórzenie
 
