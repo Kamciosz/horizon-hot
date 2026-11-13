@@ -28,9 +28,9 @@ use horizon_protocol::{
 use hot_diag::{DiagError, Logger};
 use serde_json::json;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// PL: Tyle czeka proxy na gracza albo silnik w czasie logowania.
 /// EN: How long the proxy waits for the player or the engine during login.
@@ -126,8 +126,12 @@ impl Proxy {
                 let who = json!({ "player": profile.name, "uuid": uuid_string(profile.uuid) });
                 self.log
                     .info("A player joined through the proxy", who.clone());
-                relay(client, engine);
-                self.log.info("A player left the proxy", who);
+                let started = Instant::now();
+                let why = relay(client, engine);
+                let mut left = who;
+                left["reason"] = why.into();
+                left["seconds"] = started.elapsed().as_secs().into();
+                self.log.info("A player left the proxy", left);
             }
             Ok(None) => {}
             Err(Failure::Diag(e)) => self.log.error(&e),
@@ -435,24 +439,48 @@ impl Proxy {
 
 /// PL: Przesyła pakiety w obie strony, aż jedna strona się rozłączy; wtedy zamyka obie.
 /// EN: Relays packets both ways until one side disconnects, then closes both.
-fn relay(client: Connection, engine: Connection) {
+fn relay(client: Connection, engine: Connection) -> String {
     let (client_r, client_w) = client.split();
     let (engine_r, engine_w) = engine.split();
-    let to_client = thread::spawn(move || pump(engine_r, client_w));
-    pump(client_r, engine_w);
+    // PL: Limit z logowania nie dotyczy gry: gracz może długo nic nie wysyłać (pauza, pobieranie
+    // paczki zasobów). EN: The login limit does not apply in game: a player may send nothing for a
+    // long time (pause menu, resource pack download).
+    let _ = client_r.set_read_timeout(None);
+    let _ = engine_r.set_read_timeout(None);
+    let first = Arc::new(OnceLock::new());
+    let first_to_client = Arc::clone(&first);
+    let to_client = thread::spawn(move || {
+        pump(
+            engine_r,
+            client_w,
+            ["the engine", "the player"],
+            &first_to_client,
+        );
+    });
+    pump(client_r, engine_w, ["the player", "the engine"], &first);
     let _ = to_client.join();
+    first.get().cloned().unwrap_or_default()
 }
 
-fn pump(mut from: ConnReader, mut to: ConnWriter) {
+/// PL: Przesyła pakiety z `from` do `to`. Pierwszy kończący zapisuje w `first`, która strona
+/// zerwała połączenie i dlaczego; potem zamyka obie, więc druga pętla też się kończy.
+/// EN: Relays packets from `from` to `to`. The first to end writes into `first` which side broke
+/// off and why, then closes both, so the other loop ends too.
+fn pump(mut from: ConnReader, mut to: ConnWriter, sides: [&str; 2], first: &OnceLock<String>) {
     let mut packet = Vec::new();
-    while let Ok((id, payload)) = from.recv() {
+    let why = loop {
+        let (id, payload) = match from.recv() {
+            Ok(p) => p,
+            Err(e) => break format!("{} connection ended: {e}", sides[0]),
+        };
         packet.clear();
         write_varint(&mut packet, id);
         packet.extend_from_slice(&payload);
-        if to.send(&packet).is_err() {
-            break;
+        if let Err(e) = to.send(&packet) {
+            break format!("{} connection ended: {e}", sides[1]);
         }
-    }
+    };
+    let _ = first.set(why);
     to.shutdown();
     if let Ok(closer) = from.closer() {
         closer.close();

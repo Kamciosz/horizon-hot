@@ -297,11 +297,11 @@ fn finish(c: &mut Connection) -> Result<login::GameProfile, String> {
     }
 }
 
-fn log_text(dir: &Path) -> String {
+fn log_text(dir: &Path, needle: &str) -> String {
     let mut text = String::new();
     for _ in 0..50 {
         text = std::fs::read_to_string(dir.join("hot-proxy.jsonl")).unwrap_or_default();
-        if text.contains("HOT-E06") {
+        if text.contains(needle) {
             break;
         }
         thread::sleep(std::time::Duration::from_millis(20));
@@ -330,6 +330,15 @@ fn an_online_player_reaches_the_engine_with_a_signed_profile() {
     assert_eq!(got.properties.len(), 1);
     assert_eq!(got.properties[0].signature.as_deref(), Some("sig"));
     assert_eq!(got.from_client, (4, b"from the client".to_vec()));
+    // PL: Atrapa silnika kończy połączenie; log mówi, która strona i po ilu sekundach.
+    // EN: The stand-in engine ends the connection; the log names the side and the seconds.
+    let text = log_text(&logs, "left the proxy");
+    let left = text
+        .lines()
+        .find(|l| l.contains("left the proxy"))
+        .unwrap_or_default();
+    assert!(left.contains("the engine connection ended"), "{left}");
+    assert!(left.contains("\"seconds\""), "{left}");
 }
 
 #[test]
@@ -341,7 +350,7 @@ fn a_player_the_session_service_does_not_know_is_refused() {
     let (mut c, _) = client(at, "Cracked");
     let reason = finish(&mut c).unwrap_err();
     assert!(reason.contains("multiplayer.disconnect.unverified_username"));
-    assert!(log_text(&logs).contains("HOT-E0601"));
+    assert!(log_text(&logs, "HOT-E0601").contains("HOT-E0601"));
 }
 
 #[test]
@@ -361,7 +370,7 @@ fn no_session_service_means_a_refusal_not_an_offline_login() {
     let (mut c, _) = client(at, "Tester");
     let reason = finish(&mut c).unwrap_err();
     assert!(reason.contains("multiplayer.disconnect.authservers_down"));
-    assert!(log_text(&logs).contains("HOT-E0602"));
+    assert!(log_text(&logs, "HOT-E0602").contains("HOT-E0602"));
 }
 
 #[test]
@@ -373,7 +382,7 @@ fn an_engine_without_a_forwarding_secret_is_refused() {
     let (mut c, _) = client(at, "Tester");
     let reason = finish(&mut c).unwrap_err();
     assert!(reason.contains("multiplayer.disconnect.server_shutdown"));
-    assert!(log_text(&logs).contains("HOT-E0603"));
+    assert!(log_text(&logs, "HOT-E0603").contains("HOT-E0603"));
 }
 
 #[test]
