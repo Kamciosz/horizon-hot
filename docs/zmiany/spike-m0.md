@@ -68,6 +68,7 @@
 - `hot-proxy`: linia `{"held":N}` w odpowiedzi na `switch` i komenda `engine ADRES`; adres silnika po restarcie z `hot-state/engine.json`.
 
 - `hotd engine --reclaim-mb N` (M8.5, D4): po przekroczeniu progu bajtów nieużywanych generacji modów (domyślnie 256 MiB) usługa silnika sama podmienia silnik na ten sam plik i oddaje ich pamięć. `hot-core` podaje te liczby w polu `libraries` w `status.json` i w `hot-state/libraries.json`.
+- `hotd build-engine` (ADR 0012): buduje silnik z `hot-host` dla podanej rewizji Horizona przez przypięcie w kopii paczki. Bazą jest dowolne zainstalowane wydanie albo Nightly. Kod błędu `HOT-E0301`.
 
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
@@ -101,6 +102,7 @@
 - Podmiana silnika i zastosowanie commita nie idą naraz (`hot-state/swap.lock`): commit czeka na koniec podmiany, podmiana do 90 s na potwierdzenie commita.
 - Instalator i kontener uruchamiają silnik przez `hotd engine` zamiast `horizon-server run` (usługa `horizon-hot-server` z `KillMode=mixed`); instalator sprawdza też port drugiej strony silnika (port silnika + 1).
 - `hot-core`: gdy świat trzyma inny silnik (rozgrzany silnik przy podmianie), stan z `hot-state` czyta dopiero przy pierwszym zdarzeniu po zajęciu świata, a zatrzymany przed nim niczego nie zapisuje. Wcześniej nowy silnik brał podmianę za awarię: wczytywał ostatnią sprawdzoną generację modów, a po dwóch podmianach włączyłby tryb bezpieczny.
+- Instalator i obraz budują silnik przez `hotd build-engine` zamiast `horizon-launcher install <tag>`: wydanie `nightly-2026-11-05-66f3981` zniknęło z GitHuba, więc czysta instalacja padłaby na kroku 13. Folder silnika nazywa się od rewizji Horizona, a paczka `hot-host` zostaje w `/srv/horizon/hot-host-bundle`.
 
 ### Uwagi
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.

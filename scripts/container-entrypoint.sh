@@ -243,17 +243,16 @@ hot_engine() {
       "the server runs without hot mods; hotd is not started" "launcher=${LAUNCHER:-none}"
     return 0
   fi
-  local out=$ENGINES/${HOT_SHA:0:12}-$HORIZON_VERSION bundle=$ROOT/tmp/hot-host-bundle
-  rm -rf "$bundle" && mkdir -p "$ROOT/tmp" && chown horizon:horizon "$ROOT/tmp"
+  # PL: Rewizję wybiera przypięcie w paczce, nie wydanie, które znika z GitHuba (ADR 0012).
+  # EN: The bundle's pin chooses the revision, not a release that vanishes from GitHub (ADR 0012).
+  local out=$ENGINES/${HOT_SHA:0:12}-${HORIZON_REV:0:12}
   say "Buduję silnik z hot-host (kilka minut)…"
-  OUTPUT=$(as_horizon cp -R "$HOT/hot-host-bundle" "$bundle" 2>&1 \
-    && as_horizon "$LAUNCHER" install "$HORIZON_VERSION" 2>&1 \
-    && as_horizon "$LAUNCHER" native-build "$bundle" --server-output "$out" --version "$HORIZON_VERSION" --trust-native-code 2>&1 \
+  OUTPUT=$(as_horizon "$HOTBIN/hotd" build-engine --launcher "$LAUNCHER" --bundle "$HOT/hot-host-bundle" \
+      --rev "$HORIZON_REV" --out "$out" --trust-native-code 2>&1 \
     && hz config set "engine.path=$out/horizon-engine" 2>&1) \
     || { rm -rf "$out"; warn_operator HOT-E0110 "horizon-launcher native-build cannot build the engine with hot-host" \
-      "native-build writes $out/horizon-engine" "see chain: often the launcher has no game files prepared for the horizon user" \
+      "native-build writes $out/horizon-engine" "see chain (HOT-E0301): often the launcher has no game files prepared for the horizon user" \
       "Read chain; fix it, then docker compose restart" "the server runs without hot mods; hotd is not started" "out=$out"; }
-  rm -rf "$bundle"
 }
 
 # --- PL: Pilnowanie procesów. EN: Watching the processes. ------------------------------------

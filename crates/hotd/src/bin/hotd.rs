@@ -25,6 +25,7 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
        hotd slots-source DIR   (then: cd DIR && cargo horizon-mod build)
        hotd engine [--home DIR] [--engine horizon-server] [--reclaim-mb 256]
        hotd swap [--to FILE] [--home DIR]
+       hotd build-engine --launcher FILE --bundle DIR --rev HASH --out DIR [--trust-native-code]
 
 --home is the engine's HOT_HOME (hot-state/ and logs/ live there; default $HOT_HOME).
 --engine-dir is the horizon-server --dir of the engine (default: --home); mod data packs go
@@ -35,7 +36,10 @@ horizon-server run) and swaps it on request (D11); logs go to <home>/logs/hotd-e
 It also swaps to the same engine by itself when old mod generations hold more than
 --reclaim-mb MiB of library files (D4; 0 turns it off).
 swap asks it to swap to the engine file --to (default: the same engine) with the players in
-game; prints a JSON report, exit 1 when the players stayed on or went back to the old engine.";
+game; prints a JSON report, exit 1 when the players stayed on or went back to the old engine.
+build-engine builds the engine with hot-host for Horizon commit --rev into --out (the launcher's
+native-build; the bundle's pin chooses the commit, any installed release or Nightly gives the game
+files); prints the engine file. Native code runs only with --trust-native-code (the owner's word).";
 
 struct Args {
     command: String,
@@ -111,6 +115,9 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         };
+    }
+    if argv.peek().map(String::as_str) == Some("build-engine") {
+        return build_engine(argv.skip(1));
     }
     let args = match parse(argv) {
         Ok(a) => a,
@@ -210,6 +217,45 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         std::thread::sleep(Duration::from_secs(args.interval.max(1)));
+    }
+}
+
+/// PL: `hotd build-engine` dla instalatora i obrazu (`build.rs`). EN: `hotd build-engine` for the
+/// installer and the image (`build.rs`).
+fn build_engine(mut it: impl Iterator<Item = String>) -> ExitCode {
+    let (mut launcher, mut bundle, mut rev, mut out, mut trust) = (None, None, None, None, false);
+    while let Some(flag) = it.next() {
+        let target = match flag.as_str() {
+            "--trust-native-code" => {
+                trust = true;
+                continue;
+            }
+            "--launcher" => &mut launcher,
+            "--bundle" => &mut bundle,
+            "--rev" => &mut rev,
+            "--out" => &mut out,
+            other => {
+                eprintln!("hotd: unknown option {other}\n\n{USAGE}");
+                return ExitCode::from(2);
+            }
+        };
+        *target = it.next();
+    }
+    let (Some(launcher), Some(bundle), Some(rev), Some(out)) = (launcher, bundle, rev, out) else {
+        eprintln!("hotd: build-engine needs --launcher, --bundle, --rev and --out\n\n{USAGE}");
+        return ExitCode::from(2);
+    };
+    let out = PathBuf::from(out);
+    let out = std::path::absolute(&out).unwrap_or(out);
+    match hotd::build::build_engine(launcher.as_ref(), bundle.as_ref(), &rev, &out, trust) {
+        Ok(engine) => {
+            println!("{}", engine.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("hotd: {}", serde_json::Value::Object(e.fields()));
+            ExitCode::FAILURE
+        }
     }
 }
 

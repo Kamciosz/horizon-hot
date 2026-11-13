@@ -99,6 +99,7 @@ FAKT z kodu `launcher/src/native_mods.rs` (`pinned_revision`, `mismatch`, `repin
 - Mod przypięty do innej rewizji niż build → błąd „Made for other Horizon versions”, chyba że podano `--allow-version-mismatch`.
 - `--ignore-pins` (od 11-05) buduje na commicie wersji bazowej: `--version <tag>` albo `--update` (najnowsza zainstalowana). Launcher sam przepisuje wtedy `horizon_revision` w kopii modu.
 - **Skutek dla D18:** `hot-host` ma `horizon_revision`, więc build aktualizacji musi mieć `--version <nowe Nightly> --ignore-pins`. Inaczej silnik zostaje na starej wersji, choć nowe Nightly jest zainstalowane.
+- **Zmiana 2026-11-13 (ADR 0012):** `--version` wymaga zainstalowanego wydania, a datowane wydania znikają po kilku dniach. Zamiast `--ignore-pins` przepinamy `horizon_revision` w kopii paczki na nową rewizję, a bazą jest dowolne zainstalowane wydanie albo Nightly. Przy jednym przypięciu launcher buduje przypiętą rewizję (`agreed` w `newest`).
 - Koszt builda według Horizona (`docs/design/mod-hotload.md`, szybki desktop pod obciążeniem): na zimno 812 s, bez zmian 55 s.
 
 ### 8. Horizon sam wprowadza mody bez restartu
@@ -115,7 +116,7 @@ Ryzyko i szansa, HIPOTEZA: Horizon może dojść do przeładowania modów na ser
 ## Wnioski dla planu
 
 1. Nazwane haki, których używa `hot-host`, przetrwały wszystkie Nightly od powstania API. Zasada z D18 („tylko nazwane haki”) się sprawdza. API jest jednak młode: numer wzrósł o 52 w dwa dni.
-2. D18: build aktualizacji z `--version <Nightly> --ignore-pins`. Wpisane w `PLAN.md`.
+2. D18: build aktualizacji z `--version <Nightly> --ignore-pins`. Wpisane w `PLAN.md`. Zastąpione przez ADR 0012: przypięcie w kopii paczki.
 3. Okno zgodności klientów (D18): protokół stały, kanały się dopisuje. Niewiadomą pozostaje `content_identity` między Nightly (punkt 2).
 4. R23: między `v0.2.97` a `nightly-2026-11-01` było 6255 commitów.
 

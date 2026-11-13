@@ -64,6 +64,7 @@ RUN sed "s|^\(          ref: \)main$|\1$HOT_SHA|" templates/server-repo/.github/
 # --- PL: Obraz do uruchomienia. EN: Runtime image. -------------------------------------------
 FROM ubuntu:24.04
 ARG HORIZON_VERSION
+ARG HORIZON_REV
 ARG HOT_SHA=main
 RUN apt-get update -q \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
@@ -77,7 +78,7 @@ COPY --from=build /out/lib/ /opt/horizon-hot/lib/
 COPY --from=build /out/hot_slots.hmod /out/hot.yml /opt/horizon-hot/
 COPY --from=build /out/hot-host-bundle/ /opt/horizon-hot/hot-host-bundle/
 COPY scripts/container-entrypoint.sh /opt/horizon-hot/entrypoint.sh
-ENV HORIZON_VERSION=$HORIZON_VERSION HOT_SHA=$HOT_SHA HORIZON_NO_AUDIO=1
+ENV HORIZON_VERSION=$HORIZON_VERSION HORIZON_REV=$HORIZON_REV HOT_SHA=$HOT_SHA HORIZON_NO_AUDIO=1
 VOLUME /srv/horizon
 EXPOSE 25565 8131
 # PL: Status przez proxy, jak lista serwerów w grze: zdrowy = gracz dojdzie do silnika.

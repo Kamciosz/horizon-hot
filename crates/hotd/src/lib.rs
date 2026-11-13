@@ -13,6 +13,7 @@
 //! `ssh-keygen`, `horizon-server` and the engine's `hot-state/` files.
 
 pub mod brake;
+pub mod build;
 pub mod classify;
 pub mod codes;
 pub mod daemon;

@@ -748,7 +748,7 @@ engine_has_hot_host() {
 engine() {
   step 13/13 "Silnik z hot-host"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
-  local out=$ENGINES/${HOT_SHA:0:12}-$HORIZON_VERSION
+  local out=$ENGINES/${HOT_SHA:0:12}-${HORIZON_REV:0:12}
   if grep -q "^path = \"$out/horizon-engine\"" "$SRV/server.toml" 2>/dev/null && [ -x "$out/horizon-engine" ]; then
     say "Już jest: $out."; return
   fi
@@ -763,18 +763,20 @@ engine() {
     "--launcher PATH or horizon-launcher in PATH" "native-build lives in the launcher, not in horizon-server" \
     "Install the Horizon launcher for Linux x86-64 (github.com/horizon-rust/horizon/releases?q=launcher), then rerun with --launcher PATH" \
     "the server runs without hot mods" "launcher=${LAUNCHER:-none}"
-  local bundle=$ROOT/tmp/hot-host-bundle
-  rm -rf "$bundle"
+  # PL: Paczka zostaje: z niej buduje też aktualizacja Horizona (M9). Rewizję wybiera przypięcie
+  #     w paczce, nie wydanie, które znika z GitHuba (ADR 0012).
+  # EN: The bundle stays: the Horizon update (M9) builds from it too. The bundle's pin chooses the
+  #     revision, not a release that vanishes from GitHub (ADR 0012).
+  local bundle=$ROOT/hot-host-bundle
   as_horizon sh "$SRC/crates/hot-host/build-bundle.sh" "$bundle" >/dev/null
   say "Buduję silnik (kilka minut)…"
-  OUTPUT=$(as_horizon "$LAUNCHER" install "$HORIZON_VERSION" 2>&1 \
-    && as_horizon "$LAUNCHER" native-build "$bundle" --server-output "$out" --version "$HORIZON_VERSION" --trust-native-code 2>&1) \
+  OUTPUT=$(as_horizon "$BIN/hotd" build-engine --launcher "$LAUNCHER" --bundle "$bundle" \
+      --rev "$HORIZON_REV" --out "$out" --trust-native-code 2>&1) \
     || { rm -rf "$out"; fail HOT-E0110 "horizon-launcher native-build cannot build the engine with hot-host" \
       "native-build writes $out/horizon-engine" \
-      "see chain: often the launcher's version is not prepared (no game files for the horizon user)" \
+      "see chain (HOT-E0301): often the launcher's version is not prepared (no game files for the horizon user)" \
       "Prepare once as the horizon user: sudo -u horizon -H $LAUNCHER account sign-in, then sudo -u horizon -H $LAUNCHER prepare --download; rerun with --trust-native-code" \
       "the server runs on its old engine without hot mods" "out=$out"; }
-  rm -rf "$bundle"
   OUTPUT=$(hz config set "engine.path=$out/horizon-engine" 2>&1 && systemctl restart horizon-hot-server 2>&1) \
     || fail HOT-E0110 "The server cannot switch to the new engine" "config set engine.path and restart succeed" \
       "see chain" "Run: sudo -u horizon $BIN/horizon-server --dir $SRV config set engine.path=$out/horizon-engine" \

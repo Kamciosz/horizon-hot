@@ -1,5 +1,6 @@
-//! PL: Kody błędów `hotd` (zakres `E02xx`, git i CI). Opisy: `docs/bledy/`.
-//! EN: `hotd` error codes (range `E02xx`, git and CI). Descriptions: `docs/bledy/`.
+//! PL: Kody błędów `hotd` (zakresy `E02xx` git i CI, `E03xx` budowa silnika, `E06xx` podmiana, `E07xx`
+//! aktualizacje). Opisy: `docs/bledy/`. EN: `hotd` error codes (git and CI, the engine build, the swap,
+//! updates). Descriptions: `docs/bledy/`.
 
 use hot_diag::Code;
 
@@ -43,6 +44,10 @@ pub const DISK_LOW: Code = Code::new("HOT-E0211");
 /// PL: Silnik nie wczytuje świata; `hotd` podaje polecenie przywrócenia, nic nie przywraca sam.
 /// EN: The engine cannot load the world; `hotd` gives the restore command and restores nothing.
 pub const WORLD_DAMAGED: Code = Code::new("HOT-E0212");
+
+/// PL: Silnika z `hot-host` nie da się zbudować (`native-build`, D15). EN: The engine with
+/// `hot-host` cannot be built (`native-build`, D15).
+pub const ENGINE_BUILD_FAILED: Code = Code::new("HOT-E0301");
 
 /// PL: Nowy silnik nie przygotował się do podmiany; gracze zostali na starym (D11).
 /// EN: The new engine did not get ready for the swap; the players stayed on the old one (D11).
