@@ -281,16 +281,25 @@ mod tests {
             let out = output(Command::new("sh").args(["-c", "echo gotowe"]));
             (out, start.elapsed())
         });
-        std::thread::sleep(Duration::from_millis(300));
-        let group = registry().groups.first().copied();
-        let state = group.and_then(|g| {
-            let out = Command::new("ps")
-                .args(["-o", "stat=", "-p", &g.to_string()])
-                .output()
-                .ok()?;
-            Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
-        });
-        std::thread::sleep(Duration::from_millis(1200));
+        // PL: Czekamy na grupę, a nie stały czas: wolny runner CI potrzebuje więcej niż 300 ms.
+        // EN: Wait for the group, not a fixed time: a slow CI runner needs more than 300 ms.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut state = None;
+        while Instant::now() < deadline {
+            let group = registry().groups.first().copied();
+            state = group.and_then(|g| {
+                let out = Command::new("ps")
+                    .args(["-o", "stat=", "-p", &g.to_string()])
+                    .output()
+                    .ok()?;
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+            });
+            if state.as_deref().is_some_and(|s| s.starts_with('T')) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(1500));
         assert_eq!(note().as_deref(), Some("test"));
         hold(false, None);
         let (out, took) = worker

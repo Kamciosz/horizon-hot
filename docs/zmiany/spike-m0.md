@@ -86,6 +86,7 @@
 - `PLAN.md`, sekcja 8: dwa budżety pauzy (ten sam silnik, nowy plik silnika), stan zasobów prób po M0, otwarte luki maskowania w raporcie (IPv6, ścieżki domowe).
 - Budżet pauzy podmiany silnika: krócej niż 1 s w każdym przypadku (decyzja użytkownika, ADR 0004); rozgrzany silnik w D11 i nowy krok M0.19 (S13).
 - Haki `tick_block` i `random_tick` dla bloków ze slotów przeniesione z M5 do M0.19: obecne API nie zmienia w nich całego bloku i nie podaje nazwy bloku, a włączenie losowego ticku zmienia pulę u graczy (`PLAN.md`, M5.2).
+- Test hamulca MSPT (`hotd`) czeka na zatrzymaną grupę procesów do 10 s zamiast stałych 300 ms; na wolnym runnerze CI grupa nie była jeszcze zapisana.
 
 ### Uwagi
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.
