@@ -52,6 +52,7 @@
 - Testy `hotd` i `hot-core` na prawdziwie pełnym dysku: działają tylko ze zmienną `HOT_FULL_DISK_DIR`, czyli na osobnym, małym woluminie.
 - `hotd` rozpoznaje świat, którego silnik nie wczytał (M7.3): gdy silnik nie działa, a najnowszy raport w `crash-reports/` mówi `Failed to load world`, `hot status` pokazuje wiersz „ŚWIAT” z powodem i poleceniem przywrócenia najnowszej kopii, a log dostaje `HOT-E0212`. Przywraca operator, nie `hotd`.
 - Slice'y systemd (M6.2): silnik i `hot-pack` w `horizon-game.slice`, `hotd` i kopia `hot-state` w `horizon-bg.slice` z niskim priorytetem.
+- `server-install.sh --uninstall` (M6.3): bez `--yes` pokazuje plan, z `--yes` usuwa usługi, slice'y, reguły zapory, nasze pliki i adres paczki zasobów, a zostawia świat, kopie, logi i użytkownika `horizon`. Stan modów trafia przedtem do `backups/`. Kod `HOT-E0113`.
 - Hamulec MSPT w `hotd` (M6.2): gdy p95 czasu ticku przekroczy 35 ms, ciężkie procesy tła `hotd` stają, a po 10 s poniżej 25 ms ruszają dalej. Mody wczytują się bez przerwy. `hot status` pokazuje wiersz „hamulec”.
 
 ### Zmienione

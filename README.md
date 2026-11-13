@@ -30,6 +30,8 @@ Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtó
 
 Na końcu skrypt pokazuje, co raz dodać w repo serwera: `hot.yml` w `.github/workflows/` i sekret `HOT_SIGNING_KEY`. Błędy idą do `/srv/horizon/logs/install.jsonl`, opisy kodów są w `docs/bledy/`. Ponowne uruchomienie niczego nie psuje.
 
+Odinstalowanie: `sudo bash server-install.sh --uninstall` pokazuje, co zniknie, a z `--yes` to usuwa. Świat, kopie, logi i użytkownik `horizon` zostają, a stan modów trafia najpierw do `/srv/horizon/backups/`.
+
 Każdy gracz raz: pobiera `http://<IP-serwera>:8131/hot_slots.hmod` do folderu `horizon-mods/` swojej instancji Horizona, dopisuje `mod.hot_slots:true` do `horizon-mods.txt` obok i przy wejściu przyjmuje paczkę zasobów serwera. Bez tego pliku serwer go nie wpuści („Your mods don't match”). Później zrobi to aplikacja gracza.
 
 ## Testy

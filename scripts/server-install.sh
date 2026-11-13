@@ -41,8 +41,11 @@ PACK_PORT=8131
 ADDRESS=
 OP=
 TEST_NO_HORIZON=0
+UNINSTALL=0
+YES=0
 
 USAGE="Użycie: server-install.sh --repo URL --eula [opcje]
+       server-install.sh --uninstall [--yes]
 
   --repo URL              repo serwera na GitHubie (https://… publiczne, git@github.com:… prywatne)
   --eula                  akceptujesz EULA Minecrafta: https://aka.ms/MinecraftEULA
@@ -57,7 +60,9 @@ USAGE="Użycie: server-install.sh --repo URL --eula [opcje]
   --hot-source URL        skąd pobrać horizon-hot (domyślnie GitHub)
   --horizon-version TAG   Nightly Horizona (domyślnie $HORIZON_VERSION)
   --test-no-horizon       TYLKO DO TESTÓW: pomija Horizona (pobranie, pliki gry, świat, silnik),
-                          żeby sprawdzić resztę na maszynie bez Linuxa x86-64"
+                          żeby sprawdzić resztę na maszynie bez Linuxa x86-64
+  --uninstall             pokazuje, co zostanie usunięte; z --yes usuwa horizon-hot i Horizona,
+                          a zostawia świat, kopie, logi i użytkownika horizon"
 
 # --- PL: Dziennik D27 i komunikaty. EN: The D27 log and messages. ---------------------------
 
@@ -138,11 +143,13 @@ while [ $# -gt 0 ]; do
     --hot-source) HOT_SOURCE=${2:?"--hot-source potrzebuje adresu"}; shift 2 ;;
     --horizon-version) HORIZON_VERSION=${2:?"--horizon-version potrzebuje tagu"}; shift 2 ;;
     --test-no-horizon) TEST_NO_HORIZON=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --yes) YES=1; shift ;;
     -h|--help) say "$USAGE"; exit 0 ;;
     *) say "Nieznana opcja: $1" >&2; say "$USAGE" >&2; exit 2 ;;
   esac
 done
-[ -n "$REPO" ] || { say "Brakuje --repo." >&2; say "$USAGE" >&2; exit 2; }
+[ -n "$REPO" ] || [ "$UNINSTALL" = 1 ] || { say "Brakuje --repo." >&2; say "$USAGE" >&2; exit 2; }
 
 # PL: Ponowne uruchomienie z tymi samymi opcjami i z tej samej wersji skryptu (do komunikatów).
 # EN: The rerun command: the same options and the same version of this script.
@@ -763,6 +770,77 @@ main() {
   if engine_has_hot_host; then autotest 12/12 "Autotest z hot-core"; fi
   summary
 }
+
+# --- PL: Odinstalowanie. EN: Uninstalling. ----------------------------------------------------
+
+# PL: Usuwa to, co zainstalował ten skrypt, oprócz świata, kopii, logów i użytkownika horizon
+#     (jest właścicielem świata). Stan modów (hot-state, hot-keys) trafia najpierw do kopii
+#     w backups/. Pakietów systemowych nie rusza, bo mogą służyć czemuś innemu. Bez --yes tylko
+#     wypisuje plan. Drugie uruchomienie niczego nie psuje.
+# EN: Removes what this script installed, except the world, backups, logs and the horizon user
+#     (it owns the world). The mod state (hot-state, hot-keys) first goes into a copy in
+#     backups/. System packages stay, as they may serve something else. Without --yes it only
+#     prints the plan. Running it again breaks nothing.
+uninstall() {
+  [ "$(id -u)" = 0 ] || { say "Uruchom przez sudo: … | sudo bash -s -- --uninstall" >&2; exit 2; }
+  local units="horizon-hot-hotd.service horizon-hot-pack.service horizon-hot-server.service horizon-hot-backup.timer horizon-hot-backup.service"
+  local slices="horizon-bg.slice horizon-game.slice horizon.slice"
+  local game_port pack_port path u left=""
+  pack_port=$(sed -n 's/.*serve-pack .*--port \([0-9]*\).*/\1/p' /etc/systemd/system/horizon-hot-pack.service 2>/dev/null || true)
+  pack_port=${pack_port:-$PACK_PORT}
+  game_port=$(sed -n 's/^port *= *\([0-9]*\).*/\1/p' "$SRV/server.toml" 2>/dev/null | head -n 1 || true)
+  game_port=${game_port:-$PORT}
+  local remove=("$BIN" "$HZ" "$ROOT/src" "$ROOT/tmp" "$ENGINES" "$SHARE" "$KEYS" "$ROOT/.cargo" "$ROOT/.rustup"
+    "$ROOT/.ssh" "$ROOT/hot-version" "$ROOT/cargo-horizon-mod-version" "$SRV/hot-core" "$SRV/hot-state"
+    "$SRV/hot-keys" "$SRV/horizon-mods/hot_slots.hmod")
+  say "Usunę:"
+  say "  usługi i slice'y systemd: $units $slices"
+  say "  reguły zapory dla portów $game_port i $pack_port (SSH zostaje)"
+  for path in "${remove[@]}"; do [ -e "$path" ] && say "  $path"; done
+  say "  mod.hot_slots z $SRV/horizon-mods.txt i adres paczki zasobów z $SRV/server.toml"
+  say "Zostawię: świat i ustawienia w $SRV, kopie w $SRV/backups i $BACKUPS, logi w $LOGS, użytkownika horizon."
+  if [ "$YES" != 1 ]; then
+    say "Nic nie zmienione. Żeby usunąć, uruchom jeszcze raz z --uninstall --yes."
+    exit 2
+  fi
+  if [ -d "$SRV/hot-state" ] || [ -d "$SRV/hot-keys" ]; then
+    mkdir -p "$BACKUPS"
+    local copy parts=() p
+    copy=$BACKUPS/hot-state-przed-odinstalowaniem-$(date +%Y-%m-%d_%H-%M-%S).tar.gz
+    for p in hot-state hot-keys; do [ -d "$SRV/$p" ] && parts+=("$p"); done
+    OUTPUT=$(tar -czf "$copy" -C "$SRV" "${parts[@]}" 2>&1) \
+      || fail HOT-E0113 "The mod state cannot be copied before uninstalling" "tar writes $copy" \
+        "see chain; usually a full disk" "Free disk space, then rerun with --uninstall --yes" "nothing was removed"
+    chown horizon:horizon "$copy" 2>/dev/null || true
+    say "Kopia stanu modów: $copy"
+  fi
+  for u in $units; do systemctl disable -q --now "$u" 2>/dev/null || true; done
+  # PL: Slice bez pliku zostałby aktywny do restartu. EN: A slice without its file stays active until reboot.
+  for u in $slices; do systemctl stop "$u" 2>/dev/null || true; done
+  for u in $units $slices; do rm -f "/etc/systemd/system/$u"; done
+  systemctl daemon-reload
+  systemctl reset-failed 2>/dev/null || true
+  if command -v ufw >/dev/null; then
+    ufw delete allow "$game_port/tcp" >/dev/null 2>&1 || true
+    ufw delete allow "$pack_port/tcp" >/dev/null 2>&1 || true
+  fi
+  for path in "${remove[@]}"; do rm -rf -- "$path" || true; done
+  [ -f "$SRV/horizon-mods.txt" ] && sed -i '/^mod\.hot_slots:true$/d' "$SRV/horizon-mods.txt"
+  # PL: Tylko nasz adres paczki: bez serwera paczki wymagana paczka nie wpuściłaby graczy.
+  # EN: Only our pack address: without the pack server a required pack would keep players out.
+  if [ -f "$SRV/server.toml" ] && grep -q "^resource-pack *= *\".*:$pack_port/pack.zip\"" "$SRV/server.toml"; then
+    sed -i -e '/^resource-pack *= *".*:'"$pack_port"'\/pack\.zip"/d' -e '/^require-resource-pack *=/d' "$SRV/server.toml"
+  fi
+  for u in $units $slices; do [ -e "/etc/systemd/system/$u" ] && left+=" /etc/systemd/system/$u"; done
+  for path in "${remove[@]}"; do [ -e "$path" ] && left+=" $path"; done
+  [ -z "$left" ] || OUTPUT=$left fail HOT-E0113 "Some horizon-hot files cannot be removed" "every listed path is gone" \
+    "see chain: a file in use or a read-only file system" "Remove the paths in chain by hand (sudo rm -rf …), then rerun with --uninstall --yes" \
+    "the services are stopped; the world and backups are untouched"
+  say "Usunięte. Świat i kopie zostały w $ROOT."
+  say "Całkiem (to usuwa też świat): sudo userdel horizon && sudo rm -rf $ROOT"
+}
+
+if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
 
 HOT_SHA=
 HOT_REBUILT=0
