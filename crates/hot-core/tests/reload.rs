@@ -1257,3 +1257,77 @@ fn a_warm_engine_reads_hot_state_only_after_the_old_one_stops() -> TestResult {
     new.stop();
     Ok(())
 }
+
+fn libraries_file(home: &Path) -> Result<serde_json::Map<String, Value>, Box<dyn Error>> {
+    let v: Value =
+        serde_json::from_str(&fs::read_to_string(home.join("hot-state/libraries.json"))?)?;
+    assert_eq!(v["pid"].as_u64(), Some(u64::from(std::process::id())));
+    Ok(v["files"].as_object().cloned().unwrap_or_default())
+}
+
+/// PL: M8.5: `hot-core` podaje, ile bajtów to nieużywane generacje, z bibliotekami poprzednich
+/// kopii `hot-core` w tym samym procesie, ale bez tych z poprzedniego silnika (inny pid).
+/// EN: M8.5: `hot-core` reports how many bytes are unused generations, with the libraries of
+/// earlier `hot-core` copies in the same process, but not those of an earlier engine (another pid).
+#[test]
+fn old_generations_are_counted_for_the_memory_swap() -> TestResult {
+    let home = Server::home("libraries");
+    fs::create_dir_all(home.join("hot-state/gen"))?;
+    let earlier_copy = home.join("hot-state/gen/earlier-core-copy.dylib");
+    let key = earlier_copy.display().to_string();
+    fs::write(
+        home.join("hot-state/libraries.json"),
+        serde_json::json!({ "pid": std::process::id(), "files": { key.clone(): 1000 } })
+            .to_string(),
+    )?;
+    let mut s = Server::start(&home)?;
+    let files = [mod_file("licznik_v1")?, mod_file("licznik_v2")?];
+    for n in 1..=5u64 {
+        s.load_and_wait(&files[(n % 2) as usize], |st| {
+            generation(st, "licznik") == Some(n)
+        })?;
+    }
+    let status = s.status()?;
+    let lib = &status["libraries"];
+    assert_eq!(lib["pid"].as_u64(), Some(u64::from(std::process::id())));
+    let listed = libraries_file(&home)?;
+    assert!(listed.contains_key(&key), "{listed:?}");
+    let gen_dir = home.join("hot-state/gen").display().to_string();
+    let ours: Vec<&String> = listed.keys().filter(|f| f.starts_with(&gen_dir)).collect();
+    assert_eq!(ours.len(), 6, "{ours:?}");
+    // PL: W użyciu: generacja 5 i 4 (powrót po panice); nieużywane: 1–3 i kopia rdzenia.
+    // EN: In use: generations 5 and 4 (the fallback); unused: 1–3 and the core copy.
+    let smallest = files
+        .iter()
+        .map(|f| fs::metadata(f).map(|m| m.len()))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .min()
+        .unwrap_or(0);
+    let stale = lib["stale_bytes"].as_u64().unwrap_or(0);
+    let bytes = lib["bytes"].as_u64().unwrap_or(0);
+    assert!(stale >= 1000 + 3 * smallest, "{lib:#}");
+    assert!(bytes - stale >= 2 * smallest, "{lib:#}");
+    s.stop();
+
+    let other = Server::home("libraries-earlier-engine");
+    fs::create_dir_all(other.join("hot-state"))?;
+    let theirs = other.join("hot-state/gen/earlier-engine.dylib");
+    fs::write(
+        other.join("hot-state/libraries.json"),
+        serde_json::json!({
+            "pid": u64::from(std::process::id()) + 1,
+            "files": { theirs.display().to_string(): 1000 },
+        })
+        .to_string(),
+    )?;
+    let mut s = Server::start(&other)?;
+    s.load_and_wait(&files[0], |st| generation(st, "licznik") == Some(1))?;
+    let listed = libraries_file(&other)?;
+    assert!(
+        !listed.contains_key(&theirs.display().to_string()),
+        "{listed:?}"
+    );
+    s.stop();
+    Ok(())
+}

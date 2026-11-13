@@ -9,6 +9,9 @@
 //! - `status` — aktywna strona, jej katalog, adres i faza;
 //! - `swap [PLIK]` — podmiana na nowy plik silnika (bez pliku: na ten sam).
 //!
+//! Co minutę sprawdza też pamięć starych generacji modów i po przekroczeniu progu sam robi
+//! podmianę na ten sam plik (D4, `reclaim.rs`).
+//!
 //! EN: `hotd engine`, the main process of the engine service (instead of `horizon-server run`). It
 //! starts the active side's engine (`horizon-server start`), keeps the other side from waiting for
 //! nothing, and swaps the engine (D11, `swap.rs`) on request from the `<home>/hot-engine.sock`
@@ -19,6 +22,9 @@
 //! The socket (0600), one command per connection, one JSON line in reply:
 //! - `status` — the active side, its folder, address and phase;
 //! - `swap [FILE]` — a swap to a new engine file (no file: the same one).
+//!
+//! Every minute it also checks the memory of old mod generations and past the limit swaps to the
+//! same file by itself (D4, `reclaim.rs`).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -33,6 +39,7 @@ use hot_diag::{DiagError, Logger};
 use serde_json::{json, Value};
 
 use crate::codes;
+use crate::reclaim::{self, Reclaim};
 use crate::swap::{self, Engines, Layout, Limits, ProxySocket, Server};
 
 static STOP: AtomicBool = AtomicBool::new(false);
@@ -61,7 +68,12 @@ pub enum End {
 /// # Errors
 /// PL: Silnik nie wystartował albo gniazda nie da się otworzyć. EN: The engine did not start, or
 /// the socket cannot be opened.
-pub fn run(home: &Path, program: &Path, log: &Arc<Logger>) -> Result<End, DiagError> {
+pub fn run(
+    home: &Path,
+    program: &Path,
+    mut reclaim: Reclaim,
+    log: &Arc<Logger>,
+) -> Result<End, DiagError> {
     // SAFETY: obsługa tylko zapisuje atomową flagę. EN: the handler only stores an atomic flag.
     unsafe {
         libc::signal(libc::SIGTERM, on_stop as *const () as libc::sighandler_t);
@@ -114,6 +126,7 @@ pub fn run(home: &Path, program: &Path, log: &Arc<Logger>) -> Result<End, DiagEr
         .state("The engine runs, but engine swaps are not possible until hotd engine restarts")
     })?;
     let mut checked = Instant::now();
+    let mut memory_checked = Instant::now();
     loop {
         if STOP.load(Ordering::SeqCst) {
             let _one = busy.lock().unwrap_or_else(PoisonError::into_inner);
@@ -147,7 +160,45 @@ pub fn run(home: &Path, program: &Path, log: &Arc<Logger>) -> Result<End, DiagEr
                 }
             }
         }
+        if memory_checked.elapsed() >= reclaim::EVERY {
+            memory_checked = Instant::now();
+            if let Ok(_one) = busy.try_lock() {
+                reclaim_memory(&layout, &mut server, &mut reclaim, log);
+            }
+        }
         thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// PL: Podmiana na ten sam plik silnika, gdy stare generacje modów zajmują za dużo (D4).
+/// EN: A swap to the same engine file when old mod generations take too much (D4).
+fn reclaim_memory(layout: &Layout, server: &mut Server, reclaim: &mut Reclaim, log: &Logger) {
+    let status = std::fs::read(layout.home.join("hot-state").join("status.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .unwrap_or(Value::Null);
+    let now = Instant::now();
+    let Some(stale) = reclaim.due(&status, server.engine_pid(&layout.active_dir()), now) else {
+        return;
+    };
+    log.info(
+        "hotd engine swaps the engine to free the memory of old mod generations (D4)",
+        json!({
+            "stale_bytes": stale,
+            "libraries": status["libraries"]["count"],
+            "limit_bytes": reclaim.limit,
+        }),
+    );
+    let proxy = ProxySocket {
+        home: layout.home.clone(),
+    };
+    match swap::swap(layout, server, &proxy, None, Limits::default(), log) {
+        Ok(report) => {
+            log.info("Memory swap done", json!({ "report": report }));
+            reclaim.done(None, Instant::now());
+        }
+        // PL: `swap` sam zapisał błąd w logu. EN: `swap` has logged the error itself.
+        Err(e) => reclaim.done(Some(e.code()), Instant::now()),
     }
 }
 

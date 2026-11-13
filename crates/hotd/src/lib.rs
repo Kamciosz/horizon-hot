@@ -22,6 +22,7 @@ pub mod engine;
 pub mod git;
 pub mod keeper;
 pub mod pack;
+pub mod reclaim;
 pub mod sign;
 pub mod slots;
 pub mod state;

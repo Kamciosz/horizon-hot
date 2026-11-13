@@ -99,6 +99,7 @@ Kontekst: R8 — osobne sterty i hooki paniki. Decyzja: struktury `#[repr(C)]`, 
 - `ctx` ważny tylko na czas wywołania (`HostCtx<'call>` w `hot-sdk`).
 - `catch_unwind` w każdym eksporcie (`hot-sdk`); panika → mod wyłączony, wraca poprzednia generacja.
 - Każda generacja to kopia pliku pod unikalną nazwą; stara zostaje w pamięci bez wywołań. Pamięć odzyskuje podmiana silnika (D11) wykonywana automatycznie, gdy wzrost przekroczy próg — bez restartu.
+  - Próg (M8.5, 2026-11-13): bajty plików nieużywanych generacji w procesie silnika (`--reclaim-mb`, domyślnie 256 MiB), nie RSS. RSS rośnie też od świata i graczy, a tego podmiana nie oddaje; liczba plików jest dokładna i niezależna od obciążenia.
 - Trwałe dane moda: `hot-data/<mod>/`.
 
 **D5. Haki v1.**
@@ -457,7 +458,10 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
   - Wynik (2026-11-13): zerwanie połączenia przez silnik bez `Disconnect` → proxy trzyma gracza do 180 s, wysyła mu własne keep-alive (pierwszy po 5 s, potem co 10 s) i co 20 ms próbuje logowania pod aktywnym adresem; po czasie komunikat dla gracza i `HOT-E0605`. Test z atrapą, która wstaje po 6 s, i test podmiany na martwy silnik.
   - Na Macu (to samo stanowisko co M8.2, 11 graczy): `kill -9` procesu silnika → supervisor `horizon-server` wznowił go, wszyscy wrócili do gry po 5,6 s, nikt nie został rozłączony, boty online 10, klient w `playing`, czat działa. Zmiany świata od ostatniego zapisu przepadły (blok z ostatniej rundy): silnik zabity bez zapisu, tego proxy nie naprawi.
   - Nie sprawdzone: ThinkCentre (brak maszyny); przerwa dłuższa niż 30 s z prawdziwym klientem (atrapa sprawdza keep-alive, prawdziwy silnik wstał po 5,6 s).
-- [ ] M8.5 Odzyskanie pamięci generacji przez podmianę (D4). Sprawdzenie: po 200 przeładowaniach RSS spada do poziomu startowego bez restartu.
+- [x] M8.5 Odzyskanie pamięci generacji przez podmianę (D4). Sprawdzenie: po 200 przeładowaniach RSS spada do poziomu startowego bez restartu.
+  - Wynik (2026-11-13): `hot-core` zapisuje w `status.json` pole `libraries` (pid procesu, liczba bibliotek, bajty nieużywanych generacji) i listę w `hot-state/libraries.json`, którą przejmuje nowa kopia `hot-core` w tym samym procesie; liczy też biblioteki odrzucone po otwarciu. `crates/hotd/src/reclaim.rs`: `hotd engine` co minutę porównuje bajty z progiem `--reclaim-mb` (domyślnie 256, 0 wyłącza) i robi podmianę na ten sam plik; status z innym pidem się nie liczy; po `HOT-E0606` przerwa 30 min, po `HOT-E0607` 6 h. Testy: `reload.rs` (`old_generations_are_counted_for_the_memory_swap`), `reclaim.rs` (2). Mutacje: bez sprawdzenia pidu w `hot-core`, bez zapisu otwartej biblioteki, bez sprawdzenia pidu w `hotd`, ta sama przerwa po `HOT-E0607` → testy padają.
+  - Na Macu (prawdziwy `horizon-server` z `hot-host`, `hotd engine --reclaim-mb 100`, `hot-proxy`, 3 boty; pid w `status.json` = `engine_pid` z `horizon-server status`): przy 200 przeładowaniach `licznik` (plik 574 KB) RSS rośnie o ok. 45 MB (ok. 220 KB na generację), w procesie zostaje 201 bibliotek. Podmiana ruszyła sama po przekroczeniu progu (log: 201 bibliotek, 108 MiB), zamrożenie 649 ms, pauza proxy 497 ms, 3 przeniesionych, boty `failed` 0. RSS: dwa cykle 574 → 541 MB i 576 → 505 MB; podmiany bez przeładowań (kontrola) dają 512–534 MB, start 523 MB. Po podmianie proces ma 2 biblioteki zamiast 201, mod zostaje w swojej generacji.
+  - Nie sprawdzone: ThinkCentre (brak maszyny), w tym czy jest tam pamięć na czekający silnik w chwili podmiany (363–515 MB na Macu); domyślny próg 256 MiB dobrany z pomiaru na Macu.
 
 ### M9 — Aktualizacja Horizona (D18)
 - [ ] M9.1 Wykrycie Nightly, przygotowanie wersji, build w tle, test na kopii świata, podmiana, obserwacja, powrót.
@@ -579,6 +583,8 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 **2026-11-13 — M6.3 zrobione (maszyna wirtualna):** `server-install.sh --uninstall [--yes]` usuwa horizon-hot i Horizona, a zostawia świat, kopie, logi i użytkownika `horizon`; przedtem pakuje stan modów do `backups/`. Szczegóły w M6.3. Dalej: M0.19.
 
 **2026-11-13 — M0.20 zrobione na Macu: pula 4096/8192.** Z rozgrzanym silnikiem pula prawie nie zmienia pauzy: 480–549 ms na tym samym silniku, 505–573 ms na nowym pliku silnika z pustym cache; rośnie rozgrzanie (do 4,4 s, przed zamrożeniem) i pamięć czekającego silnika (ok. 515 MB). `hotd::slots` ma 4096/8192, bez slotów z tickiem (`docs/sloty.md`). Mixin `wait_for_world` kończy czekanie po SIGTERM, bo samo `stop` czekało 120 s; `hotd` przerywa podmianę przez `stop` + SIGTERM. Nie sprawdzone: ThinkCentre (M0.11). Dalej: M8.
+
+**2026-11-13 — M8.5: pamięć starych generacji wraca przez podmianę.** `hot-core` podaje, ile bajtów zajmują nieużywane generacje modów w procesie silnika, a `hotd engine` po przekroczeniu progu sam podmienia silnik na ten sam plik. Na Macu po 200 przeładowaniach RSS wrócił do poziomu startowego (574 → 505 MB) bez restartu i bez rozłączenia graczy. Dalej: M9.1.
 
 **2026-11-13 — M8.3: `hotd` podmienia silnik pod graczami.** `hotd engine` prowadzi silnik i na `hotd swap` uruchamia drugą stronę, przenosi graczy przez `hot-proxy` i zatrzymuje starą. Na Macu z 11 graczami: zamrożenie 638–769 ms, pauza proxy 407–530 ms, nikt nie rozłączony; zepsuty silnik → gracze na starym (`HOT-E0606`), silnik, który nie przejął świata → powrót na stary (`HOT-E0607`, pauza 4,9 s). Poprawiony błąd: `hot-core` nowej strony czytał stan modów, zanim stary silnik skończył go zapisywać. Otwarte: test z `.hnmod` (zgoda właściciela na kod natywny), ThinkCentre. Dalej: M8.5.
 

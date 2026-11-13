@@ -67,6 +67,9 @@ impl Paths {
     pub fn status(&self) -> PathBuf {
         self.state().join("status.json")
     }
+    pub fn libraries(&self) -> PathBuf {
+        self.state().join("libraries.json")
+    }
     pub fn gen_dir(&self) -> PathBuf {
         self.state().join("gen")
     }

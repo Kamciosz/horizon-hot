@@ -23,7 +23,7 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
        hotd status [--home DIR]
        hotd serve-pack [--home DIR] [--port 8131]
        hotd slots-source DIR   (then: cd DIR && cargo horizon-mod build)
-       hotd engine [--home DIR] [--engine horizon-server]
+       hotd engine [--home DIR] [--engine horizon-server] [--reclaim-mb 256]
        hotd swap [--to FILE] [--home DIR]
 
 --home is the engine's HOT_HOME (hot-state/ and logs/ live there; default $HOT_HOME).
@@ -32,6 +32,8 @@ to the world folder named in its server.toml.
 --allowed-signers defaults to <home>/hot-keys/allowed_signers.
 engine runs the engine of the active side (the main process of the engine service, instead of
 horizon-server run) and swaps it on request (D11); logs go to <home>/logs/hotd-engine.jsonl.
+It also swaps to the same engine by itself when old mod generations hold more than
+--reclaim-mb MiB of library files (D4; 0 turns it off).
 swap asks it to swap to the engine file --to (default: the same engine) with the players in
 game; prints a JSON report, exit 1 when the players stayed on or went back to the old engine.";
 
@@ -46,6 +48,7 @@ struct Args {
     interval: u64,
     port: u16,
     to: Option<PathBuf>,
+    reclaim_mb: u64,
 }
 
 fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -61,6 +64,7 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         interval: 10,
         port: 8131,
         to: None,
+        reclaim_mb: hotd::reclaim::DEFAULT_MB,
     };
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or(format!("{flag} needs a value"));
@@ -72,6 +76,9 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--engine-dir" => a.engine_dir = Some(value()?.into()),
             "--to" => a.to = Some(value()?.into()),
             "--allowed-signers" => a.allowed_signers = Some(value()?.into()),
+            "--reclaim-mb" => {
+                a.reclaim_mb = value()?.parse().map_err(|e| format!("--reclaim-mb: {e}"))?;
+            }
             "--port" => a.port = value()?.parse().map_err(|e| format!("--port: {e}"))?,
             "--interval" => {
                 a.interval = value()?.parse().map_err(|e| format!("--interval: {e}"))?;
@@ -127,7 +134,7 @@ fn main() -> ExitCode {
         return serve_pack(&home, args.port);
     }
     if args.command == "engine" {
-        return engine(&home, &args.engine);
+        return engine(&home, &args.engine, args.reclaim_mb);
     }
     if args.command == "swap" {
         let to = args.to.map(|f| std::path::absolute(&f).unwrap_or(f));
@@ -248,7 +255,7 @@ fn serve_pack(home: &std::path::Path, port: u16) -> ExitCode {
 /// przestał wznawiać silnik (systemd wtedy go uruchamia ponownie).
 /// EN: `hotd engine`: exit 0 after SIGTERM or an engine stop, 1 after an error or when the
 /// supervisor stopped restarting the engine (systemd then starts it again).
-fn engine(home: &std::path::Path, program: &std::path::Path) -> ExitCode {
+fn engine(home: &std::path::Path, program: &std::path::Path, reclaim_mb: u64) -> ExitCode {
     let log = match hot_diag::Logger::open(
         hot_diag::LogConfig::new("hotd-engine", hotd::VERSION, home.join("logs")),
         hot_diag::Redactor::new(),
@@ -260,7 +267,8 @@ fn engine(home: &std::path::Path, program: &std::path::Path) -> ExitCode {
         }
     };
     hot_diag::install_panic_hook(std::sync::Arc::clone(&log));
-    match hotd::keeper::run(home, program, &log) {
+    let reclaim = hotd::reclaim::Reclaim::new(reclaim_mb);
+    match hotd::keeper::run(home, program, reclaim, &log) {
         Ok(hotd::keeper::End::Stopped) => ExitCode::SUCCESS,
         Ok(hotd::keeper::End::GaveUp) => ExitCode::FAILURE,
         Err(e) => {

@@ -538,6 +538,16 @@ impl Server {
         }
     }
 
+    /// PL: Pid procesu silnika strony, gdy działa. EN: The side's engine process pid when running.
+    #[must_use]
+    pub fn engine_pid(&self, dir: &Path) -> Option<u64> {
+        let status = self.status(dir);
+        if status["phase"] != "running" {
+            return None;
+        }
+        status["engine_pid"].as_u64()
+    }
+
     fn status(&self, dir: &Path) -> Value {
         self.run(dir, &["status", "--json"])
             .ok()

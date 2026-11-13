@@ -78,6 +78,16 @@ Listy graczy na stronie `b`: `op`, `whitelist add` i `ban-ip` wydane silnikowi s
 
 Pauza na drodze błędu jest dłuższa: przy `HOT-E0607` gracze czekają na limit przejęcia (10 s) i ponowny start starego silnika. Na Macu: 4,9 s, gracze zostali w grze. Limit „krócej niż 1 s” dotyczy udanej podmiany.
 
+### Podmiana dla pamięci (D4)
+
+`hot-core` nie zamyka bibliotek starych generacji modów, więc każde przeładowanie zostawia kopię biblioteki w procesie silnika. `hot-core` podaje w `hot-state/status.json` (pole `libraries`), ile bibliotek trzyma proces (`count`, `pid`) i ile bajtów plików to generacje już nieużywane (`stale_bytes`; bieżąca, poprzednia i ostatnia dobra generacja moda są w użyciu). Pełna lista jest w `hot-state/libraries.json`; nowa kopia `hot-core` (`hot core load`) przejmuje ją, gdy pid się zgadza.
+
+`hotd engine` co minutę porównuje `stale_bytes` z progiem `--reclaim-mb` (domyślnie 256 MiB, 0 wyłącza) i po jego przekroczeniu robi podmianę na ten sam plik silnika. Status z innym pidem niż aktywny silnik (poprzedni silnik, druga strona) nie liczy się. Po nieudanej podmianie następna próba najwcześniej po 30 min (`HOT-E0606`) albo po 6 h (`HOT-E0607`, gracze czekali kilka sekund). W logu `logs/hotd-engine.jsonl`: „hotd engine swaps the engine to free the memory of old mod generations (D4)”.
+
+Próg liczy bajty plików, nie RSS: RSS rośnie też od świata i graczy, a tego podmiana nie oddaje. Na Macu (mod `licznik`, plik 574 KB) jedna generacja to ok. 220 KB RSS, więc 256 MiB plików to ok. 450 przeładowań takiego moda i ok. 100 MB RSS.
+
+Podmiana dla pamięci potrzebuje miejsca na drugi, czekający silnik (363–515 MB na Macu, M0.19 i M0.20), a robi się właśnie wtedy, gdy pamięci jest mniej. Nie sprawdzone na ThinkCentre (brak maszyny).
+
 ### Proxy: `hot-proxy switch`
 
 `hot-proxy` słucha komend na gnieździe Unix `<HOT_HOME>/hot-proxy.sock` (tylko właściciel, 0600). Jedna komenda na połączenie; odpowiedź to linie JSON, ostatnia jest wynikiem (`hot-proxy switch` wypisuje tylko ją):

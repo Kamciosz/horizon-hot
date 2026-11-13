@@ -67,6 +67,8 @@
 - `hotd engine` i `hotd swap [--to PLIK]`: usługa silnika uruchamia aktywną stronę (`a` albo `engine-b`) i na żądanie podmienia silnik na rozgrzany silnik drugiej strony (D11, `crates/hotd/src/swap.rs`, `keeper.rs`). Błąd przed zamrożeniem zostawia graczy na starym silniku (HOT-E0606), błąd po nim przywraca stary (HOT-E0607); HOT-E0608 to nieudany start usługi.
 - `hot-proxy`: linia `{"held":N}` w odpowiedzi na `switch` i komenda `engine ADRES`; adres silnika po restarcie z `hot-state/engine.json`.
 
+- `hotd engine --reclaim-mb N` (M8.5, D4): po przekroczeniu progu bajtów nieużywanych generacji modów (domyślnie 256 MiB) usługa silnika sama podmienia silnik na ten sam plik i oddaje ich pamięć. `hot-core` podaje te liczby w polu `libraries` w `status.json` i w `hot-state/libraries.json`.
+
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
 - Mixin `wait_for_world` przestaje czekać po pierwszym SIGTERM, więc przerwaną podmianę kończy `stop` i SIGTERM do silnika w 0,5 s zamiast 120 s.

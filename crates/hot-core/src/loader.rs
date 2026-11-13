@@ -8,14 +8,44 @@
 //! an engine swap (D11) reclaims the memory. A new file loads on its own thread and never touches
 //! the host table, which is only valid on the server thread.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
+use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hot_abi::{EntryFn, ModVTable, ABI_MAJOR, ENTRY_SYMBOL};
 use hot_diag::DiagError;
 
 use crate::codes;
+
+/// PL: Biblioteki otwarte w tym procesie (ścieżka kopii → rozmiar pliku). Zostają w pamięci do
+/// końca procesu, także te odrzucone po otwarciu (zła wersja ABI, złe id). Zbiór, nie licznik:
+/// ta sama kopia `hot-core` startuje w testach wiele razy, a każda nowa kopia (`hot core load`)
+/// dostaje go z `hot-state/libraries.json` (M8.5).
+/// EN: Libraries opened in this process (copy path → file size). They stay in memory until the
+/// process ends, including ones refused after opening (wrong ABI version, bad id). A set, not a
+/// counter: the same `hot-core` copy starts many times in tests, and every new copy
+/// (`hot core load`) gets it from `hot-state/libraries.json` (M8.5).
+static MAPPED: Mutex<BTreeMap<PathBuf, u64>> = Mutex::new(BTreeMap::new());
+
+/// PL: Kopia zbioru otwartych bibliotek. EN: A copy of the opened library set.
+#[must_use]
+pub fn mapped() -> BTreeMap<PathBuf, u64> {
+    MAPPED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
+/// PL: Dopisuje biblioteki otwarte przez poprzednią kopię `hot-core` w tym samym procesie.
+/// EN: Adds libraries a previous `hot-core` copy opened in the same process.
+pub fn note_mapped(files: impl IntoIterator<Item = (PathBuf, u64)>) {
+    MAPPED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .extend(files);
+}
 
 /// PL: Wczytana biblioteka moda. EN: A loaded mod library.
 #[derive(Clone)]
@@ -107,6 +137,10 @@ pub fn open(file: &Path, source: &Path) -> Result<Gen, DiagError> {
     };
     // PL: Biblioteki nie zamykamy (opis modułu). EN: The library is never closed (module docs).
     std::mem::forget(lib);
+    note_mapped([(
+        file.to_path_buf(),
+        std::fs::metadata(file).map_or(0, |m| m.len()),
+    )]);
     // SAFETY: funkcja z tabeli zwraca wskaźnik do statycznej tabeli w bibliotece, która nie
     // zostanie wyładowana. EN: returns a pointer to a static table in a library never unloaded.
     let table = unsafe { entry() };
