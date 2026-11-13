@@ -84,7 +84,7 @@ crates/hot-host/build-bundle.sh <katalog> && horizon-launcher native-build <kata
 
 Próba `hotd` bez GitHuba: lokalne repo z `mods/<id>/`, `HOT_SIGNING_KEY_FILE=<klucz> scripts/hot-build.sh <repo> <out>`, `scripts/hot-publish.sh <repo> <out>`, potem `hotd once --home <HOT_HOME> --repo file://<origin.git> --engine <horizon-server> --allowed-signers <plik>`. Testy `cargo test -p hotd` potrzebują `git` i `ssh-keygen`.
 
-Instalator serwera: `scripts/server-install.sh --repo URL --eula` jako root na Ubuntu x86_64 (kroki i kody `HOT-E0101`–`HOT-E0111` w nagłówku skryptu i w `docs/bledy/`). Kod wyjścia 3 = czeka na właściciela: pliki gry (`--resources DIR`) albo zgoda na kod natywny (`--trust-native-code`; tej zgody agent nie daje). Próba bez Horizona w maszynie wirtualnej: `--test-no-horizon` (pomija pobranie Horizona, świat i silnik). Nie uruchamiaj go na Macu ani na maszynie z grą: zakłada użytkownika, usługi systemd i zaporę.
+Instalator serwera: `scripts/server-install.sh --repo URL --eula` jako root na Ubuntu x86_64 (kroki i kody `HOT-E0101`–`HOT-E0114` w nagłówku skryptu i w `docs/bledy/`; silnik na `127.0.0.1:25566` za `hot-proxy` na porcie graczy). Kod wyjścia 3 = czeka na właściciela: pliki gry (`--resources DIR`) albo zgoda na kod natywny (`--trust-native-code`; tej zgody agent nie daje). Próba bez Horizona w maszynie wirtualnej: `--test-no-horizon` (pomija pobranie Horizona, świat i silnik). Nie uruchamiaj go na Macu ani na maszynie z grą: zakłada użytkownika, usługi systemd i zaporę.
 
 Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktualizowana dokumentacja w tym samym commicie.
 

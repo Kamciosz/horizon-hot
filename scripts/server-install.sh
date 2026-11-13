@@ -900,7 +900,8 @@ uninstall() {
   say "  reguły zapory dla portów $game_port i $pack_port (SSH zostaje)"
   for path in "${remove[@]}"; do [ -e "$path" ] && say "  $path"; done
   say "  mod.hot_slots z $SRV/horizon-mods.txt i adres paczki zasobów z $SRV/server.toml"
-  [ -e "$SRV/forwarding.secret" ] && say "  $SRV/forwarding.secret; silnik w server.toml wraca na port $game_port, wszystkie adresy i online_mode = true"
+  [ -e "$SRV/forwarding.secret" ] && say "  $SRV/forwarding.secret"
+  [ -e "$SRV/forwarding.secret" ] && [ -f "$SRV/server.toml" ] && say "  silnik za proxy: w server.toml wraca port $game_port, wszystkie adresy i online_mode = true"
   say "Zostawię: świat i ustawienia w $SRV, kopie w $SRV/backups i $BACKUPS, logi w $LOGS, użytkownika horizon."
   if [ "$YES" != 1 ]; then
     say "Nic nie zmienione. Żeby usunąć, uruchom jeszcze raz z --uninstall --yes."

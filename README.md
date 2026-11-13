@@ -28,6 +28,8 @@ Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtó
 
 `--address` to adres, który gracze wpisują w grze. Z niego gra pobiera paczkę zasobów z wyglądem bloków modów (port 8131).
 
+Gracze łączą się z portem 25565 (`--port`). Słucha na nim `hot-proxy`: sprawdza w usłudze sesji Microsoftu, czy gracz ma kupioną grę, i dopiero wtedy wpuszcza go do silnika. Silnik słucha tylko na `127.0.0.1:25566` (`--engine-port`), więc z sieci nie da się go ominąć. Zapora otwiera tylko SSH, 25565 i 8131.
+
 Na końcu skrypt pokazuje, co raz dodać w repo serwera: `hot.yml` w `.github/workflows/` i sekret `HOT_SIGNING_KEY`. Błędy idą do `/srv/horizon/logs/install.jsonl`, opisy kodów są w `docs/bledy/`. Ponowne uruchomienie niczego nie psuje.
 
 Odinstalowanie: `sudo bash server-install.sh --uninstall` pokazuje, co zniknie, a z `--yes` to usuwa. Świat, kopie, logi i użytkownik `horizon` zostają, a stan modów trafia najpierw do `/srv/horizon/backups/`.
