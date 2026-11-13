@@ -16,6 +16,8 @@ const USAGE: &str = "\
 Usage: hot-proxy --engine 127.0.0.1:PORT --secret FILE --home DIR
                  [--listen 0.0.0.0:25565] [--discovery URL] [--offline]
        hot-proxy ping HOST:PORT
+       hot-proxy switch [ENGINE] [--home DIR]
+       hot-proxy status [--home DIR]
 
 --engine    the engine (online_mode = false, the same forwarding.secret).
 --secret    the engine's forwarding.secret.
@@ -24,7 +26,10 @@ Usage: hot-proxy --engine 127.0.0.1:PORT --secret FILE --home DIR
 --offline   no purchase check, for a local test; refused unless --listen is 127.0.0.1.
 
 ping        prints the status JSON of HOST:PORT, as the game's server list asks for it
-            (exit 1 when there is no answer within 10 s).";
+            (exit 1 when there is no answer within 10 s).
+switch      moves the players of the running proxy to ENGINE (default: the same engine)
+            without a loading screen; prints a JSON summary (exit 1 when a player failed).
+status      prints the active engine and the players in game as JSON.";
 
 struct Args {
     listen: SocketAddr,
@@ -82,10 +87,60 @@ fn ping(address: Option<String>) -> ExitCode {
     }
 }
 
+/// PL: `hot-proxy switch|status`: komenda do gniazda sterującego działającego proxy.
+/// EN: `hot-proxy switch|status`: a command to the running proxy's control socket.
+fn control(command: &str, rest: Vec<String>) -> ExitCode {
+    let mut line = command.to_owned();
+    let mut home = std::env::var_os("HOT_HOME").map(PathBuf::from);
+    let mut it = rest.into_iter();
+    while let Some(arg) = it.next() {
+        if arg == "--home" {
+            home = it.next().map(PathBuf::from);
+        } else if command == "switch" && line == "switch" && arg.parse::<SocketAddr>().is_ok() {
+            line = format!("switch {arg}");
+        } else {
+            eprintln!("hot-proxy: {command}: unexpected {arg}\n\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    }
+    let Some(home) = home else {
+        eprintln!("hot-proxy: {command} needs --home DIR or $HOT_HOME\n\n{USAGE}");
+        return ExitCode::from(2);
+    };
+    match hot_proxy::control::request(&home, &line) {
+        Ok(reply) => {
+            println!("{reply}");
+            let failed = serde_json::from_str::<serde_json::Value>(&reply).is_ok_and(|v| {
+                v.get("error").is_some()
+                    || v.get("failed")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|f| !f.is_empty())
+            });
+            if failed {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "hot-proxy: {command}: no answer on {}: {e}",
+                hot_proxy::control::socket_path(&home).display()
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let mut argv = std::env::args().skip(1).peekable();
-    if argv.peek().map(String::as_str) == Some("ping") {
-        return ping(argv.nth(1));
+    match argv.peek().map(String::as_str) {
+        Some("ping") => return ping(argv.nth(1)),
+        Some(c @ ("switch" | "status")) => {
+            let c = c.to_owned();
+            return control(&c, argv.skip(1).collect());
+        }
+        _ => {}
     }
     let args = match parse(argv) {
         Ok(a) => a,
@@ -144,6 +199,18 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Err(e) = hot_proxy::control::serve(&proxy, &home) {
+        let e = hot_diag::DiagError::new(
+            hot_proxy::codes::CONFIG,
+            format!("hot-proxy cannot open its control socket: {e}"),
+            "Another hot-proxy with the same --home runs (stop it), or HOT_HOME is not writable for this user",
+        )
+        .context("socket", hot_proxy::control::socket_path(&home).display().to_string())
+        .state("The proxy did not start");
+        log.error(&e);
+        eprintln!("hot-proxy: {e}");
+        return ExitCode::FAILURE;
+    }
     log.info(
         "hot-proxy is listening",
         serde_json::json!({

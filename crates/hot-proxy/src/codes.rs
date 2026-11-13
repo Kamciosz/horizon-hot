@@ -15,3 +15,7 @@ pub const ENGINE_LOGIN: Code = Code::new("HOT-E0603");
 
 /// PL: Zła konfiguracja proxy. EN: The proxy is misconfigured.
 pub const CONFIG: Code = Code::new("HOT-E0604");
+
+/// PL: Gracza nie dało się przenieść na silnik (podmiana albo powrót silnika po awarii).
+/// EN: A player could not be moved to the engine (a swap, or the engine's return after a crash).
+pub const REJOIN: Code = Code::new("HOT-E0605");

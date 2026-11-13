@@ -38,13 +38,31 @@ Błędy:
 
 1. Po pierwszym wejściu gracza proxy **nigdy** nie wysyła klientowi `Login`, `Respawn` ani `StartConfiguration`. Każdy z nich pokazuje ekran ładowania.
 2. Proxy zapisuje, co klient wysłał w konfiguracji, i odtwarza to wobec nowego silnika. Konfigurację od nowego silnika połyka.
-3. Id gracza u klienta to id z pierwszego `Login`. Każdy pakiet z id encji przechodzi przez zamianę „id u klienta ↔ id w aktywnym silniku”, w obie strony. Lista pakietów: `spikes/s8-podmiana/proxy/src/main.rs` (`remap_clientbound`, `remap_serverbound`), znane braki: `s8-podmiana-prototyp.md`.
+3. Id gracza u klienta to id z pierwszego `Login`. Każdy pakiet z id encji przechodzi przez zamianę „id u klienta ↔ id w aktywnym silniku”, w obie strony. Lista pakietów: `crates/hot-proxy/src/remap.rs` (`clientbound`, `serverbound`), z testami na prawdziwym kodowaniu pakietów Horizona.
 4. Proxy śledzi encje, które pokazało klientowi (`add_entity`, `remove_entities`), i przy podmianie usuwa je wszystkie oprócz gracza.
-5. Od nowego silnika proxy odrzuca `game_event` 13 (start ładowania poziomu). Komunikatu „joined the game” nowy silnik samemu graczowi nie wysyła (S8), ale proxy też go odrzuca: przy wielu graczach dostaną go pozostali.
-6. Klient rozłącza się po 30 s bez żadnego pakietu (`READ_TIMEOUT`). W każdej przerwie dłuższej niż kilka sekund proxy samo wysyła klientowi keep-alive co ok. 10 s i nie przekazuje odpowiedzi silnikowi (D13). To jest projekt, jeszcze niesprawdzony.
+5. Przez 5 s po wejściu na nowy silnik proxy odrzuca `game_event` 13 (start ładowania poziomu) i komunikaty „joined/left the game”. Samemu graczowi nowy silnik ich nie wysyła (S8), ale przy wielu graczach dostaliby je pozostali.
+6. Klient rozłącza się po 30 s bez żadnego pakietu (`READ_TIMEOUT`). W przerwie proxy samo wysyła klientowi keep-alive: pierwszy po 5 s, potem co 10 s. Ich id mają znacznik `0x686f74…` („hot”), a odpowiedzi klienta na nie przepadają (D13). Sprawdzone testem z atrapą silnika, która wstaje po 6 s (`crates/hot-proxy/tests/switch.rs`).
+7. Do silnika trafia tylko odpowiedź na keep-alive, który wysłał aktywny silnik. Odpowiedź na keep-alive starego silnika przepada. Horizon i tak nie wyrzuca za złe id, ale silnik Mojanga by wyrzucił.
+8. Numer wiadomości czatu (`global_index` w `PlayerChat`) nowy silnik liczy od 0, a klient sprawdza ciągłość i bez przesunięcia rozłączyłby się przy pierwszej wiadomości (`bad_chat_index`). Proxy dodaje do numeru liczbę wiadomości sprzed podmiany.
+9. Gdy podmiana trafi w środek paczki pakietów (`bundle_delimiter`), proxy ją zamyka, zanim wyśle `RemoveEntities`.
+10. Podpisanego czatu nie ma: silniki działają w trybie offline za proxy, więc klient pokazuje czat jako „Not Secure”, a lista ostatnio widzianych wiadomości nie przechodzi walidacji podpisu. Podmiana tego nie zmienia.
+11. Silnik zerwał połączenie bez `Disconnect` (awaria, restart przez supervisor): proxy trzyma gracza do 180 s i co 20 ms próbuje go zalogować pod aktywnym adresem. `Disconnect` od silnika (kick, ban, `stop` bez podmiany) idzie do gracza i kończy sesję. Gracz, którego nie udało się przenieść, dostaje komunikat „The server is restarting. Join again in a minute.”, a w logu jest `HOT-E0605`.
+
+## Sterowanie
+
+`hot-proxy` słucha komend na gnieździe Unix `<HOT_HOME>/hot-proxy.sock` (tylko właściciel, 0600). Jedna komenda na połączenie, odpowiedź to jedna linia JSON:
+
+```sh
+hot-proxy status --home /srv/horizon            # {"engine":"127.0.0.1:25566","players":["Dev"]}
+hot-proxy switch --home /srv/horizon            # przeniesienie na ten sam silnik
+hot-proxy switch 127.0.0.1:25567 --home /srv/horizon
+# {"engine":"127.0.0.1:25567","players":1,"moved":1,"failed":[],"pause_ms":512}
+```
+
+`switch` najpierw u wszystkich graczy w grze zamyka stary silnik (krok 3), potem każdego loguje do nowego równolegle, więc pauza nie rośnie z liczbą graczy. Na nowy silnik czeka do 25 s. Kod wyjścia 1, gdy choć jeden gracz nie przeszedł. Druga podmiana czeka, aż skończy się pierwsza.
 
 ## Jak sprawdzić, że podmiana zadziałała
 
-- `hot status`: aktywny silnik, czas ostatniej podmiany, pauza.
-- W logu proxy na każdą podmianę jest jedna linia z pauzą, liczbą usuniętych encji i liczbą odrzuconych pakietów. Błąd zamiany id ma osobną linię: `could not remap <pakiet>`.
+- `hot-proxy status`: aktywny silnik i gracze w grze.
+- W logu proxy (`<HOT_HOME>/logs/hot-proxy.jsonl`) każdy przeniesiony gracz ma linię „A player moved to another engine” z pauzą, liczbą usuniętych encji i liczbą odrzuconych pakietów, a cała podmiana linię „Engine switch finished” z podsumowaniem jak w odpowiedzi `switch`.
 - Po stronie gracza ekran `playing` przez cały czas (`horizon-ctl status`, `horizon-ctl events`). To pole nie widzi nakładki ładowania (S6), więc w testach podmiany potrzebne są też zrzuty klatki (`horizon-ctl screenshot`) w czasie podmiany.

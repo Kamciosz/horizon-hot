@@ -60,6 +60,11 @@
 - S13 (M0.19): rozgrzany silnik. Mixin `wait_for_world` w `hot-host` zatrzymuje start silnika serwera przed zajęciem świata, dopóki poprzedni silnik go nie zwolni. Proxy S8 ma flagi `--warm` i `--flush`, a `spikes/s13-rozgrzany-silnik/` stanowisko i podmiany na nowy plik silnika. Pauza podmiany na Macu: 470–541 ms na tym samym silniku i 509–531 ms na nowym pliku silnika (`docs/spike/s13-rozgrzany-silnik.md`).
 - Hamulec MSPT w `hotd` (M6.2): gdy p95 czasu ticku przekroczy 35 ms, ciężkie procesy tła `hotd` stają, a po 10 s poniżej 25 ms ruszają dalej. Mody wczytują się bez przerwy. `hot status` pokazuje wiersz „hamulec”.
 
+- `hot-proxy`: podmiana silnika pod graczem bez ekranu ładowania (M8.2). Zamiana id encji w obie strony (`remap.rs`), odtworzenie konfiguracji klienta, `RemoveEntities` dla encji starego silnika, przesunięcie numeru czatu, własne keep-alive w przerwie i odrzucanie nieaktualnych odpowiedzi, zamknięcie otwartej paczki pakietów (`link.rs`). Po awarii silnika gracz czeka do 180 s na silnik pod tym samym adresem.
+- `hot-proxy switch [ADRES]` i `hot-proxy status`: komendy przez gniazdo `<HOT_HOME>/hot-proxy.sock` (0600), odpowiedź w JSON-ie.
+- Kod `HOT-E0605` (gracza nie dało się przenieść na silnik) i `docs/bledy/HOT-E0605.md`.
+- `crates/hot-proxy/tests/switch.rs`: podmiana na ten sam i na inny silnik, awaria silnika z keep-alive od proxy, gniazdo sterujące, podmiana na martwy silnik.
+
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
 - Mixin `wait_for_world` przestaje czekać po pierwszym SIGTERM, więc przerwaną podmianę kończy `stop` i SIGTERM do silnika w 0,5 s zamiast 120 s.

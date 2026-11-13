@@ -15,8 +15,11 @@
 pub mod auth;
 pub mod codes;
 pub mod config;
+pub mod control;
 pub mod forwarding;
+pub mod link;
 pub mod ping;
+pub mod remap;
 pub mod session;
 
 /// PL: Wersja `hot-proxy` w logach. EN: The `hot-proxy` version in logs.

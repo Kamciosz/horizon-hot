@@ -2,20 +2,21 @@
 //! danymi gracza, a potem przesyłanie pakietów w obie strony. Kod logowania wzorowany na serwerze
 //! Horizona (`horizon-client/src/lan/conn.rs`, `authenticate`) i na próbie S8
 //! (`spikes/s8-podmiana/proxy`). Strona gracza i strona silnika mają osobne połączenia
-//! (własna kompresja, szyfrowanie tylko u gracza), więc później proxy podmieni silnik pod graczem.
+//! (własna kompresja, szyfrowanie tylko u gracza), więc proxy podmienia silnik pod graczem (`link`).
 //!
 //! EN: One player connection: handshake, online login, login to the engine with the player's signed
 //! data, then relaying packets both ways. The login code follows Horizon's server
 //! (`horizon-client/src/lan/conn.rs`, `authenticate`) and spike S8 (`spikes/s8-podmiana/proxy`).
 //! The player side and the engine side are separate connections (own compression, encryption only
-//! towards the player), so the proxy can later swap the engine under the player.
+//! towards the player), so the proxy can swap the engine under the player (`link`).
 
 use crate::auth::SessionService;
 use crate::config::{Config, COMPRESSION};
+use crate::link::{Link, Rejoin};
 use crate::{codes, forwarding};
 use horizon_protocol::{
     buf::write_varint,
-    connection::{ConnReader, ConnWriter, Connection},
+    connection::Connection,
     crypto::{offline_uuid, random_bytes, server_hash, uuid_string},
     ids,
     packets::{
@@ -28,7 +29,7 @@ use horizon_protocol::{
 use hot_diag::{DiagError, Logger};
 use serde_json::json;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -38,6 +39,14 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// PL: Tyle czeka proxy na połączenie z silnikiem. EN: How long the proxy waits to reach the engine.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// PL: Tyle gracz czeka na nowy silnik przy podmianie. EN: How long a player waits for a new engine in a swap.
+const SWITCH_WAIT: Duration = Duration::from_secs(25);
+
+/// PL: Tyle gracz czeka, gdy silnik padł: supervisor wznawia go po 5–40 s, a start trwa kilka sekund.
+/// EN: How long a player waits after an engine crash: the supervisor restarts it after 5–40 s, and a
+/// start takes a few seconds.
+const ENGINE_LOST_WAIT: Duration = Duration::from_secs(180);
 
 /// PL: Dlaczego połączenie się skończyło. EN: Why a connection ended.
 enum Failure {
@@ -58,20 +67,37 @@ fn gone(e: impl std::fmt::Display) -> Failure {
 }
 
 /// PL: Kim jest gracz po logowaniu. EN: Who the player is after login.
-struct Profile {
-    uuid: u128,
-    name: String,
-    properties: Vec<Property>,
+pub(crate) struct Profile {
+    pub(crate) uuid: u128,
+    pub(crate) name: String,
+    pub(crate) properties: Vec<Property>,
+}
+
+/// PL: Wynik logowania do silnika. EN: The outcome of a login to the engine.
+pub(crate) enum EngineLogin {
+    /// PL: Gracz wpuszczony; połączenie w konfiguracji. EN: Let in; the connection is in configuration.
+    Joined(Box<Connection>, login::LoginFinished),
+    /// PL: Silnik odmówił; powód w JSON-ie dla gracza. EN: The engine refused; the reason as JSON.
+    Refused(String),
+    /// PL: Błąd po stronie serwera. EN: A server-side failure.
+    Failed(DiagError),
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// PL: Proxy: ustawienia, klucz RSA na czas działania, usługa sesji i log.
 /// EN: The proxy: settings, an RSA key for its lifetime, the session service and the log.
 pub struct Proxy {
     config: Config,
+    /// PL: Aktywny silnik; zmienia go `switch`. EN: The active engine; `switch` changes it.
+    engine: Mutex<SocketAddr>,
+    links: Mutex<Vec<Weak<Link>>>,
     key: RsaPrivateKey,
     public_der: Vec<u8>,
     sessions: SessionService,
-    log: Arc<Logger>,
+    pub(crate) log: Arc<Logger>,
 }
 
 impl Proxy {
@@ -93,6 +119,8 @@ impl Proxy {
         let public_der = key.public_der();
         let sessions = SessionService::new(&config.discovery);
         Ok(Self {
+            engine: Mutex::new(config.engine),
+            links: Mutex::new(Vec::new()),
             config,
             key,
             public_der,
@@ -103,6 +131,17 @@ impl Proxy {
 
     /// PL: Przyjmuje graczy bez końca, każdego w osobnym wątku. EN: Accepts players forever, a thread each.
     pub fn serve(self: &Arc<Self>, listener: &TcpListener) {
+        // PL: Keep-alive od proxy dla graczy czekających na silnik. EN: Proxy keep-alives for waiting players.
+        let ticker = Arc::downgrade(self);
+        thread::spawn(move || {
+            while let Some(proxy) = ticker.upgrade() {
+                for link in proxy.live() {
+                    link.tick();
+                }
+                drop(proxy);
+                thread::sleep(Duration::from_millis(250));
+            }
+        });
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
@@ -117,17 +156,136 @@ impl Proxy {
         }
     }
 
-    fn connection(&self, stream: TcpStream) {
+    /// PL: Aktywny silnik. EN: The active engine.
+    pub fn engine(&self) -> SocketAddr {
+        *lock(&self.engine)
+    }
+
+    pub(crate) fn register(&self, link: &Arc<Link>) {
+        let mut links = lock(&self.links);
+        links.retain(|l| l.strong_count() > 0);
+        links.push(Arc::downgrade(link));
+    }
+
+    fn live(&self) -> Vec<Arc<Link>> {
+        lock(&self.links).iter().filter_map(Weak::upgrade).collect()
+    }
+
+    /// PL: Przenosi wszystkich graczy w grze na silnik `target` (domyślnie ten sam) bez ekranu
+    /// ładowania. Najpierw wszyscy przestają dostawać pakiety starego silnika, potem każdy loguje się
+    /// do nowego równolegle, więc pauza nie rośnie z liczbą graczy. Zwraca podsumowanie w JSON-ie.
+    /// EN: Moves every player in game to the engine `target` (the same one by default) with no
+    /// loading screen. First everybody stops getting the old engine's packets, then each logs in to
+    /// the new one in parallel, so the pause does not grow with the player count. Returns a JSON
+    /// summary.
+    pub fn switch(self: &Arc<Self>, target: Option<SocketAddr>) -> serde_json::Value {
+        self.switch_within(target, SWITCH_WAIT)
+    }
+
+    /// PL: `switch` z własnym limitem czekania na silnik. EN: `switch` with its own wait for the engine.
+    pub fn switch_within(
+        self: &Arc<Self>,
+        target: Option<SocketAddr>,
+        wait: Duration,
+    ) -> serde_json::Value {
+        let target = {
+            let mut engine = lock(&self.engine);
+            if let Some(t) = target {
+                *engine = t;
+            }
+            *engine
+        };
+        let links: Vec<Arc<Link>> = self.live().into_iter().filter(|l| l.in_game()).collect();
+        for link in &links {
+            link.begin_gap();
+        }
+        let results: Vec<Rejoin> = thread::scope(|s| {
+            let handles: Vec<_> = links
+                .iter()
+                .map(|l| s.spawn(move || l.rejoin(self, target, wait)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join()
+                        .unwrap_or_else(|_| Rejoin::Failed("the switch thread panicked".into()))
+                })
+                .collect()
+        });
+        let mut pause = Duration::ZERO;
+        let mut failed = Vec::new();
+        for (result, link) in results.into_iter().zip(&links) {
+            match result {
+                Rejoin::Moved(p) => pause = pause.max(p),
+                Rejoin::Superseded => {}
+                Rejoin::Failed(why) => {
+                    self.lost(link, &why, target);
+                    failed.push(json!({ "player": link.name, "reason": why }));
+                }
+            }
+        }
+        let summary = json!({
+            "engine": target.to_string(),
+            "players": links.len(),
+            "moved": links.len() - failed.len(),
+            "failed": failed,
+            "pause_ms": pause.as_millis(),
+        });
+        self.log.info("Engine switch finished", summary.clone());
+        summary
+    }
+
+    /// PL: Stan dla `hot-proxy status`. EN: The state for `hot-proxy status`.
+    pub fn status_json(&self) -> serde_json::Value {
+        let players: Vec<_> = self
+            .live()
+            .into_iter()
+            .filter(|l| l.in_game())
+            .map(|l| l.name.clone())
+            .collect();
+        json!({ "engine": self.engine().to_string(), "players": players })
+    }
+
+    /// PL: Silnik zerwał połączenie bez `Disconnect` (awaria, restart): gracz czeka na silnik pod
+    /// aktywnym adresem (D13). EN: The engine broke off without `Disconnect` (a crash, a restart):
+    /// the player waits for the engine at the active address (D13).
+    pub(crate) fn engine_lost(self: &Arc<Self>, link: &Arc<Link>, why: &str) {
+        let target = self.engine();
+        self.log.warn(
+            "The engine connection ended; the player waits for the engine",
+            json!({ "player": link.name, "engine": target.to_string(), "reason": why }),
+        );
+        link.begin_gap();
+        if let Rejoin::Failed(why) = link.rejoin(self, target, ENGINE_LOST_WAIT) {
+            self.lost(link, &why, target);
+        }
+    }
+
+    fn lost(&self, link: &Link, why: &str, target: SocketAddr) {
+        link.give_up("The server is restarting. Join again in a minute.");
+        self.log.error(
+            &DiagError::new(
+                codes::REJOIN,
+                format!("{} could not move to the engine at {target}: {why}", link.name),
+                "Check that the engine runs and takes players (logs/latest.log in the engine folder, hot-proxy status); the player can join again",
+            )
+            .context("player", link.name.as_str())
+            .context("engine", target.to_string())
+            .state("This player was disconnected with a message; players who moved play on"),
+        );
+    }
+
+    fn connection(self: &Arc<Self>, stream: TcpStream) {
         let Ok(address) = stream.peer_addr() else {
             return;
         };
         match self.login(stream, address) {
-            Ok(Some((client, engine, profile))) => {
+            Ok(Some((client, engine, profile, intent))) => {
                 let who = json!({ "player": profile.name, "uuid": uuid_string(profile.uuid) });
                 self.log
                     .info("A player joined through the proxy", who.clone());
                 let started = Instant::now();
-                let why = relay(client, engine);
+                let why = Link::run(self, client, engine, profile, intent, address.ip());
                 let mut left = who;
                 left["reason"] = why.into();
                 left["seconds"] = started.elapsed().as_secs().into();
@@ -148,7 +306,7 @@ impl Proxy {
         &self,
         stream: TcpStream,
         address: SocketAddr,
-    ) -> Result<Option<(Connection, Connection, Profile)>, Failure> {
+    ) -> Result<Option<(Connection, Connection, Profile, Intention)>, Failure> {
         stream.set_read_timeout(Some(LOGIN_TIMEOUT)).map_err(gone)?;
         let mut client = Connection::from_stream(stream).map_err(gone)?;
         let (id, p) = client.recv().map_err(gone)?;
@@ -177,18 +335,19 @@ impl Proxy {
                 properties: Vec::new(),
             }
         };
-        let (engine, finished) = match self.engine_login(&intent, &profile, address.ip()) {
-            Ok(Ok(done)) => done,
-            Ok(Err(reason_json)) => {
+        let target = self.engine();
+        let (engine, finished) = match self.engine_login(target, &intent, &profile, address.ip()) {
+            EngineLogin::Joined(c, finished) => (*c, finished),
+            EngineLogin::Refused(reason_json) => {
                 disconnect(&mut client, &reason_json);
                 return Err(engine_error(
                     format!("The engine refused {}: {reason_json}", profile.name),
                     "If the reason mentions the proxy or forwarding, give the engine and the proxy the same forwarding.secret; otherwise it is the engine's own refusal (whitelist, ban, full server)",
-                    &self.config,
+                    target,
                 )
                 .into());
             }
-            Err(e) => {
+            EngineLogin::Failed(e) => {
                 disconnect(
                     &mut client,
                     &translate("multiplayer.disconnect.server_shutdown"),
@@ -212,7 +371,7 @@ impl Proxy {
         if id != ids::login::serverbound::LOGIN_ACKNOWLEDGED {
             return Err(gone(format!("expected LoginAcknowledged, got packet {id}")));
         }
-        Ok(Some((client, engine, profile)))
+        Ok(Some((client, engine, profile, intent)))
     }
 
     /// PL: Szyfrowanie i `hasJoined` jak w serwerze gry. EN: Encryption and `hasJoined`, as the game server.
@@ -286,12 +445,25 @@ impl Proxy {
         }
     }
 
-    /// PL: Logowanie do silnika z danymi gracza podpisanymi sekretem. `Ok(Err)`: silnik odmówił
-    /// (powód w JSON-ie dla gracza).
-    /// EN: Logs in to the engine with the player's data signed with the secret. `Ok(Err)`: the engine
-    /// refused (the reason as JSON for the player).
-    fn engine_login(
+    /// PL: Logowanie do silnika `target` z danymi gracza podpisanymi sekretem.
+    /// EN: Logs in to the engine `target` with the player's data signed with the secret.
+    pub(crate) fn engine_login(
         &self,
+        target: SocketAddr,
+        intent: &Intention,
+        profile: &Profile,
+        address: IpAddr,
+    ) -> EngineLogin {
+        match self.try_engine_login(target, intent, profile, address) {
+            Ok(Ok((c, finished))) => EngineLogin::Joined(Box::new(c), finished),
+            Ok(Err(reason)) => EngineLogin::Refused(reason),
+            Err(e) => EngineLogin::Failed(e),
+        }
+    }
+
+    fn try_engine_login(
+        &self,
+        target: SocketAddr,
         intent: &Intention,
         profile: &Profile,
         address: IpAddr,
@@ -301,13 +473,12 @@ impl Proxy {
             engine_error(
                 what,
                 "Start the engine (systemctl status horizon-hot-server) and check that it listens on the address given to --engine",
-                config,
+                target,
             )
         };
-        let stream = TcpStream::connect_timeout(&config.engine, CONNECT_TIMEOUT).map_err(|e| {
+        let stream = TcpStream::connect_timeout(&target, CONNECT_TIMEOUT).map_err(|e| {
             fail(format!(
-                "hot-proxy cannot reach the engine at {}: {e}",
-                config.engine
+                "hot-proxy cannot reach the engine at {target}: {e}"
             ))
         })?;
         stream.set_read_timeout(Some(LOGIN_TIMEOUT)).map_err(|e| {
@@ -375,7 +546,7 @@ impl Proxy {
                     return Err(engine_error(
                         "The engine asked the proxy for encryption: it runs in online mode".into(),
                         "Set online_mode = false and add forwarding.secret in the engine's folder (the installer does this); the proxy checks the purchase instead",
-                        config,
+                        target,
                     ))
                 }
                 login::Clientbound::Disconnect(d) => return Ok(Err(d.reason_json)),
@@ -383,7 +554,7 @@ impl Proxy {
                     return Err(engine_error(
                         format!("The engine sent login packet {id}, which this proxy does not know"),
                         "Build the proxy at the engine's Horizon revision (horizon-protocol in the workspace Cargo.toml, ADR 0010)",
-                        config,
+                        target,
                     ))
                 }
                 login::Clientbound::LoginFinished(finished) => {
@@ -391,7 +562,7 @@ impl Proxy {
                         return Err(engine_error(
                             "The engine let the player in without asking for forwarded data: it has no forwarding.secret".into(),
                             "Put the proxy's secret into forwarding.secret next to the engine's server.toml and restart the engine",
-                            config,
+                            target,
                         ));
                     }
                     c.send(&login::Serverbound::LoginAcknowledged(Empty).encode())
@@ -407,7 +578,7 @@ impl Proxy {
     /// EN: A status query (server list) goes to the engine unchanged. A failure only ends the
     /// connection: the server list asks often, and a login reports the problem with a code.
     fn status(&self, mut client: Connection, intent: &Intention) {
-        let Ok(stream) = TcpStream::connect_timeout(&self.config.engine, CONNECT_TIMEOUT) else {
+        let Ok(stream) = TcpStream::connect_timeout(&self.engine(), CONNECT_TIMEOUT) else {
             return;
         };
         let _ = stream.set_read_timeout(Some(LOGIN_TIMEOUT));
@@ -434,56 +605,6 @@ impl Proxy {
             Ok(())
         };
         let _ = relay();
-    }
-}
-
-/// PL: Przesyła pakiety w obie strony, aż jedna strona się rozłączy; wtedy zamyka obie.
-/// EN: Relays packets both ways until one side disconnects, then closes both.
-fn relay(client: Connection, engine: Connection) -> String {
-    let (client_r, client_w) = client.split();
-    let (engine_r, engine_w) = engine.split();
-    // PL: Limit z logowania nie dotyczy gry: gracz może długo nic nie wysyłać (pauza, pobieranie
-    // paczki zasobów). EN: The login limit does not apply in game: a player may send nothing for a
-    // long time (pause menu, resource pack download).
-    let _ = client_r.set_read_timeout(None);
-    let _ = engine_r.set_read_timeout(None);
-    let first = Arc::new(OnceLock::new());
-    let first_to_client = Arc::clone(&first);
-    let to_client = thread::spawn(move || {
-        pump(
-            engine_r,
-            client_w,
-            ["the engine", "the player"],
-            &first_to_client,
-        );
-    });
-    pump(client_r, engine_w, ["the player", "the engine"], &first);
-    let _ = to_client.join();
-    first.get().cloned().unwrap_or_default()
-}
-
-/// PL: Przesyła pakiety z `from` do `to`. Pierwszy kończący zapisuje w `first`, która strona
-/// zerwała połączenie i dlaczego; potem zamyka obie, więc druga pętla też się kończy.
-/// EN: Relays packets from `from` to `to`. The first to end writes into `first` which side broke
-/// off and why, then closes both, so the other loop ends too.
-fn pump(mut from: ConnReader, mut to: ConnWriter, sides: [&str; 2], first: &OnceLock<String>) {
-    let mut packet = Vec::new();
-    let why = loop {
-        let (id, payload) = match from.recv() {
-            Ok(p) => p,
-            Err(e) => break format!("{} connection ended: {e}", sides[0]),
-        };
-        packet.clear();
-        write_varint(&mut packet, id);
-        packet.extend_from_slice(&payload);
-        if let Err(e) = to.send(&packet) {
-            break format!("{} connection ended: {e}", sides[1]);
-        }
-    };
-    let _ = first.set(why);
-    to.shutdown();
-    if let Ok(closer) = from.closer() {
-        closer.close();
     }
 }
 
@@ -517,8 +638,8 @@ fn disconnect(client: &mut Connection, reason_json: &str) {
     );
 }
 
-fn engine_error(what: String, fix: &str, config: &Config) -> DiagError {
+fn engine_error(what: String, fix: &str, engine: SocketAddr) -> DiagError {
     DiagError::new(codes::ENGINE_LOGIN, what, fix)
-        .context("engine", config.engine.to_string())
+        .context("engine", engine.to_string())
         .state("The player was refused; players already in the game play on")
 }
