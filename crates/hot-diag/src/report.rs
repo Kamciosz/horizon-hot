@@ -104,7 +104,7 @@ pub fn build_report(input: &ReportInput, redactor: &Redactor) -> String {
         let _ = write!(
             middle,
             "\n### Log: {}\n\n```text\n{body}\n```\n",
-            path.display()
+            mask(&path.display().to_string())
         );
     }
     format!("{head}\n{middle}\n{tail}")

@@ -162,7 +162,7 @@ Instalator wpisuje te same `--hot-source` i `--hot-ref`, z których zbudował se
 
 1. **Raz na dobę** `git fetch` w klonie `--src` i głowa gałęzi `--ref`. Gdy `--ref` to tag albo commit, serwer jest przypięty i nic się nie dzieje.
 2. **Podział** po `git diff --name-only <wersja z /srv/horizon/hot-version> <nowa>` (`plan` w `crates/hotd/src/upgrade.rs`):
-   - same dokumenty (oprócz `AGENTS.md`, który wbudowuje `hot-diag report`), testy, `spikes/`, `.github/`, `examples/`, pliki kontenera: nowa wersja zapisuje się bez budowy;
+   - same dokumenty (oprócz `AGENTS.md`, który wbudowuje `hot-diag report`), testy, `spikes/`, `.github/`, `examples/`, `crates/hot-play/` (aplikacja gracza), pliki kontenera: nowa wersja zapisuje się bez budowy;
    - tylko `crates/hot-core`: tryb `core`;
    - `crates/hot-host`, `crates/hot-abi`, instalator, `templates/`, `crates/hotd/src/slots.rs`: nic się nie wdraża, `HOT-E0706`;
    - reszta: tryb `full`.

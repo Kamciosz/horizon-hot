@@ -284,21 +284,26 @@ pub fn install(home: &Path, zip: &[u8]) -> Result<String, DiagError> {
     Ok(sha1)
 }
 
-/// PL: Podaje `GET /pack.zip` i `GET /hot_slots.hmod` z katalogu paczki. Pliki czytane przy
-/// każdym żądaniu, więc nowa paczka idzie od razu. Zanim `hotd` zbuduje pierwszą paczkę, idzie
+/// PL: Podaje `GET /pack.zip` i `GET /hot_slots.hmod` z katalogu paczki oraz `GET /hot-play.json`
+/// dla aplikacji gracza. Pliki czytane przy każdym żądaniu, więc nowa paczka idzie od razu. Zanim `hotd` zbuduje pierwszą paczkę, idzie
 /// paczka bez bloków: przy `require-resource-pack = true` brak paczki wyrzuciłby gracza. Każde
 /// połączenie w osobnym wątku, z limitem czasu.
-/// EN: Serves `GET /pack.zip` and `GET /hot_slots.hmod` from the pack folder. Files are read per
-/// request, so a new pack goes out at once. Until `hotd` builds the first pack, a pack without
+/// EN: Serves `GET /pack.zip` and `GET /hot_slots.hmod` from the pack folder and `GET /hot-play.json`
+/// for the player app. Files are read per request, so a new pack goes out at once. Until `hotd` builds the first pack, a pack without
 /// blocks goes out: with `require-resource-pack = true` a missing pack would kick the player. One
 /// thread per connection, with a timeout.
 pub fn serve(listener: &TcpListener, home: &Path, log: &Arc<Logger>) {
     let folder = dir(home);
     let base: Arc<[u8]> = zip(&files(&Slots::default(), &BTreeMap::new())).into();
     for stream in listener.incoming().flatten() {
-        let (folder, base, log) = (folder.clone(), Arc::clone(&base), Arc::clone(log));
+        let (home, folder, base, log) = (
+            home.to_owned(),
+            folder.clone(),
+            Arc::clone(&base),
+            Arc::clone(log),
+        );
         std::thread::spawn(move || {
-            if let Err(e) = answer(stream, &folder, &base) {
+            if let Err(e) = answer(stream, &home, &folder, &base) {
                 log.warn(
                     "hotd serve-pack could not answer a request",
                     json!({ "error": e.to_string() }),
@@ -308,7 +313,24 @@ pub fn serve(listener: &TcpListener, home: &Path, log: &Arc<Logger>) {
     }
 }
 
-fn answer(mut stream: TcpStream, folder: &Path, base: &[u8]) -> std::io::Result<()> {
+/// PL: Co aplikacja gracza (`hot-play`, D26) musi zgrać z serwerem: rewizja Horizona działającego
+/// silnika (zmienia się po podmianie z M9.1, więc liczona przy każdym żądaniu) i sha1 puli slotów.
+/// EN: What the player app (`hot-play`, D26) has to match with the server: the running engine's
+/// Horizon revision (it changes after an M9.1 swap, so it is read per request) and the slot pool's
+/// sha1.
+#[must_use]
+pub fn play_info(home: &Path) -> Value {
+    let horizon = fs::read_to_string(home.join("server.toml"))
+        .ok()
+        .and_then(|text| crate::swap::toml_value(&text, "engine", "path"))
+        .and_then(|engine| crate::build::engine_revision(Path::new(&engine)));
+    let slots = fs::read(dir(home).join("hot_slots.hmod"))
+        .ok()
+        .map(|b| sha1_hex(&b));
+    json!({ "horizon": horizon, "slots_sha1": slots })
+}
+
+fn answer(mut stream: TcpStream, home: &Path, folder: &Path, base: &[u8]) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(60)))?;
     let mut head = Vec::new();
@@ -333,6 +355,9 @@ fn answer(mut stream: TcpStream, folder: &Path, base: &[u8]) -> std::io::Result<
         ("GET" | "HEAD", "/hot_slots.hmod") => fs::read(folder.join("hot_slots.hmod"))
             .ok()
             .map(|b| (b, "application/octet-stream")),
+        ("GET" | "HEAD", "/hot-play.json") => {
+            Some((play_info(home).to_string().into_bytes(), "application/json"))
+        }
         _ => None,
     };
     let Some(body) = body else {
@@ -484,7 +509,31 @@ mod tests {
             panic!("install failed");
         };
         assert_eq!(sha1, sha1_hex(b"zawartosc"));
+        let info = get("/hot-play.json").unwrap_or_default();
+        assert!(
+            info.ends_with(r#"{"horizon":null,"slots_sha1":null}"#),
+            "{info}"
+        );
         let _ = fs::write(dir(&home).join("hot_slots.hmod"), b"pula");
+        let engine = home.join("engines").join("e").join("horizon-server");
+        let _ = fs::create_dir_all(engine.parent().unwrap_or(&home));
+        let rev = "66f3981f522b24c250b21523a70080965b940424";
+        let _ = fs::write(
+            engine.with_file_name("native-mods.json"),
+            format!(r#"{{"horizon":"{rev}"}}"#),
+        );
+        let _ = fs::write(
+            home.join("server.toml"),
+            format!("[engine]\npath = \"{}\"\n", engine.display()),
+        );
+        let info = get("/hot-play.json").unwrap_or_default();
+        assert!(
+            info.ends_with(&format!(
+                r#"{{"horizon":"{rev}","slots_sha1":"{}"}}"#,
+                sha1_hex(b"pula")
+            )),
+            "{info}"
+        );
         let hmod = get("/hot_slots.hmod").unwrap_or_default();
         assert!(
             hmod.starts_with("HTTP/1.1 200") && hmod.ends_with("pula"),

@@ -51,7 +51,7 @@ scripts/           server-install.sh (instalator serwera na Ubuntu, D25); hot-bu
                    hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)
 templates/server-repo/  pliki do repo serwera: hot.yml (kopiuje instalator) i README z układem repo dla autorów modów
 crates/hot-proxy/  proxy: logowanie online, podpis Velocity dla silnika, przekazywanie ruchu (M8.1; podmiana silnika od M8.2)
-crates/hot-play/   aplikacja gracza                            (planowany)
+crates/hot-play/   aplikacja gracza: menu, „Graj”, „Napraw” nad horizon-launcher (M11, ADR 0015)
 docs/bledy/        katalog kodów błędów HOT-EXXXX (test: crates/hot-diag/tests/catalog.rs)
 docs/adr/          decyzje (jedna decyzja = jeden plik)
 docs/zmiany/       wpisy do changelogu z pull requestów

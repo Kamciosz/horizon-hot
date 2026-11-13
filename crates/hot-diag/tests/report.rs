@@ -122,3 +122,19 @@ fn cli_writes_the_report_and_masks_the_secret_file() -> Result<(), DiagError> {
     let _ = fs::remove_dir_all(dir);
     Ok(())
 }
+
+#[test]
+fn the_log_folder_in_headings_is_masked_too() -> Result<(), DiagError> {
+    let dir = logs_with_artificial_error("path")?;
+    let mut redactor = Redactor::new();
+    redactor.add(dir.display().to_string());
+    let input = ReportInput {
+        logs_dir: dir.clone(),
+        ..ReportInput::default()
+    };
+    let report = build_report(&input, &redactor);
+    assert!(report.contains("### Log: "), "{report}");
+    assert!(!report.contains(&dir.display().to_string()), "path leaked");
+    let _ = fs::remove_dir_all(&dir);
+    Ok(())
+}

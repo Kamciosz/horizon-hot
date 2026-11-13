@@ -1,0 +1,18 @@
+[package]
+name = "hot-play"
+description = "Aplikacja gracza: sprawdza, naprawia i uruchamia grę na serwerze horizon-hot (D26, M11)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+hot-diag = { path = "../hot-diag" }
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+ureq.workspace = true
+
+[lints]
+workspace = true

@@ -59,7 +59,15 @@ pub enum Plan {
 /// PL: Pliki, które nie trafiają na serwer z pakietu `hotd upgrade`. EN: Files that do not reach
 /// the server through `hotd upgrade`.
 fn ignored(file: &str) -> bool {
-    const PREFIXES: [&str; 4] = ["docs/", "spikes/", ".github/", "examples/"];
+    // PL: `crates/hot-play` to aplikacja gracza; na serwer nie trafia. EN: `crates/hot-play` is the
+    // player app; it never reaches the server.
+    const PREFIXES: [&str; 5] = [
+        "docs/",
+        "spikes/",
+        ".github/",
+        "examples/",
+        "crates/hot-play/",
+    ];
     const FILES: [&str; 5] = [
         "Dockerfile",
         ".dockerignore",
@@ -512,7 +520,8 @@ mod tests {
             plan(&files(&[
                 "docs/a.md",
                 "PLAN.md",
-                "crates/hotd/tests/flow.rs"
+                "crates/hotd/tests/flow.rs",
+                "crates/hot-play/src/game.rs"
             ])),
             Plan::Nothing
         );
