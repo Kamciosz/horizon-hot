@@ -11,6 +11,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 rm -rf "$out"
 mkdir -p "$out/api" "$out/hot_abi"
 cp "$here/horizon-mixin.toml" "$out/"
+cp "$here/wait_for_world.rs" "$out/"
 cp "$here/api/Cargo.toml" "$out/api/"
 cp -R "$here/api/src" "$out/api/"
 cp "$here/../hot-abi/Cargo.toml" "$out/hot_abi/"

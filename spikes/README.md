@@ -15,4 +15,5 @@ horizon-launcher native-build <katalog paczki> --server-output <katalog> --versi
 | `s2-s5-pula-slotow/paczka/` | S5, M0.6 (paczka zasobów serwera) | `docs/spike/s5-wyglad-slotu-z-paczki-serwera.md` |
 | `s3-s4-hak-komendy-i-tick/` | S3 i S4, M0.4–M0.5 | `docs/spike/s3-…`, `docs/spike/s4-…` |
 | `s7-rozmiar-puli/` | S7, M0.8 (`gen.py` tworzy pulę, skrypty pomiaru startu i podmiany) | `docs/spike/s7-rozmiar-puli.md` |
+| `s13-rozgrzany-silnik/` | S13, M0.19 (stanowisko dwóch serwerów i podmiany na nowy plik silnika; proxy S8 z `--warm --flush`) | `docs/spike/s13-rozgrzany-silnik.md` |
 | `s8-podmiana/proxy/` | S8, M0.9 (`cargo build --release`, proxy podmiany silnika); S6, M0.7 (`--pack-file`, paczka zasobów w trakcie gry) | `docs/spike/s8-podmiana-prototyp.md`, `docs/spike/s6-paczka-w-trakcie-gry.md` |

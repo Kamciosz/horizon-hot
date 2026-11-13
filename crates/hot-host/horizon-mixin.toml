@@ -15,3 +15,17 @@ path = "api"
 [[crate]]
 id = "hot_abi"
 path = "hot_abi"
+
+# PL: Rozgrzany silnik (D11, S13): na zajętym świecie silnik serwera czeka, aż poprzedni go zwolni,
+# zamiast kończyć się błędem. Wszystko przed wczytaniem świata dzieje się więc przed zamrożeniem.
+# EN: Warm engine (D11, S13): on a world in use the server engine waits for the previous one to
+# release it instead of failing, so everything before the world load happens before the freeze.
+[[injection]]
+id = "wait_for_world"
+target = "horizon_client::game::world_loading::WorldRequest::prepare_world"
+kind = "HEAD"
+helper = "wait_for_world.rs"
+bindings = [
+  { name = "request", ty = "&WorldRequest", value = "&self" },
+  { name = "options", ty = "&Options", value = "options" },
+]

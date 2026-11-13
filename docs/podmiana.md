@@ -1,6 +1,6 @@
 # Podmiana silnika bez rozłączania graczy
 
-Jak `hot-proxy` i `hotd` przenoszą graczy na nowy silnik (`horizon-server`), żeby nikt nie zobaczył ekranu ładowania ani nie stracił połączenia. Decyzje: D10–D13 w `PLAN.md`. Dowody: `docs/spike/s8-podmiana-analiza-klienta.md` (kod klienta), `docs/spike/s8-podmiana-prototyp.md` (prototyp i pomiar), `docs/spike/s12-dwa-serwery-jeden-swiat.md` (dwa silniki na jednym świecie).
+Jak `hot-proxy` i `hotd` przenoszą graczy na nowy silnik (`horizon-server`), żeby nikt nie zobaczył ekranu ładowania ani nie stracił połączenia. Decyzje: D10–D13 w `PLAN.md`. Dowody: `docs/spike/s8-podmiana-analiza-klienta.md` (kod klienta), `docs/spike/s8-podmiana-prototyp.md` (prototyp i pomiar), `docs/spike/s12-dwa-serwery-jeden-swiat.md` (dwa silniki na jednym świecie), `docs/spike/s13-rozgrzany-silnik.md` (rozgrzany silnik).
 
 ## Kiedy
 
@@ -11,22 +11,28 @@ Jak `hot-proxy` i `hotd` przenoszą graczy na nowy silnik (`horizon-server`), ż
 
 ## Co widzi gracz
 
-Przez ok. 1 s świat stoi. Gracz może chodzić i niszczyć bloki, ale po przerwie wraca na miejsce sprzed niej, a zniszczone bloki wracają: wszystko, co zrobił w tym czasie, przepada (S8). Potem znikają wszystkie moby, gracze i przedmioty na ziemi, a po ok. 0,8 s wracają. Ekran gry zostaje, połączenie też.
+Przez ok. 0,5 s świat stoi (S13, Mac). Gracz może chodzić i niszczyć bloki, ale po przerwie wraca na miejsce sprzed niej, a zniszczone bloki wracają: wszystko, co zrobił w tym czasie, przepada (S8). Potem znikają wszystkie moby, gracze i przedmioty na ziemi, a po ok. 0,8 s wracają. Ekran gry zostaje, połączenie też.
 
 ## Kolejność
 
-| Krok | Kto | Co | Czas (Mac, pusty świat) |
+Rozgrzany silnik (D11, S13): wszystko, co nie wymaga świata, dzieje się przed zamrożeniem.
+
+| Krok | Kto | Co | Czas (Mac, pula 1024/2048) |
 |---|---|---|---|
-| 1 | `hot-proxy` | przestaje przekazywać ruch w obie strony; pakiety klienta odrzuca | — |
-| 2 | `hotd` | `stop` starego silnika (zapis świata i graczy, zwolnienie `session.lock`); czeka na **zniknięcie procesu silnika**, nie na koniec komendy | ok. 0,4 s |
-| 3 | `hotd` | `start` nowego silnika na tym samym świecie; **bez czekania** na zakończenie komendy | — |
-| 4 | `hot-proxy` | co 20 ms próba logowania do nowego silnika jako każdy gracz | ok. 0,55 s od kroku 3 |
-| 5 | `hot-proxy` | odtworzenie konfiguracji klienta, połknięcie `Login`, `PlayerLoaded` do silnika | < 20 ms |
-| 6 | `hot-proxy` | `RemoveEntities` do klienta z encjami starego silnika; zamiana id gracza; dalej zwykłe przekazywanie | — |
+| 1 | `hotd` | wstrzymuje zmiany datapacków; `start` nowego silnika w tle, **bez czekania** na koniec komendy (wraca dopiero w fazie `running`) | — |
+| 2 | nowy silnik | zasoby, cache treści modów, port; przed zajęciem świata czeka (mixin `wait_for_world`), w logu „horizon-hot: waiting for the world” | 0,5 s z ciepłym cache, ok. 3 s z zimnym; **przed zamrożeniem** |
+| 3 | `hot-proxy` | przestaje przekazywać ruch w obie strony; pakiety klienta odrzuca. **Początek pauzy** | — |
+| 4 | `hotd` | `save-all flush`, potem `stop` starego silnika (zapis świata i graczy, zwolnienie `session.lock`) | 0,4–0,6 s |
+| 5 | nowy silnik | zajmuje świat w ciągu 2 ms od zwolnienia, wczytuje go | ok. 0,1 s |
+| 6 | `hot-proxy` | co 20 ms próba logowania do nowego silnika jako każdy gracz; odtworzenie konfiguracji klienta, połknięcie `Login`, `PlayerLoaded` do silnika | < 30 ms |
+| 7 | `hot-proxy` | `RemoveEntities` do klienta z encjami starego silnika; zamiana id gracza; dalej zwykłe przekazywanie | — |
 
-Razem: 0,96–1,07 s w prototypie bez modów. Z pulą slotów start nowego silnika trwa dłużej: 1,16–1,82 s, a z nowym plikiem silnika (zimny cache treści modów) ok. 3,9 s przy pełnej puli (`docs/sloty.md`). Nowy silnik musi startować dopiero po zatrzymaniu starego. Inaczej nie otworzy świata i wpadnie w pętlę restartów (S12).
+Razem: 470–541 ms na tym samym silniku i 509–531 ms na nowym pliku silnika z pustym cache. Bez rozgrzania było 1,16–1,34 s i ok. 2,2 s.
 
-Decyzja użytkownika (2026-11-12): pauza krótsza niż 1 s w każdym przypadku. Ta kolejność tego nie spełnia. Droga do budżetu, czyli rozgrzany silnik, jest w `PLAN.md` (D11) i w `docs/adr/0004-pauza-podmiany-ponizej-1-s.md`; sprawdza ją próba S13.
+Błędy:
+- `start` nowej strony z kodem różnym od 0 (wraca po 0,5–1 s) to błąd przed zamrożeniem: gracze zostają na starym silniku, `hotd` zgłasza błąd od razu.
+- Przerwana podmiana: `hotd` zatrzymuje czekający silnik. Po 120 s czekania silnik idzie dalej, dostaje błąd zajętego świata i supervisor wpada w pętlę restartów (S12).
+- Każdy silnik pod nową ścieżką: nadpisanie pliku, z którego działa silnik, zabija następny start (macOS, kod 137) albo się nie udaje (Linux, „Text file busy”).
 
 ## Zasady dla `hot-proxy`
 

@@ -60,12 +60,17 @@ struct Args {
     backends: [Backend; 2],
     swap_file: PathBuf,
     pack_file: Option<PathBuf>,
+    /// S13: nowy silnik startuje przed zamrożeniem i czeka na świat (mixin `wait_for_world`).
+    warm: bool,
+    /// S13: `save-all flush` na starym silniku tuż przed zamrożeniem.
+    flush: bool,
 }
 
 fn parse_args() -> R<Args> {
     let mut a = std::env::args().skip(1);
     let (mut listen, mut bin, mut ba, mut bb, mut swap, mut pack) =
         (None, None, None, None, None, None);
+    let (mut warm, mut flush) = (false, false);
     let backend = |s: String| -> R<Backend> {
         let (port, dir) = s.split_once(':').ok_or("backend must be PORT:DIR")?;
         Ok(Backend {
@@ -74,6 +79,17 @@ fn parse_args() -> R<Args> {
         })
     };
     while let Some(k) = a.next() {
+        match k.as_str() {
+            "--warm" => {
+                warm = true;
+                continue;
+            }
+            "--flush" => {
+                flush = true;
+                continue;
+            }
+            _ => {}
+        }
         let v = a.next().ok_or(format!("{k} needs a value"))?;
         match k.as_str() {
             "--listen" => listen = Some(v),
@@ -91,6 +107,8 @@ fn parse_args() -> R<Args> {
         backends: [ba.ok_or("--a missing")?, bb.ok_or("--b missing")?],
         swap_file: swap.ok_or("--swap-file missing")?,
         pack_file: pack,
+        warm,
+        flush,
     })
 }
 
@@ -606,8 +624,66 @@ fn configure(c: &mut Connection, rec: &Recorded) -> R<()> {
     }
 }
 
+/// S13: uruchamia silnik `to` i czeka, aż mixin `wait_for_world` zgłosi, że czeka na świat.
+fn start_warm(args: &Args, to: usize) -> R<()> {
+    let dir = &args.backends[to].dir;
+    let log = dir.join("logs/latest.log");
+    let _ = std::fs::remove_file(&log);
+    let t = ms();
+    // PL: `start` czeka na fazę `running`, więc nie wraca, dopóki silnik czeka na świat.
+    // EN: `start` waits for the `running` phase, so it does not return while the engine waits.
+    let mut child = Command::new(&args.server_bin)
+        .arg("--dir")
+        .arg(dir)
+        .arg("start")
+        .stdout(std::process::Stdio::null())
+        .spawn()?;
+    thread::spawn(move || {
+        let status = child.wait();
+        log!(
+            "warm: horizon-server start returned {status:?} after {:.0} ms",
+            ms() - t
+        );
+    });
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        if text.contains("horizon-hot: waiting for the world") {
+            break;
+        }
+        if text.contains("Done (") {
+            return Err("warm: the new engine opened the world without waiting".into());
+        }
+        if Instant::now() > deadline {
+            return Err("warm: the new engine did not reach the world in 60 s".into());
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    log!(
+        "warm: engine {to} waits for the world after {:.0} ms",
+        ms() - t
+    );
+    Ok(())
+}
+
 fn swap(sh: &Arc<Shared>, args: &Args, active: &mut usize) -> R<()> {
     let (from, to) = (*active, 1 - *active);
+    if args.warm {
+        start_warm(args, to)?;
+    }
+    if args.flush {
+        let t = ms();
+        let status = Command::new(&args.server_bin)
+            .arg("--dir")
+            .arg(&args.backends[from].dir)
+            .args(["cmd", "save-all", "flush"])
+            .stdout(std::process::Stdio::null())
+            .status()?;
+        log!(
+            "flush: save-all flush returned {status:?} after {:.0} ms",
+            ms() - t
+        );
+    }
     {
         let _client = lock(&sh.client);
         sh.generation.fetch_add(1, Ordering::SeqCst);
@@ -633,6 +709,31 @@ fn swap(sh: &Arc<Shared>, args: &Args, active: &mut usize) -> R<()> {
         .arg(&args.backends[from].dir)
         .arg("stop")
         .spawn()?;
+    if args.warm {
+        // PL: Nowy silnik sam weźmie świat, gdy stary zwolni `session.lock`; proxy od razu się loguje.
+        // EN: The new engine takes the world itself once the old one releases `session.lock`.
+        thread::spawn(move || {
+            let status = stop.wait();
+            log!(
+                "swap: horizon-server stop returned {status:?} after {:.0} ms",
+                ms() - t
+            );
+        });
+    } else {
+        cold_switch(args, from, to, stop, t)?;
+    }
+    login_new(sh, args, to, generation)?;
+    *active = to;
+    Ok(())
+}
+
+fn cold_switch(
+    args: &Args,
+    from: usize,
+    to: usize,
+    mut stop: std::process::Child,
+    t: f64,
+) -> R<()> {
     let pattern = format!(
         "control-socket {}/.horizon/engine.json",
         args.backends[from].dir.display()
@@ -672,6 +773,10 @@ fn swap(sh: &Arc<Shared>, args: &Args, active: &mut usize) -> R<()> {
             ms() - t
         );
     });
+    Ok(())
+}
+
+fn login_new(sh: &Arc<Shared>, args: &Args, to: usize, generation: u64) -> R<()> {
     let rec = lock(&sh.recorded).clone();
     let deadline = Instant::now() + Duration::from_secs(25);
     let mut conn = loop {
@@ -720,7 +825,6 @@ fn swap(sh: &Arc<Shared>, args: &Args, active: &mut usize) -> R<()> {
     *lock(&sh.backend) = Some(writer);
     let sh2 = Arc::clone(sh);
     thread::spawn(move || backend_loop(reader, sh2, generation, false));
-    *active = to;
     Ok(())
 }
 

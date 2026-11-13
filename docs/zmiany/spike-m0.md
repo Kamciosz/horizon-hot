@@ -53,9 +53,11 @@
 - `hotd` rozpoznaje świat, którego silnik nie wczytał (M7.3): gdy silnik nie działa, a najnowszy raport w `crash-reports/` mówi `Failed to load world`, `hot status` pokazuje wiersz „ŚWIAT” z powodem i poleceniem przywrócenia najnowszej kopii, a log dostaje `HOT-E0212`. Przywraca operator, nie `hotd`.
 - Slice'y systemd (M6.2): silnik i `hot-pack` w `horizon-game.slice`, `hotd` i kopia `hot-state` w `horizon-bg.slice` z niskim priorytetem.
 - `server-install.sh --uninstall` (M6.3): bez `--yes` pokazuje plan, z `--yes` usuwa usługi, slice'y, reguły zapory, nasze pliki i adres paczki zasobów, a zostawia świat, kopie, logi i użytkownika `horizon`. Stan modów trafia przedtem do `backups/`. Kod `HOT-E0113`.
+- S13 (M0.19): rozgrzany silnik. Mixin `wait_for_world` w `hot-host` zatrzymuje start silnika serwera przed zajęciem świata, dopóki poprzedni silnik go nie zwolni. Proxy S8 ma flagi `--warm` i `--flush`, a `spikes/s13-rozgrzany-silnik/` stanowisko i podmiany na nowy plik silnika. Pauza podmiany na Macu: 470–541 ms na tym samym silniku i 509–531 ms na nowym pliku silnika (`docs/spike/s13-rozgrzany-silnik.md`).
 - Hamulec MSPT w `hotd` (M6.2): gdy p95 czasu ticku przekroczy 35 ms, ciężkie procesy tła `hotd` stają, a po 10 s poniżej 25 ms ruszają dalej. Mody wczytują się bez przerwy. `hot status` pokazuje wiersz „hamulec”.
 
 ### Zmienione
+- D11 i `docs/podmiana.md`: nowy silnik startuje przed `stop` starego i czeka na świat; `save-all flush` przed zamrożeniem. D16: czekający silnik zajmuje 363 MB. Wniosek 3 z S12 dotyczy już tylko przerwanej podmiany i silnika bez `hot-host`. Nowy krok M0.20 (rozmiar puli i bloki z tickiem).
 - Hamulec MSPT wysyła `SIGSTOP`/`SIGCONT` wywołaniem systemowym (`libc`, ADR 0009) zamiast programem `kill`, który na Ubuntu 24.04 źle czyta ujemny numer grupy procesów.
 - Instalator ustawia `stable` jako domyślny toolchain użytkownika `horizon`, gdy go brakuje; bez tego `cargo horizon-mod` (pula slotów) nie startował.
 - Ponowne uruchomienie instalatora nie odrzuca już portu 8131, gdy zajmuje go nasza własna usługa `horizon-hot-pack`.
