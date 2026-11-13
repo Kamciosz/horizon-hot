@@ -443,6 +443,21 @@ fn upgrade(mut it: impl Iterator<Item = String>) -> ExitCode {
     };
     let abs = |p: PathBuf| std::path::absolute(&p).unwrap_or(p);
     let home = abs(home);
+    let owner = match user.as_deref().map(user_ids).transpose() {
+        Ok(o) => o,
+        Err(why) => {
+            eprintln!("hotd: --user: {why}");
+            return ExitCode::from(2);
+        }
+    };
+    // PL: Usługa działa jako root, a te pliki czyta i pisze też `horizon` (`hot status`, `hot-diag`).
+    // EN: The service runs as root, and `horizon` reads and writes these files too (`hot status`,
+    // `hot-diag`).
+    let give = |path: &std::path::Path| {
+        if let Some((uid, gid)) = owner {
+            let _ = std::os::unix::fs::chown(path, Some(uid), Some(gid));
+        }
+    };
     let log = match hot_diag::Logger::open(
         hot_diag::LogConfig::new("hotd-upgrade", hotd::VERSION, home.join("logs")),
         hot_diag::Redactor::new(),
@@ -453,6 +468,7 @@ fn upgrade(mut it: impl Iterator<Item = String>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    give(&home.join("logs").join("hotd-upgrade.jsonl"));
     hot_diag::install_panic_hook(std::sync::Arc::clone(&log));
     let mut env = hotd::upgrade_env::Real {
         home: home.clone(),
@@ -462,7 +478,7 @@ fn upgrade(mut it: impl Iterator<Item = String>) -> ExitCode {
         source,
         git_ref,
         server,
-        user,
+        user: owner,
         units,
         log: std::sync::Arc::clone(&log),
     };
@@ -478,8 +494,26 @@ fn upgrade(mut it: impl Iterator<Item = String>) -> ExitCode {
         log.error(&e);
         return ExitCode::FAILURE;
     }
+    give(&home.join("hot-state").join("upgrade.json"));
+    give(&home.join("logs").join("hotd-upgrade.jsonl"));
     println!("{}", state.to_json());
     ExitCode::SUCCESS
+}
+
+/// PL: uid i gid użytkownika z `id`, jak w instalatorze. EN: The user's uid and gid from `id`, as
+/// in the installer.
+fn user_ids(user: &str) -> Result<(u32, u32), String> {
+    let id = |flag: &str| -> Result<u32, String> {
+        let out = std::process::Command::new("id")
+            .args([flag, user])
+            .output()
+            .map_err(|e| format!("id {flag} {user}: {e}"))?;
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .map_err(|_| format!("no user {user}"))
+    };
+    Ok((id("-u")?, id("-g")?))
 }
 
 fn serve_pack(home: &std::path::Path, port: u16) -> ExitCode {

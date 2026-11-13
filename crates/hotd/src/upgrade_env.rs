@@ -1,17 +1,20 @@
 //! PL: Prawdziwy świat samoaktualizacji ([`crate::upgrade::Env`]). Git i cargo w klonie `--src`,
-//! z tymi samymi pakietami co krok 5 instalatora. Jako root polecenia idą przez
-//! `runuser -u horizon` z tym samym `HOME` i `PATH` co `as_horizon` w instalatorze, więc w klonie
-//! i w `target/` nie powstają pliki roota. Rdzeń przez `horizon-server cmd "hot core load …"`,
-//! gracze z gniazda `hot-proxy`, restart przez `systemctl`.
+//! z tymi samymi pakietami co krok 5 instalatora. Jako root polecenia działają z uid i gid
+//! użytkownika `horizon` i z tym samym `HOME` i `PATH` co `as_horizon` w instalatorze, więc w klonie
+//! i w `target/` nie powstają pliki roota. Bez `runuser`: nie ma sesji PAM co sekundę, a hamulec
+//! zatrzymuje samo cargo. Rdzeń przez `horizon-server cmd "hot core load …"`, gracze z gniazda
+//! `hot-proxy`, restart przez `systemctl`.
 //! EN: The self-update's real world ([`crate::upgrade::Env`]). git and cargo in the `--src` clone,
-//! with the same packages as installer step 5. As root, commands go through `runuser -u horizon`
-//! with the same `HOME` and `PATH` as `as_horizon` in the installer, so no root-owned files appear
-//! in the clone or in `target/`. The core through `horizon-server cmd "hot core load …"`, players
+//! with the same packages as installer step 5. As root, commands run with the `horizon` user's uid
+//! and gid and the same `HOME` and `PATH` as `as_horizon` in the installer, so no root-owned files
+//! appear in the clone or in `target/`. No `runuser`: no PAM session every second, and the brake
+//! stops cargo itself. The core through `horizon-server cmd "hot core load …"`, players
 //! from the `hot-proxy` socket, restarts through `systemctl`.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -34,6 +37,11 @@ const NEXT: &str = ".next";
 const ENGINE_UNIT: &str = "horizon-hot-server";
 /// PL: Czas na wstanie usług po restarcie. EN: The time for the services to come up.
 const COME_UP: Duration = Duration::from_secs(180);
+/// PL: Usługi z `Restart=always` są aktywne zaraz po starcie, nawet gdy program pada po chwili.
+/// Dopiero ten sam `MainPID` i `NRestarts` po tym czasie znaczy, że wstały. EN: Services with
+/// `Restart=always` are active right after the start even when the program dies a moment later.
+/// Only the same `MainPID` and `NRestarts` after this time means they came up.
+const STABLE: Duration = Duration::from_secs(30);
 
 /// PL: Ustawienia i narzędzia prawdziwego świata. EN: The real world's settings and tools.
 #[derive(Clone)]
@@ -48,9 +56,10 @@ pub struct Real {
     pub source: String,
     pub git_ref: String,
     pub server: PathBuf,
-    /// PL: Użytkownik dla git, cargo i `horizon-server`, gdy działamy jako root. EN: The user for
-    /// git, cargo and `horizon-server` when we run as root.
-    pub user: Option<String>,
+    /// PL: uid i gid dla git, cargo, `horizon-server` i nowych programów, gdy działamy jako root.
+    /// EN: The uid and gid for git, cargo, `horizon-server` and the new programs when we run as
+    /// root.
+    pub user: Option<(u32, u32)>,
     /// PL: Usługi do restartu w kolejności. EN: The services to restart, in order.
     pub units: Vec<String>,
     pub log: Arc<Logger>,
@@ -93,21 +102,18 @@ impl Real {
     /// PL: Polecenie jako `horizon`, gdy działamy jako root. EN: A command as `horizon` when we run
     /// as root.
     fn cmd(&self, program: &Path) -> Command {
-        match &self.user {
-            Some(user) => {
-                let mut c = Command::new("runuser");
-                c.args(["-u", user, "--", "env"])
-                    .arg(format!("HOME={}", self.root.display()))
-                    .arg(format!(
-                        "PATH={}/.cargo/bin:{}:/usr/local/bin:/usr/bin:/bin",
-                        self.root.display(),
-                        self.bin.display()
-                    ))
-                    .arg(program);
-                c
-            }
-            None => Command::new(program),
+        let mut c = Command::new(program);
+        if let Some((uid, gid)) = self.user {
+            c.uid(uid).gid(gid).env("HOME", &self.root).env(
+                "PATH",
+                format!(
+                    "{}/.cargo/bin:{}:/usr/local/bin:/usr/bin:/bin",
+                    self.root.display(),
+                    self.bin.display()
+                ),
+            );
         }
+        c
     }
 
     fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
@@ -207,6 +213,25 @@ impl Real {
                     e,
                 )
             })
+    }
+
+    /// PL: `MainPID` i `NRestarts` każdej usługi. EN: Each service's `MainPID` and `NRestarts`.
+    fn unit_pids(&self) -> Vec<String> {
+        self.units
+            .iter()
+            .map(|unit| {
+                Command::new("systemctl")
+                    .args(["show", "-p", "MainPID,NRestarts", "--value", unit])
+                    .output()
+                    .map(|o| {
+                        String::from_utf8_lossy(&o.stdout)
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_default()
+            })
+            .collect()
     }
 
     fn active_units(&self) -> Result<(), String> {
@@ -314,9 +339,37 @@ impl Env for Real {
     fn load_core(&mut self) -> Result<(), DiagError> {
         let live = self.core_dir().join(core_file());
         let next = with_suffix(&live, ".next");
-        let reply = self
-            .server_cmd(&["cmd", &format!("hot core load {}", next.display())])
-            .unwrap_or_else(|e| e);
+        let retry = |me: &Self, why: String| {
+            let _ = fs::remove_file(&next);
+            check_error("the engine did not confirm hot core load", why)
+                .state("The previous hot-core runs; hotd upgrade tries this version again")
+                .context("engine", me.server.display().to_string())
+        };
+        // PL: Podmiana silnika (D11) nie może iść w tym samym czasie. Pliku blokady nie tworzymy:
+        // root zostawiłby plik, którego `horizon` nie otworzy. EN: An engine swap (D11) must not run
+        // at the same time. The lock file is not created here: root would leave a file `horizon`
+        // cannot open.
+        let lock = self.home.join("hot-state").join("swap.lock");
+        let _held = if lock.exists() {
+            match crate::swap::try_swap_lock(&self.home) {
+                crate::swap::SwapLock::Busy => {
+                    return Err(retry(
+                        self,
+                        "an engine swap holds hot-state/swap.lock".into(),
+                    ))
+                }
+                held => Some(held),
+            }
+        } else {
+            None
+        };
+        let reply = match self.server_cmd(&["cmd", &format!("hot core load {}", next.display())]) {
+            Ok(r) => r,
+            Err(e) => return Err(retry(self, e)),
+        };
+        if reply.contains("Rdzeń podmieniony") {
+            return rename(&next, &live);
+        }
         if reply.contains("Nie wczytam rdzenia") || reply.contains("nie wystartował") {
             let _ = fs::remove_file(&next);
             return Err(DiagError::new(
@@ -327,13 +380,7 @@ impl Env for Real {
             .context("reply", reply.trim())
             .state("The previous hot-core runs; this version is skipped"));
         }
-        if !reply.contains("Rdzeń podmieniony") {
-            self.log.warn(
-                "hotd upgrade: the engine did not confirm hot core load; the next engine start loads the new core",
-                json!({ "reply": reply.trim() }),
-            );
-        }
-        rename(&next, &live)
+        Err(retry(self, format!("reply: {}", reply.trim())))
     }
 
     fn players(&mut self) -> usize {
@@ -357,6 +404,11 @@ impl Env for Real {
     }
 
     fn install(&mut self) -> Result<(), DiagError> {
+        // PL: Stare `.previous` z poprzedniej aktualizacji wróciłyby przy częściowej podmianie.
+        // EN: Old `.previous` files from an earlier update would come back on a partial swap.
+        for (_, live) in self.pairs() {
+            let _ = fs::remove_file(with_suffix(&live, ".previous"));
+        }
         for (staged, live) in self.pairs() {
             if live.exists() {
                 rename(&live, &with_suffix(&live, ".previous"))?;
@@ -391,10 +443,26 @@ impl Env for Real {
         let start = Instant::now();
         loop {
             match self.active_units() {
-                Ok(()) => return Ok(()),
+                Ok(()) => break,
                 Err(why) if start.elapsed() >= COME_UP => return Err(fail(why)),
                 Err(_) => std::thread::sleep(Duration::from_secs(3)),
             }
+        }
+        let before = self.unit_pids();
+        std::thread::sleep(STABLE);
+        self.active_units().map_err(fail)?;
+        let after = self.unit_pids();
+        match self
+            .units
+            .iter()
+            .zip(before.iter().zip(&after))
+            .find(|(_, (b, a))| b != a)
+        {
+            Some((unit, (b, a))) => Err(fail(format!(
+                "{unit} restarted by itself within {} s (MainPID NRestarts: {b} -> {a})",
+                STABLE.as_secs()
+            ))),
+            None => Ok(()),
         }
     }
 

@@ -192,7 +192,23 @@ fn the_self_update_builds_the_installed_branch_as_horizon() {
     let clone = position(INSTALLER, "as_horizon git clone");
     assert!(build < stop && stop < clone);
     let main = &INSTALLER[position(INSTALLER, "main() {")..];
-    assert!(position(main, "autotest 13/13") < position(main, "self_updates"));
+    let engine = position(main, "\n  engine\n");
+    assert!(position(main, "autotest 12/13") < position(main, "self_updates"));
+    assert!(
+        position(main, "self_updates") < engine,
+        "consent may end the installer at engine"
+    );
+    assert!(
+        position(&main[engine..], "autotest 13/13") < position(&main[engine..], "self_updates")
+    );
+    let trap = position(
+        INSTALLER,
+        "trap '[ -f /etc/systemd/system/horizon-hot-upgrade.timer ]",
+    );
+    assert!(
+        stop < trap && trap < clone,
+        "a failed install turns the self-update back on"
+    );
     assert!(
         INSTALLER.contains("( umask 077; printf '%s\\n' \"$RERUN\" > \"$ROOT/install-command\" )")
     );

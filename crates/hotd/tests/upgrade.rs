@@ -26,6 +26,7 @@ struct Fake {
     fetch_fails: bool,
     build_fails: bool,
     core_fails: bool,
+    core_unconfirmed: bool,
     restart_fails: bool,
     calls: Vec<String>,
 }
@@ -73,6 +74,13 @@ impl Env for Fake {
     fn load_core(&mut self) -> Result<(), DiagError> {
         self.calls.push("load_core".into());
         if self.core_fails {
+            return Err(DiagError::new(
+                codes::UPGRADE_CORE_FAILED,
+                "fake rejection",
+                "nothing",
+            ));
+        }
+        if self.core_unconfirmed {
             return Err(failure());
         }
         Ok(())
@@ -133,6 +141,21 @@ fn a_core_that_does_not_load_is_skipped_for_good() {
         1,
         "a bad version is not built again"
     );
+}
+
+#[test]
+fn a_core_load_the_engine_did_not_confirm_is_retried() {
+    let mut env = Fake::new(&["crates/hot-sdk/src/lib.rs"]);
+    env.core_unconfirmed = true;
+    let mut u = Upgrade::default();
+    u.step(&mut env, DAY, DAY);
+    assert_eq!(u.phase, Phase::CheckFailed);
+    assert_eq!(u.code.as_deref(), Some("HOT-E0705"));
+    assert!(u.bad.is_empty(), "no answer is not a rejection");
+    env.core_unconfirmed = false;
+    u.step(&mut env, 2 * DAY, DAY);
+    assert_eq!(u.phase, Phase::Done);
+    assert_eq!(env.count("build Core"), 2);
 }
 
 #[test]

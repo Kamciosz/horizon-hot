@@ -331,9 +331,12 @@ rust_ready() {
 hot_build() {
   step 5/13 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag, hot-proxy"
   rust_ready
-  # PL: Samoaktualizacja nie może pracować w klonie razem z instalatorem; self_updates włącza ją z powrotem.
-  # EN: The self-update must not work in the clone together with the installer; self_updates turns it back on.
+  # PL: Samoaktualizacja nie może pracować w klonie razem z instalatorem; self_updates włącza ją
+  #     z powrotem, a gdy instalator skończy się wcześniej (błąd, czekanie na zgodę), robi to pułapka.
+  # EN: The self-update must not work in the clone together with the installer; self_updates turns
+  #     it back on, and when the installer ends early (an error, waiting for consent), the trap does.
   systemctl stop horizon-hot-upgrade.timer horizon-hot-upgrade.service 2>/dev/null || true
+  trap '[ -f /etc/systemd/system/horizon-hot-upgrade.timer ] && systemctl start horizon-hot-upgrade.timer 2>/dev/null; true' EXIT
   if [ ! -d "$SRC/.git" ]; then
     OUTPUT=$(as_horizon git clone -q "$HOT_SOURCE" "$SRC" 2>&1) \
       || fail HOT-E0106 "horizon-hot cannot be cloned from $HOT_SOURCE" "git clone succeeds" "see chain" \
@@ -993,6 +996,10 @@ main() {
   units
   firewall
   autotest 12/13 "Autotest serwera"
+  # PL: Przed silnikiem, bo bez zgody `engine` kończy instalator (kod 3); po nim jeszcze raz, bo
+  #     dochodzi usługa silnika. EN: Before the engine, because without consent `engine` ends the
+  #     installer (code 3); after it again, because the engine service is added.
+  self_updates
   engine
   # PL: Po zbudowaniu silnika test jeszcze raz, już z hot-core. EN: Test again, now with hot-core.
   if engine_has_hot_host; then autotest 13/13 "Autotest z hot-core"; fi

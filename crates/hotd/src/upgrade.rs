@@ -59,13 +59,7 @@ pub enum Plan {
 /// PL: Pliki, które nie trafiają na serwer z pakietu `hotd upgrade`. EN: Files that do not reach
 /// the server through `hotd upgrade`.
 fn ignored(file: &str) -> bool {
-    const PREFIXES: [&str; 5] = [
-        "docs/",
-        "spikes/",
-        ".github/",
-        "crates/hot-sdk/",
-        "examples/",
-    ];
+    const PREFIXES: [&str; 4] = ["docs/", "spikes/", ".github/", "examples/"];
     const FILES: [&str; 5] = [
         "Dockerfile",
         ".dockerignore",
@@ -75,7 +69,8 @@ fn ignored(file: &str) -> bool {
     ];
     PREFIXES.iter().any(|p| file.starts_with(p))
         || FILES.contains(&file)
-        || file.ends_with(".md")
+        // PL: `hot-diag report` wbudowuje `AGENTS.md`. EN: `hot-diag report` embeds `AGENTS.md`.
+        || (file.ends_with(".md") && file != "AGENTS.md")
         || file.contains("/tests/")
 }
 
@@ -97,7 +92,10 @@ pub fn plan(changed: &[String]) -> Plan {
                 "nowa wersja zmienia instalację ({file}): uruchom instalator ponownie"
             ));
         }
-        mode = match (mode, file.starts_with("crates/hot-core/")) {
+        // PL: `hot-sdk` trafia na serwer tylko w `hot-core` (`hot_mod!`). EN: `hot-sdk` reaches
+        // the server only inside `hot-core` (`hot_mod!`).
+        let core_only = file.starts_with("crates/hot-core/") || file.starts_with("crates/hot-sdk/");
+        mode = match (mode, core_only) {
             (None | Some(Mode::Core), true) => Some(Mode::Core),
             _ => Some(Mode::Full),
         };
@@ -126,11 +124,13 @@ pub trait Env {
     /// # Errors
     /// PL: `HOT-E0705`. EN: `HOT-E0705`.
     fn build(&mut self, rev: &str, mode: Mode) -> Result<(), DiagError>;
-    /// PL: `hot core load` odłożonego rdzenia; po sukcesie zastępuje on stary plik.
-    /// EN: `hot core load` of the staged core; on success it replaces the old file.
+    /// PL: `hot core load` odłożonego rdzenia; po potwierdzeniu silnika zastępuje on stary plik.
+    /// EN: `hot core load` of the staged core; once the engine confirms, it replaces the old file.
     ///
     /// # Errors
-    /// PL: `HOT-E0707`. EN: `HOT-E0707`.
+    /// PL: `HOT-E0707`, gdy silnik odrzucił rdzeń (wersja odrzucona); `HOT-E0705`, gdy nie
+    /// potwierdził (ponowienie). EN: `HOT-E0707` when the engine rejected the core (the version is
+    /// skipped); `HOT-E0705` when it did not confirm (a retry).
     fn load_core(&mut self) -> Result<(), DiagError>;
     fn players(&mut self) -> usize;
     /// PL: Odłożone pliki na miejsce, stare z końcówką `.previous`. EN: The staged files into
@@ -388,6 +388,14 @@ impl Upgrade {
     fn core(&mut self, env: &mut dyn Env, rev: &str) {
         match env.load_core() {
             Ok(()) => self.adopt(env, rev, "nowy hot-core wczytany bez restartu"),
+            Err(e) if e.code() != codes::UPGRADE_CORE_FAILED => self.fail(
+                env,
+                &e,
+                format!(
+                    "silnik nie potwierdził nowego hot-core z wersji {}; ponowię jutro",
+                    short(rev)
+                ),
+            ),
             Err(e) => {
                 env.error(&e);
                 self.mark_bad(rev);
@@ -540,9 +548,14 @@ mod tests {
             );
         }
         assert_eq!(
-            plan(&files(&["Dockerfile", "crates/hot-sdk/src/lib.rs"])),
+            plan(&files(&["Dockerfile", "examples/licznik/src/lib.rs"])),
             Plan::Nothing
         );
+        assert_eq!(
+            plan(&files(&["crates/hot-sdk/src/lib.rs"])),
+            Plan::Deploy(Mode::Core)
+        );
+        assert_eq!(plan(&files(&["AGENTS.md"])), Plan::Deploy(Mode::Full));
     }
 
     #[test]
