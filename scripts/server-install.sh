@@ -850,7 +850,7 @@ WantedBy=multi-user.target" && systemctl daemon-reload && systemctl enable -q ho
 #     a root-only file (--repo may hold a token): the owner reruns the installer from it when hot
 #     status asks (HOT-E0706).
 self_updates() {
-  local u flags=""
+  local u flags="" changed=0
   for u in horizon-hot-server horizon-hot-proxy horizon-hot-pack horizon-hot-hotd horizon-hot-horizon; do
     systemctl is-enabled -q "$u.service" 2>/dev/null && flags+=" --unit $u.service"
   done
@@ -867,7 +867,7 @@ Nice=19
 IOSchedulingClass=idle
 TimeoutStartSec=6h
 Environment=HOT_HOME=$SRV
-ExecStart=$BIN/hotd upgrade --home $SRV --root $ROOT --src $SRC --bin $BIN --source $HOT_SOURCE --ref $HOT_REF --engine $BIN/horizon-server --user horizon$flags"
+ExecStart=$BIN/hotd upgrade --home $SRV --root $ROOT --src $SRC --bin $BIN --source $HOT_SOURCE --ref $HOT_REF --engine $BIN/horizon-server --user horizon$flags" && changed=1
   write_if_changed /etc/systemd/system/horizon-hot-upgrade.timer "[Unit]
 Description=horizon-hot: self-update check every 10 minutes
 
@@ -876,8 +876,8 @@ OnBootSec=10min
 OnUnitActiveSec=10min
 
 [Install]
-WantedBy=timers.target"
-  systemctl daemon-reload
+WantedBy=timers.target" && changed=1
+  if [ "$changed" = 1 ]; then systemctl daemon-reload; fi
   OUTPUT=$(systemctl enable -q --now horizon-hot-upgrade.timer 2>&1) \
     || fail HOT-E0109 "systemd cannot start horizon-hot-upgrade.timer" "systemctl enable --now succeeds" \
       "see chain" "Run journalctl -u horizon-hot-upgrade -n 50, fix the cause, then rerun the installer" \

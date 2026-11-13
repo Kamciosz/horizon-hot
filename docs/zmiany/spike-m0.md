@@ -114,6 +114,8 @@
 - Instalator zatrzymuje samoaktualizację na czas swojej pracy w klonie `src/horizon-hot`.
 
 ### Uwagi
+
+- `server-install.sh`: ponowne uruchomienie kończyło się kodem 1 po kroku 13, gdy pliki usługi samoaktualizacji się nie zmieniły (`write_if_changed` przy `set -e`). Znalezione w maszynie wirtualnej, poprawione, test w `crates/hot-proxy/tests/installer.rs`.
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.
 - D19 zakładał, że restart `hotd` jest dla graczy niewidoczny. Od M8.3 usługa `horizon-hot-server` to `hotd engine`, który trzyma silnik, więc każda aktualizacja poza samym `hot-core` czeka na pusty serwer (ADR 0014).
 - Kody samoaktualizacji leżą w zakresie `E07xx` (aktualizacje), bo `E08xx` jest zarezerwowany na sprzęt i hamulec MSPT.

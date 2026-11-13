@@ -191,6 +191,16 @@ fn the_self_update_builds_the_installed_branch_as_horizon() {
     let build = position(INSTALLER, "hot_build() {");
     let clone = position(INSTALLER, "as_horizon git clone");
     assert!(build < stop && stop < clone);
+    // PL: `write_if_changed` zwraca 1 bez zmiany, a `set -e` kończy wtedy instalator (drugie
+    // wywołanie `self_updates`, maszyna wirtualna 2026-11-13). EN: `write_if_changed` returns 1
+    // when nothing changed, and `set -e` then ends the installer (the second `self_updates` call,
+    // the virtual machine on 2026-11-13).
+    let body = &INSTALLER[position(INSTALLER, "self_updates() {")..];
+    let body = &body[..position(body, "\n}\n")];
+    assert_eq!(
+        body.matches("write_if_changed").count(),
+        body.matches("\" && changed=1").count()
+    );
     let main = &INSTALLER[position(INSTALLER, "main() {")..];
     let engine = position(main, "\n  engine\n");
     assert!(position(main, "autotest 12/13") < position(main, "self_updates"));
