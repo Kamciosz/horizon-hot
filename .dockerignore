@@ -1,0 +1,15 @@
+# PL: Do obrazu trafia tylko to, z czego się go buduje. Nic z plików gry, światów ani sekretów:
+#     wszystko spoza listy niżej zostaje poza kontekstem budowy (ADR 0011).
+# EN: Only what the image is built from goes in. No game files, worlds or secrets: everything not
+#     listed below stays out of the build context (ADR 0011).
+*
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!crates/
+!examples/
+!templates/
+!docs/bledy/
+!AGENTS.md
+!scripts/container-entrypoint.sh
+**/target/

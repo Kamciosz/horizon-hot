@@ -17,7 +17,8 @@ set -euo pipefail
 
 VERSION=0.1.0
 ROOT=/srv/horizon
-HZ=$ROOT/horizon            # PL: Horizon z oficjalnego install.sh. EN: Horizon from its install.sh.
+HZ=$ROOT/horizon            # PL: Horizon zbudowany ze źródeł. EN: Horizon built from source.
+HZ_SRC=$ROOT/horizon-src    # PL: źródła Horizona w przypiętej rewizji. EN: Horizon source at the pinned revision.
 BIN=$ROOT/bin
 SRV=$ROOT/server            # PL: folder serwera = HOT_HOME. EN: the server folder = HOT_HOME.
 SRC=$ROOT/src/horizon-hot
@@ -32,6 +33,7 @@ REPO=
 HOT_SOURCE=https://github.com/Kamciosz/horizon-hot.git
 HOT_REF=main
 HORIZON_VERSION=nightly-2026-11-05-66f3981
+HORIZON_REV=66f3981f522b24c250b21523a70080965b940424
 RESOURCES=
 LAUNCHER=
 TRUST_NATIVE=0
@@ -60,7 +62,8 @@ USAGE="Użycie: server-install.sh --repo URL --eula [opcje]
                           gra pobiera paczkę zasobów: http://HOST:8131/pack.zip
   --hot-ref REF           wersja horizon-hot: gałąź, tag albo commit (domyślnie main)
   --hot-source URL        skąd pobrać horizon-hot (domyślnie GitHub)
-  --horizon-version TAG   Nightly Horizona (domyślnie $HORIZON_VERSION)
+  --horizon-version TAG   nazwa wersji Horizona (domyślnie $HORIZON_VERSION); podaj razem z --horizon-rev
+  --horizon-rev HASH      pełny hash commita Horizona, z którego budujemy serwer (domyślnie $HORIZON_REV)
   --test-no-horizon       TYLKO DO TESTÓW: pomija Horizona (pobranie, pliki gry, świat, silnik),
                           żeby sprawdzić resztę na maszynie bez Linuxa x86-64
   --uninstall             pokazuje, co zostanie usunięte; z --yes usuwa horizon-hot i Horizona,
@@ -145,6 +148,7 @@ while [ $# -gt 0 ]; do
     --hot-ref) HOT_REF=${2:?"--hot-ref potrzebuje gałęzi, tagu albo commita"}; shift 2 ;;
     --hot-source) HOT_SOURCE=${2:?"--hot-source potrzebuje adresu"}; shift 2 ;;
     --horizon-version) HORIZON_VERSION=${2:?"--horizon-version potrzebuje tagu"}; shift 2 ;;
+    --horizon-rev) HORIZON_REV=${2:?"--horizon-rev potrzebuje pełnego hasha"}; shift 2 ;;
     --test-no-horizon) TEST_NO_HORIZON=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --yes) YES=1; shift ;;
@@ -251,44 +255,71 @@ packages() {
 
 # --- PL: Krok 4: Horizon. EN: Step 4: Horizon. ---------------------------------------------
 
+# PL: Ze źródeł w przypiętej rewizji, jak packaging/server/Dockerfile Horizona: datowane wydania
+#     Nightly znikają z GitHuba po kilku dniach, a commit zostaje. Układ katalogów jak w install.sh
+#     Horizona (releases/<wersja>, current, małe skrypty w $BIN). Kompilacja nie pobiera nic od Mojanga.
+# EN: From source at the pinned revision, as Horizon's packaging/server/Dockerfile does: dated Nightly
+#     releases vanish from GitHub after a few days, the commit stays. The folder layout follows
+#     Horizon's install.sh (releases/<version>, current, small scripts in $BIN). Nothing from Mojang.
 horizon() {
-  step 4/13 "Horizon $HORIZON_VERSION"
+  step 4/13 "Horizon $HORIZON_VERSION (${HORIZON_REV:0:12}) ze źródeł"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
-  if [ "$(readlink "$HZ/current" 2>/dev/null)" = "$HZ/releases/$HORIZON_VERSION" ] && [ -x "$BIN/horizon-server" ]; then
+  local release=$HZ/releases/$HORIZON_VERSION
+  if [ "$(readlink "$HZ/current" 2>/dev/null)" = "$release" ] && [ -x "$release/horizon-engine" ] && [ -x "$BIN/horizon-server" ]; then
     say "Już jest."; return
   fi
-  local script=$ROOT/tmp/horizon-install.sh
-  OUTPUT=$(curl -fsSL https://raw.githubusercontent.com/horizon-rust/horizon/main/packaging/server/install.sh -o "$script" 2>&1 \
-    && chown horizon:horizon "$script" \
-    && as_horizon sh "$script" --version "$HORIZON_VERSION" --dir "$HZ" --bin "$BIN" 2>&1) \
-    || fail HOT-E0105 "Horizon's official install.sh cannot install $HORIZON_VERSION" \
-      "install.sh puts horizon-server into $BIN" "no network, a tag that does not exist, or a failed checksum" \
-      "Check the tag on https://github.com/horizon-rust/horizon/releases, then rerun with --horizon-version TAG" \
-      "the Horizon release already in use (if any) stays" "dir=$HZ"
-  say "Zainstalowany w $HZ."
+  rust_ready
+  say "Kompiluję serwer Horizona (pierwszy raz kilkadziesiąt minut)…"
+  mkdir -p "$HZ_SRC" "$HZ/releases" "$HZ/game-files/horizon-client"
+  chown horizon:horizon "$HZ_SRC" "$HZ" "$HZ/releases" "$HZ/game-files" "$HZ/game-files/horizon-client"
+  OUTPUT=$( { [ -d "$HZ_SRC/.git" ] || as_horizon git -C "$HZ_SRC" init -q; } 2>&1 \
+    && as_horizon git -C "$HZ_SRC" fetch -q --depth 1 https://github.com/horizon-rust/horizon "$HORIZON_REV" 2>&1 \
+    && as_horizon git -C "$HZ_SRC" checkout -q --force FETCH_HEAD 2>&1 \
+    && [ "$(as_horizon git -C "$HZ_SRC" rev-parse HEAD)" = "$HORIZON_REV" ] \
+    && as_horizon sh -c "cd '$HZ_SRC' && nice -n 10 cargo build --release -q --locked -p horizon-client --no-default-features --bin horizon-client && nice -n 10 cargo build --release -q --locked -p horizon-server --bin horizon-server" 2>&1) \
+    || fail HOT-E0105 "Horizon $HORIZON_REV cannot be built from source" \
+      "cargo build writes horizon-client and horizon-server in $HZ_SRC/target/release" \
+      "see chain: no network to GitHub or crates.io, a wrong --horizon-rev, or too little memory for the compiler" \
+      "Check the network and free memory (free -h), then rerun the installer; --horizon-rev must be a full commit hash" \
+      "the Horizon release already in use (if any) stays" "rev=$HORIZON_REV"
+  rm -rf "$release"
+  mkdir -p "$release/.local"
+  install -m 0755 "$HZ_SRC/target/release/horizon-client" "$release/horizon-engine"
+  install -m 0755 "$HZ_SRC/target/release/horizon-server" "$release/horizon-server"
+  ln -sfn "$HZ/game-files/horizon-client" "$release/.local/horizon-client"
+  chown -R horizon:horizon "$release"
+  ln -sfn "$release" "$HZ/current"
+  printf '#!/bin/sh\nexec "%s/current/horizon-server" "$@"\n' "$HZ" > "$BIN/horizon-server"
+  chmod 0755 "$BIN/horizon-server"
+  say "Zbudowany w $release."
 }
 
 # --- PL: Krok 5: horizon-hot ze źródeł. EN: Step 5: horizon-hot from source. -----------------
 
-hot_build() {
-  step 5/13 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag, hot-proxy"
+# PL: Rust dla użytkownika horizon; potrzebny w krokach 4, 5 i 9. EN: Rust for the horizon user; steps 4, 5 and 9.
+rust_ready() {
   if [ ! -x "$ROOT/.cargo/bin/rustup" ]; then
     say "Instaluję Rusta dla użytkownika horizon (rustup)…"
     OUTPUT=$(curl -fsSL https://sh.rustup.rs -o "$ROOT/tmp/rustup.sh" 2>&1 && chown horizon:horizon "$ROOT/tmp/rustup.sh" \
       && as_horizon sh "$ROOT/tmp/rustup.sh" -y --profile minimal --default-toolchain none --no-modify-path 2>&1) \
       || fail HOT-E0106 "rustup cannot be installed for the horizon user" "rustup ends in $ROOT/.cargo/bin" \
         "no network to static.rust-lang.org" "Check the network, then rerun the installer" \
-        "nothing of horizon-hot was built" "step=rustup"
+        "nothing was built" "step=rustup"
   fi
-  # PL: `cargo horizon-mod` (krok 9) działa poza repo, gdzie nie ma rust-toolchain.toml, więc
-  #     potrzebuje domyślnego toolchainu. EN: `cargo horizon-mod` (step 9) runs outside the repo,
-  #     where there is no rust-toolchain.toml, so it needs a default toolchain.
+  # PL: Źródła Horizona i `cargo horizon-mod` (krok 9) nie mają rust-toolchain.toml, więc
+  #     potrzebują domyślnego toolchainu. EN: Horizon's source and `cargo horizon-mod` (step 9)
+  #     have no rust-toolchain.toml, so they need a default toolchain.
   if ! as_horizon rustup default > /dev/null 2>&1; then
     OUTPUT=$(as_horizon rustup default stable 2>&1) \
       || fail HOT-E0106 "rustup cannot set the stable toolchain as default for the horizon user" \
         "rustup default stable succeeds" "see chain; usually no network to static.rust-lang.org" \
-        "Check the network, then rerun the installer" "nothing of horizon-hot was built" "step=rustup-default"
+        "Check the network, then rerun the installer" "nothing was built" "step=rustup-default"
   fi
+}
+
+hot_build() {
+  step 5/13 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag, hot-proxy"
+  rust_ready
   if [ ! -d "$SRC/.git" ]; then
     OUTPUT=$(as_horizon git clone -q "$HOT_SOURCE" "$SRC" 2>&1) \
       || fail HOT-E0106 "horizon-hot cannot be cloned from $HOT_SOURCE" "git clone succeeds" "see chain" \
@@ -892,7 +923,7 @@ uninstall() {
   game_port=$(sed -n 's/.*hot-proxy --listen [^ ]*:\([0-9]*\) .*/\1/p' /etc/systemd/system/horizon-hot-proxy.service 2>/dev/null || true)
   [ -n "$game_port" ] || game_port=$(sed -n 's/^port *= *\([0-9]*\).*/\1/p' "$SRV/server.toml" 2>/dev/null | head -n 1 || true)
   game_port=${game_port:-$PORT}
-  local remove=("$BIN" "$HZ" "$ROOT/src" "$ROOT/tmp" "$ENGINES" "$SHARE" "$KEYS" "$ROOT/.cargo" "$ROOT/.rustup"
+  local remove=("$BIN" "$HZ" "$HZ_SRC" "$ROOT/src" "$ROOT/tmp" "$ENGINES" "$SHARE" "$KEYS" "$ROOT/.cargo" "$ROOT/.rustup"
     "$ROOT/.ssh" "$ROOT/hot-version" "$ROOT/cargo-horizon-mod-version" "$SRV/hot-core" "$SRV/hot-state"
     "$SRV/hot-keys" "$SRV/horizon-mods/hot_slots.hmod")
   say "Usunę:"

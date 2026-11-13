@@ -17,3 +17,6 @@ spikes/**/target/
 .env
 .env.*
 !.env.example
+
+# Pliki gry właściciela dla kontenera (compose.yaml); nigdy w repo
+/game-files/

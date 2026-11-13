@@ -1,0 +1,52 @@
+# PL: Serwer horizon-hot w Dockerze (M8.1c, ADR 0011, opis: docs/docker.md).
+#     Start: uzupełnij cztery wartości HOT_* niżej i ścieżkę plików gry, potem `docker compose up -d`.
+#     Na zewnątrz wychodzą tylko dwa porty: 25565 (gracze, przez hot-proxy z kontrolą zakupu)
+#     i 8131 (paczka zasobów). Silnik słucha tylko w kontenerze, na 127.0.0.1:25566.
+# EN: The horizon-hot server in Docker (M8.1c, ADR 0011, guide: docs/docker.md).
+#     Start: fill in the four HOT_* values below and the game files path, then `docker compose up -d`.
+#     Only two ports are published: 25565 (players, through hot-proxy with the purchase check)
+#     and 8131 (the resource pack). The engine listens only inside the container, on 127.0.0.1:25566.
+name: horizon-hot
+
+services:
+  server:
+    build:
+      context: .
+    image: horizon-hot:local
+    # PL: Horizon wydaje serwer tylko na Linux x86-64. EN: Horizon ships the server for Linux x86-64 only.
+    platform: linux/amd64
+    # PL: tini jako PID 1 zbiera osierocone procesy. EN: tini as PID 1 reaps orphaned processes.
+    init: true
+    restart: unless-stopped
+    # PL: Silnik zapisuje świat po SIGTERM; dajemy mu czas. EN: The engine saves the world on SIGTERM; give it time.
+    stop_grace_period: 2m
+    ports:
+      - "25565:25565"
+      - "8131:8131"
+    environment:
+      # PL: Repo serwera z modami (https://github.com/<właściciel>/<repo> albo git@github.com:...).
+      # EN: The server repository with mods (https://github.com/<owner>/<repo> or git@github.com:...).
+      HOT_REPO: ""
+      # PL: IP albo nazwa, którą gracze wpisują w grze. EN: The IP or name players type in the game.
+      HOT_ADDRESS: ""
+      # PL: "true" = właściciel przeczytał i akceptuje https://aka.ms/MinecraftEULA.
+      # EN: "true" = the owner has read and accepts https://aka.ms/MinecraftEULA.
+      HOT_EULA: ""
+      # PL: Nazwa gracza-operatora; pusta = serwer bez białej listy. EN: The operator's player name; empty = no whitelist.
+      HOT_OP: ""
+      # PL: Silnik z hot-host to kod natywny bez piaskownicy. Włącza go tylko właściciel serwera,
+      #     po przeczytaniu crates/hot-host. Bez tego serwer działa, ale bez modów gorących.
+      # EN: The engine with hot-host is native code without a sandbox. Only the server owner turns it
+      #     on, after reading crates/hot-host. Without it the server runs, but without hot mods.
+      # HOT_TRUST_NATIVE_CODE: "1"
+      # HOT_LAUNCHER: /srv/horizon/launcher/horizon-launcher
+    volumes:
+      - horizon-hot:/srv/horizon
+      # PL: Folder 26.3 przygotowany z gry właściciela (launcher Horizon, „prepare”). Tylko do odczytu.
+      #     Obraz nigdy nie zawiera plików gry.
+      # EN: The 26.3 folder prepared from the owner's game (Horizon launcher, "prepare"). Read-only.
+      #     The image never holds game files.
+      - ./game-files:/game-files:ro
+
+volumes:
+  horizon-hot:

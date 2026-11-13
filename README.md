@@ -58,10 +58,15 @@ docs/             — architektura, decyzje (ADR), standard kodu, katalog błęd
 PLAN.md           — plan budowy (roboczy; po zakończeniu treść przechodzi do docs/)
 ```
 
+## Uruchomienie w Dockerze
+
+Zamiast instalatora można użyć kontenera: `compose.yaml` w katalogu głównym. Uzupełnij w nim `HOT_REPO`, `HOT_ADDRESS`, `HOT_EULA` i `HOT_OP`, skopiuj przygotowany folder 26.3 do `./game-files` i uruchom `docker compose up -d --build`. Na zewnątrz wychodzą tylko porty 25565 (proxy z kontrolą zakupu) i 8131 (paczka zasobów). Obraz nie zawiera plików gry. Szczegóły: `docs/docker.md`.
+
 ## Dokumentacja
 - `AGENTS.md` — wejście dla nowej osoby i agenta AI: słownik, zasady, typowe zadania
 - `docs/ARCHITECTURE.md` — jak to jest zbudowane i dlaczego
 - `docs/STANDARD_KODU.md` — komentarze, błędy i logi, testy
+- `docs/docker.md` — serwer w kontenerze Docker
 - `docs/bledy/` — katalog kodów błędów `HOT-EXXXX`
 - `docs/adr/` — decyzje projektowe
 - `CONTRIBUTING.md` — jak pracujemy (gałęzie, commity, pull requesty)
