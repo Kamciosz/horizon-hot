@@ -396,7 +396,13 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
   - FAKT (APFS): miejsce po usuniętym pliku wraca z opóźnieniem, a pełny dysk nie pozwala skrócić pliku, tylko go usunąć; testy zapełniają dysk, aż miejsca przestanie przybywać.
   - Instalator usuwa po sobie `/srv/horizon/tmp/hot-slots` i `hot-host-bundle`. Kopie świata ogranicza minutnik kopii (krok 9, `backups.keep=7`). Stare silniki w `/srv/horizon/engines` sprząta M9.
   - Nie sprawdzone: ThinkCentre (ext4, brak maszyny).
-- [ ] M7.3 Uszkodzony świat → komunikat i polecenie przywrócenia; przywrócenie po potwierdzeniu.
+- [x] M7.3 Uszkodzony świat → komunikat i polecenie przywrócenia; przywrócenie po potwierdzeniu.
+  - FAKT (`horizon-client/src/game/world_loading.rs`, próba na kopii świata): serwer dedykowany sam bierze `level.dat_old`, gdy `level.dat` się nie wczyta. Gdy oba są złe, kończy pracę kodem 1 i pisze w `crash-reports/crash-<data>-server.txt` linię `Failed to load world "<folder>": its level data does not read (…)`. Supervisor po 5 awariach w 10 minut przestaje wznawiać silnik (`status --json` → `stopped`). `restore <kopia>` bez `--yes` odmawia i niczego nie zmienia, z `--yes` przenosi stary świat do `backups/replaced-<data>/world`.
+  - `hotd` (`world.rs`, `check_world`): gdy silnik nie działa, czyta najnowszy raport nowszy niż ostatni raz, gdy silnik działał; jeśli to błąd wczytania świata, `hot status` pokazuje wiersz „ŚWIAT” z powodem i poleceniem `horizon-server --dir … restore <najnowsza kopia> --yes`, a log dostaje `HOT-E0212` raz na raport. Sam niczego nie przywraca. Gdy silnik znów działa, komunikat znika.
+  - Test `damaged_world_shows_the_restore_command_and_restores_nothing`: 3 kroki bez silnika → żadnej komendy, świat i kopie bez zmian, w statusie powód i `restore nowa.zip --yes`, jeden wpis `HOT-E0212`; po starcie silnika komunikat znika, a stary raport nie wraca. Mutacja (`since` → `None`) go czerwieni.
+  - Na żywo (Mac, 2026-11-13, kopia świata testowego z uciętym `level.dat` i `level.dat_old`): silnik padał 5 razy i supervisor się poddał; `hotd once` z prawdziwym raportem pokazał w `hot status` „ŚWIAT: silnik nie wczytuje świata: its level data does not read (NBT at byte 3: truncated input)” i polecenie przywrócenia kopii `…-przed-psuciem.zip`. To polecenie przywróciło świat, a serwer wystartował.
+  - Znane: jednostka `horizon-hot-server` ma `Restart=on-failure`, więc po poddaniu się supervisora systemd uruchamia go znowu co 5 s i dopisuje kolejne raporty. Komunikat się nie zmienia (ta sama przyczyna), a wpis w logu przybywa raz na raport. Gdy brakuje `level.dat`, Horizon tworzy nowy świat bez błędu; tego `hotd` nie wykrywa.
+  - Nie sprawdzone: ThinkCentre (brak maszyny).
 - Sprawdzenie: każdy wiersz tabeli D20 ma test, który wywołuje błąd i obserwuje reakcję.
 
 ### M8 — `hot-proxy` i podmiana silnika (D10–D12)
@@ -522,6 +528,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 **2026-11-13 — M5.1 i M5.2 zrobione (na Macu):** blok moda to plik `mods/<id>/assets/blocks/<nazwa>.png`; `hotd` przydziela slot (tylko dopisywany, `hot-state/slots.json`), buduje powtarzalną paczkę zasobów bez CI, a `hotd serve-pack` ją serwuje. `hot-core` tłumaczy `<id>:<nazwa>` ↔ `hot_slots:slot_N` w `block`, `set_block`, `give` i w zdarzeniach. Sprawdzone w grze (szczegóły w M5): nowy wygląd po ponownym wejściu bez restartu silnika. **Budżet podmiany nadal niespełniony:** pula 1024/2048 wydłuża podmianę silnika do 1,16–1,34 s (S7), więc wymóg „krócej niż 1 s” (ADR 0004) czeka na M0.19; nie odhaczam go. Instalator ma krok 8 (pula, `--address`, `horizon-hot-pack`), nie sprawdzony: brak maszyny x86_64. Dalej: M7.
 
 **2026-11-13 — `tick_block`/`random_tick` przeniesione do M0.19:** w obecnym API haki nie zmienią bloku ze slotu, wymagają zmiany puli u graczy i nie mają filtra po nazwie (FAKT, szczegóły w M5.2). Decyzja przy zamrożeniu puli. Dalej: M7.
+
+**2026-11-13 — M7.3 zrobione (Mac):** świat, którego silnik nie wczyta → `hot status` podaje powód i polecenie przywrócenia najnowszej kopii, `HOT-E0212`; `hotd` niczego nie przywraca sam. Sprawdzone testem i na prawdziwym raporcie Horizona. Szczegóły w M7.3. Dalej: M6.2.
 
 **2026-11-13 — M7.2 zrobione (Mac):** wstrzymanie i sprzątanie przy małej ilości miejsca, testy na prawdziwie pełnym woluminie APFS; poprawiony błąd, przez który brak miejsca odrzucał dobry commit na zawsze. Szczegóły w M7.2. Dalej: M7.3 (uszkodzony świat).
 

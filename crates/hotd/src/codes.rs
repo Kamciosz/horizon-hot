@@ -39,3 +39,7 @@ pub const PACK_FAILED: Code = Code::new("HOT-E0210");
 /// PL: Mało miejsca na dysku nawet po sprzątaniu; `hotd` wstrzymuje pobieranie i commity.
 /// EN: Low disk space even after cleanup; `hotd` pauses fetching and commits.
 pub const DISK_LOW: Code = Code::new("HOT-E0211");
+
+/// PL: Silnik nie wczytuje świata; `hotd` podaje polecenie przywrócenia, nic nie przywraca sam.
+/// EN: The engine cannot load the world; `hotd` gives the restore command and restores nothing.
+pub const WORLD_DAMAGED: Code = Code::new("HOT-E0212");

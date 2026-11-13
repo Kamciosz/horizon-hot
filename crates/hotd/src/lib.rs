@@ -24,6 +24,7 @@ pub mod sign;
 pub mod slots;
 pub mod state;
 pub mod status;
+pub mod world;
 
 /// PL: Wersja `hotd` w logach i w `hotd.json`. EN: The `hotd` version in logs and `hotd.json`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -1011,3 +1011,99 @@ fn full_disk_leaves_state_and_pack_whole() {
     assert_eq!(read_slots(&w)["blocks"]["wyglad:nowy"], 1);
     assert_eq!(fake.take_commands(), ["hot slots"]);
 }
+
+/// PL: Linia z prawdziwego raportu Horizona przy zepsutym `level.dat` i `level.dat_old`.
+/// EN: The line from a real Horizon report with a broken `level.dat` and `level.dat_old`.
+const WORLD_FAILURE: &str = "Failed to load world \"/srv/horizon/server/./world\": its level data does not read (NBT at byte 3: truncated input). Open it from the world list to try restoring level.dat_old.";
+
+fn aged(path: &Path, text: &[u8], age: Duration) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, text).unwrap();
+    let t = std::time::SystemTime::now() - age;
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+}
+
+/// PL: M7.3: silnik nie wczytuje świata → `hot status` podaje przyczynę i polecenie przywrócenia
+/// najnowszej kopii, `HOT-E0212` raz; `hotd` nie wysyła nic do silnika i nie rusza świata ani
+/// kopii (przywraca operator). Silnik działa znowu → komunikat znika, a stary raport już nie wraca.
+/// EN: M7.3: the engine cannot load the world → `hot status` gives the reason and the command that
+/// restores the newest backup, `HOT-E0212` once; `hotd` sends nothing to the engine and touches
+/// neither the world nor the backups (the operator restores). The engine runs again → the message
+/// is gone and the old report does not bring it back.
+#[test]
+fn damaged_world_shows_the_restore_command_and_restores_nothing() {
+    let w = World::new("world-damaged");
+    let fake = Fake::new(&w.home);
+    fake.pid.set(None);
+    let report = w
+        .home
+        .join("crash-reports/crash-2026-11-13_09.27.49-server.txt");
+    aged(
+        &report,
+        format!("---- Horizon Crash Report ----\n\n{WORLD_FAILURE}\n").as_bytes(),
+        Duration::from_secs(5),
+    );
+    aged(
+        &w.home.join("backups/stara.zip"),
+        b"PK",
+        Duration::from_secs(9000),
+    );
+    aged(
+        &w.home.join("backups/nowa.zip"),
+        b"PK",
+        Duration::from_secs(600),
+    );
+    fs::create_dir_all(w.home.join("backups/replaced-2026-11-12/world")).unwrap();
+    aged(
+        &w.home.join("world/level.dat"),
+        b"zepsuty",
+        Duration::from_secs(5),
+    );
+    let before = (
+        read_all(&w.home.join("world")),
+        read_all(&w.home.join("backups")),
+    );
+
+    let mut d = w.daemon(fake.clone());
+    for _ in 0..3 {
+        d.step();
+    }
+    assert!(fake.take_commands().is_empty());
+    assert_eq!(
+        (
+            read_all(&w.home.join("world")),
+            read_all(&w.home.join("backups"))
+        ),
+        before,
+        "hotd changed the world or the backups"
+    );
+    let text = w.status_text();
+    assert!(text.contains("ŚWIAT: silnik nie wczytuje świata: its level data does not read (NBT at byte 3: truncated input) (crash-reports/crash-2026-11-13_09.27.49-server.txt)"), "{text}");
+    assert!(
+        text.contains(&format!(
+            "horizon-server --dir {} restore nowa.zip --yes",
+            w.home.display()
+        )),
+        "{text}"
+    );
+    assert!(!text.contains("Open it from the world list"), "{text}");
+    let log = fs::read_to_string(w.home.join("logs/hotd.jsonl")).unwrap();
+    let entries: Vec<&str> = log.lines().filter(|l| l.contains("HOT-E0212")).collect();
+    assert_eq!(entries.len(), 1, "{log}");
+    assert!(entries[0].contains("crash-2026-11-13_09.27.49-server.txt"));
+
+    fake.pid.set(Some(100));
+    d.step();
+    assert!(d.state().world_damage.is_none());
+    assert!(!w.status_text().contains("ŚWIAT"));
+    // PL: Silnik stanął z innego powodu (np. `stop`): stary raport nie wraca jako uszkodzony świat.
+    // EN: The engine stopped for another reason (e.g. `stop`): the old report is not shown again.
+    fake.pid.set(None);
+    d.step();
+    assert!(d.state().world_damage.is_none());
+}

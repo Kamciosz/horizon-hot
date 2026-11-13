@@ -50,6 +50,7 @@
 - Test z prawdziwym segfaultem moda gorącego w procesie potomnym.
 - `hotd` sprawdza wolne miejsce na dysku przed każdym krokiem (M7.2). Gdy jest go mniej niż 512 MB, usuwa swoje stare artefakty i stare kopie `hot-core`. Jeśli to nie wystarczy, nie pobiera i nie stosuje commitów, zapisuje `HOT-E0211` raz i pokazuje powód w `hot status`. Gdy miejsce wróci, wznawia pracę sam.
 - Testy `hotd` i `hot-core` na prawdziwie pełnym dysku: działają tylko ze zmienną `HOT_FULL_DISK_DIR`, czyli na osobnym, małym woluminie.
+- `hotd` rozpoznaje świat, którego silnik nie wczytał (M7.3): gdy silnik nie działa, a najnowszy raport w `crash-reports/` mówi `Failed to load world`, `hot status` pokazuje wiersz „ŚWIAT” z powodem i poleceniem przywrócenia najnowszej kopii, a log dostaje `HOT-E0212`. Przywraca operator, nie `hotd`.
 
 ### Zmienione
 - Instalator usuwa po sobie źródła puli slotów i pakiet `hot-host` z `/srv/horizon/tmp`.

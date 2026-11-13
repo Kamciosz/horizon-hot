@@ -48,6 +48,10 @@ pub struct State {
     /// PL: Pliki paczek danych, które silnik pominął przy ostatnim `reload` (linie z jego logu).
     /// EN: Data pack files the engine skipped at the last `reload` (lines from its log).
     pub data_warnings: Vec<String>,
+    /// PL: Świat się nie wczytuje: przyczyna i polecenie przywrócenia (M7.3); `None`, gdy silnik
+    /// działa. EN: The world does not load: the reason and the restore command (M7.3); `None`
+    /// while the engine runs.
+    pub world_damage: Option<String>,
 }
 
 impl State {
@@ -98,6 +102,7 @@ impl State {
             "recent_errors": self.errors,
             "fetch_error": self.fetch_error,
             "data_warnings": self.data_warnings,
+            "world_damage": self.world_damage,
         })
     }
 
@@ -140,6 +145,7 @@ impl State {
             errors: v["recent_errors"].as_array().cloned().unwrap_or_default(),
             fetch_error: text("fetch_error"),
             data_warnings: list("data_warnings"),
+            world_damage: text("world_damage"),
         }
     }
 

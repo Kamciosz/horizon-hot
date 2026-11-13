@@ -32,6 +32,7 @@ use crate::git::{Mirror, BUILDS_BRANCH};
 use crate::pack::{self, Look};
 use crate::slots::{self, Slots};
 use crate::state::{write_atomic, State};
+use crate::world;
 use crate::{codes, sign, VERSION};
 
 /// PL: Ustawienia `hotd`. EN: `hotd` settings.
@@ -53,6 +54,11 @@ pub struct Config {
     /// PL: Poniżej tylu wolnych bajtów `hotd` czeka (M7.2). EN: Below this many free bytes `hotd`
     /// waits (M7.2).
     pub min_free_bytes: u64,
+    /// PL: `--dir` serwera Horizona (`crash-reports/`, `backups/`) i program `horizon-server`, do
+    /// polecenia przywrócenia (M7.3). EN: The Horizon server's `--dir` (`crash-reports/`,
+    /// `backups/`) and the `horizon-server` program, for the restore command (M7.3).
+    pub engine_dir: PathBuf,
+    pub engine_program: PathBuf,
 }
 
 impl Config {
@@ -62,6 +68,8 @@ impl Config {
         let world = home.join("world");
         Self {
             world,
+            engine_dir: home.clone(),
+            engine_program: PathBuf::from("horizon-server"),
             home,
             repo: repo.to_owned(),
             branch: branch.to_owned(),
@@ -109,6 +117,12 @@ pub struct Daemon<E: Engine> {
     /// EN: The current `apply` already sent something to the engine; after that an error is not
     /// retried.
     engine_touched: bool,
+    /// PL: Kiedy `hotd` ostatnio widział działający silnik; starsze raporty awarii nie dotyczą
+    /// obecnego postoju. EN: When `hotd` last saw the engine running; older crash reports are not
+    /// about the current outage.
+    seen_running: Option<SystemTime>,
+    /// PL: Raport, z którego `HOT-E0212` już trafił do logu. EN: The report already logged.
+    world_report: Option<String>,
 }
 
 impl<E: Engine> Daemon<E> {
@@ -140,6 +154,8 @@ impl<E: Engine> Daemon<E> {
             last_fetch_error: None,
             disk_low: false,
             engine_touched: false,
+            seen_running: None,
+            world_report: None,
         })
     }
 
@@ -158,6 +174,7 @@ impl<E: Engine> Daemon<E> {
     /// and to `hotd.json`.
     pub fn step(&mut self) {
         self.check_crash();
+        self.check_world();
         if self.check_disk() {
             self.save();
             return;
@@ -740,6 +757,66 @@ impl<E: Engine> Daemon<E> {
         }
         self.error(&err);
         self.state.waiting = Some(text);
+    }
+
+    /// PL: Silnik nie działa, a najnowszy raport awarii mówi, że świat się nie wczytał: przyczyna
+    /// i polecenie przywrócenia w `hot status`, `HOT-E0212` raz na raport. Bez przywracania (D20).
+    /// EN: The engine is down and the newest crash report says the world did not load: the reason
+    /// and the restore command in `hot status`, `HOT-E0212` once per report. No restore (D20).
+    fn check_world(&mut self) {
+        if self.engine.pid().is_some() {
+            self.seen_running = Some(SystemTime::now());
+            if self.state.world_damage.take().is_some() {
+                self.log.info(
+                    "the engine runs again; the world message is cleared",
+                    json!({ "report": self.world_report }),
+                );
+            }
+            return;
+        }
+        let dir = self.cfg.engine_dir.clone();
+        let Some(failure) = world::load_failure(&dir, self.seen_running) else {
+            return;
+        };
+        let backup = world::newest_backup(&dir);
+        let restore = backup.as_ref().map(|b| {
+            format!(
+                "{} --dir {} restore {b} --yes",
+                self.cfg.engine_program.display(),
+                dir.display()
+            )
+        });
+        self.state.world_damage = Some(match &restore {
+            Some(cmd) => format!(
+                "silnik nie wczytuje świata: {} (crash-reports/{}). hotd niczego nie przywraca sam. Sprawdź kopię i przywróć ją jako użytkownik serwera: {cmd} (obecny świat trafi do backups/replaced-…; HOT-E0212)",
+                failure.reason, failure.report
+            ),
+            None => format!(
+                "silnik nie wczytuje świata: {} (crash-reports/{}), a w backups/ nie ma kopii (HOT-E0212)",
+                failure.reason, failure.report
+            ),
+        });
+        if self.world_report.as_deref() == Some(failure.report.as_str()) {
+            return;
+        }
+        let e = DiagError::new(
+            codes::WORLD_DAMAGED,
+            format!("The engine cannot load the world: {}", failure.reason),
+            match &restore {
+                Some(cmd) => format!(
+                    "Check the backup, then restore it as the server user (it replaces the world; the current one is kept in backups/replaced-*): {cmd}"
+                ),
+                None => "No backup in backups/: copy the world folder aside, then repair level.dat with an NBT editor or start a new world".to_owned(),
+            },
+        )
+        .expected("the engine loads the world named in server.toml")
+        .context("report", failure.report.clone())
+        .context("backup", backup.map_or(Value::Null, Value::from))
+        .context("dir", dir.display().to_string())
+        .chain_line(failure.line)
+        .state("hotd restores nothing by itself (D20); the server stays down and commits wait");
+        self.error(&e);
+        self.world_report = Some(failure.report);
     }
 
     fn check_disk(&mut self) -> bool {

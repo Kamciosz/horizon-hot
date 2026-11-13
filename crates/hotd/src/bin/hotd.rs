@@ -130,6 +130,8 @@ fn main() -> ExitCode {
     let engine_dir = args.engine_dir.unwrap_or(home);
     let engine_dir = std::path::absolute(&engine_dir).unwrap_or(engine_dir);
     cfg.world = hotd::data::world_dir(&engine_dir);
+    cfg.engine_dir.clone_from(&engine_dir);
+    cfg.engine_program.clone_from(&args.engine);
     let engine = HorizonServer {
         program: args.engine,
         dir: engine_dir,

@@ -39,6 +39,9 @@ pub fn render(home: &Path) -> String {
                 short(&d["applied"]),
                 d["updated"].as_str().unwrap_or("?")
             );
+            if let Some(w) = d["world_damage"].as_str() {
+                let _ = writeln!(out, "  ŚWIAT: {w}");
+            }
             if let Some(f) = d["fetch_error"].as_str() {
                 let _ = writeln!(out, "  repo teraz niedostępne: {f}");
             }
