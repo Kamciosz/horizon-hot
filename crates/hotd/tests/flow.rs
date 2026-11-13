@@ -203,7 +203,10 @@ struct World {
 
 impl World {
     fn new(name: &str) -> Self {
-        let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("hotd-{name}"));
+        Self::at(Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("hotd-{name}")))
+    }
+
+    fn at(root: PathBuf) -> Self {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let origin_dir = root.join("origin.git");
@@ -830,4 +833,165 @@ fn a_bad_texture_rejects_the_commit_and_changes_nothing() {
     assert_eq!(d.state().errors.last().unwrap()["code"], "HOT-E0210");
     assert_eq!(pack_zip(&w), zip);
     assert!(read_slots(&w)["blocks"].get("wyglad:nowy").is_none());
+}
+
+/// PL: M7.2: za mało miejsca → `hotd` sprząta swoje stare pliki, nie pobiera repo i nie stosuje
+/// commitów, błąd raz; po zwolnieniu miejsca commit wchodzi. EN: M7.2: low disk → `hotd` cleans
+/// its old files, fetches and applies nothing, logs once; once space is back the commit applies.
+#[test]
+fn low_disk_pauses_hotd_and_cleans_its_own_files() {
+    let w = World::new("disk");
+    let fake = Fake::new(&w.home);
+    let state = w.home.join("hot-state");
+    for old in ["stary1", "stary2"] {
+        fs::create_dir_all(state.join("artifacts").join(old)).unwrap();
+    }
+    fs::create_dir_all(state.join("core")).unwrap();
+    fs::write(state.join("core/hot_core-1.so"), "stary rdzeń").unwrap();
+    std::thread::sleep(Duration::from_millis(20));
+    fs::write(state.join("core/hot_core-2.so"), "nowy rdzeń").unwrap();
+    let sha = w.commit(&MOD_FILES, &[]);
+    w.publish(&sha, &["licznik"], true, false);
+
+    let mut cfg = Config::new(w.home.clone(), &w.origin, "main");
+    cfg.confirm_timeout = Duration::from_secs(2);
+    cfg.min_free_bytes = u64::MAX;
+    let mut d = Daemon::open(cfg, fake.clone()).unwrap();
+    for _ in 0..3 {
+        d.step();
+    }
+    assert!(fake.take_commands().is_empty());
+    assert!(d.state().applied.is_none());
+    assert!(
+        !state.join("repo.git").exists(),
+        "the repository was fetched"
+    );
+    assert!(d
+        .state()
+        .waiting
+        .as_deref()
+        .unwrap()
+        .contains("mało miejsca"));
+    assert!(w.status_text().contains("mało miejsca na dysku"));
+    let log = fs::read_to_string(w.home.join("logs/hotd.jsonl")).unwrap();
+    assert_eq!(
+        log.lines().filter(|l| l.contains("HOT-E0211")).count(),
+        1,
+        "{log}"
+    );
+    assert_eq!(fs::read_dir(state.join("artifacts")).unwrap().count(), 0);
+    let cores: Vec<_> = fs::read_dir(state.join("core"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(cores, ["hot_core-2.so"]);
+
+    let mut cfg = Config::new(w.home.clone(), &w.origin, "main");
+    cfg.confirm_timeout = Duration::from_secs(2);
+    cfg.min_free_bytes = 0;
+    let mut d = Daemon::open(cfg, fake.clone()).unwrap();
+    d.step();
+    assert!(fake.take_commands()[0].starts_with("hot load "));
+    assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
+    assert!(d.state().waiting.is_none());
+}
+
+/// PL: Bajty, których zip nie ściśnie (prosty generator liniowy). EN: Bytes zip cannot shrink.
+fn noise(len: usize) -> Vec<u8> {
+    let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+    (0..len)
+        .map(|_| {
+            x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            (x >> 56) as u8
+        })
+        .collect()
+}
+
+/// PL: Zapisuje `file`, aż system plików odmówi; przy `slack` > 0 zapisuje go od nowa o tyle
+/// krótszy (APFS na pełnym dysku nie skraca pliku, ale usunąć go pozwala).
+/// EN: Writes `file` until the file system refuses; with `slack` > 0 writes it again that much
+/// shorter (APFS on a full disk refuses to shorten a file but lets it be removed).
+fn fill_disk(file: &Path, slack: u64) {
+    use std::io::Write;
+    let chunk = vec![0u8; 1 << 20];
+    let mut f = fs::File::create(file).unwrap();
+    while f.write_all(&chunk).is_ok() {}
+    while f.write_all(&chunk[..4096]).is_ok() {}
+    let _ = f.sync_all();
+    let full = f.metadata().unwrap().len();
+    if slack == 0 {
+        return;
+    }
+    drop(f);
+    fs::remove_file(file).unwrap();
+    let mut f = fs::File::create(file).unwrap();
+    let mut left = full.saturating_sub(slack);
+    while left > 0 {
+        let n = left.min(chunk.len() as u64);
+        f.write_all(&chunk[..usize::try_from(n).unwrap()]).unwrap();
+        left -= n;
+    }
+    f.sync_all().unwrap();
+}
+
+/// PL: M7.2 na prawdziwie pełnym dysku. Działa tylko ze zmienną `HOT_FULL_DISK_DIR`: katalog na
+/// małym, osobnym woluminie (np. obraz `hdiutil` 64 MB), nigdy na dysku systemu. Sprawdza, że
+/// brak miejsca w połowie pobierania albo budowy paczki nie zostawia uciętych plików stanu ani
+/// paczki, nie kończy się paniką, a po zwolnieniu miejsca commit wchodzi.
+/// EN: M7.2 on a really full disk. Runs only with `HOT_FULL_DISK_DIR`: a folder on a small, separate
+/// volume (e.g. a 64 MB `hdiutil` image), never the system disk. Checks that running out of space
+/// mid-fetch or mid-pack leaves no torn state or pack file, does not panic, and that the commit
+/// applies once space is back.
+#[test]
+fn full_disk_leaves_state_and_pack_whole() {
+    let Some(dir) = std::env::var_os("HOT_FULL_DISK_DIR") else {
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    let filler = dir.join("filler");
+    let _ = fs::remove_file(&filler);
+    let w = World::at(dir.join("w"));
+    let fake = Fake::new(&w.home);
+    let open = || {
+        let mut cfg = Config::new(w.home.clone(), &w.origin, "main");
+        cfg.confirm_timeout = Duration::from_secs(2);
+        cfg.min_free_bytes = 0;
+        Daemon::open(cfg, fake.clone()).unwrap()
+    };
+    let mut d = open();
+    let v1 = w.commit_bytes(&[(LADA, &png("v1")), (LANG.0, LANG.1.as_bytes())], &[]);
+    d.step();
+    assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
+    let (zip1, slots1) = (pack_zip(&w), read_slots(&w));
+
+    let mut big = png("v2");
+    big.extend(noise(4 << 20));
+    let v2 = w.commit_bytes(&[(LADA, &big)], &[]);
+    // PL: 0 = pada już pobieranie; 6 MB = pobranie (~4 MB) wchodzi, paczka (~4 MB) już nie.
+    // EN: 0 = the fetch fails; 6 MB = the fetch (~4 MB) fits, the pack (~4 MB) does not.
+    for slack in [0, 6 << 20] {
+        fill_disk(&filler, slack);
+        d.step();
+        let applied = open().state().applied.clone();
+        let last = d.state().errors.last().map(|e| e["code"].clone());
+        let why = format!("slack {slack}: applied {applied:?}, last error {last:?}");
+        assert_eq!(
+            d.state().applied,
+            applied,
+            "state file differs from memory; {why}"
+        );
+        if applied.as_deref() == Some(v1.as_str()) {
+            assert_eq!(pack_zip(&w), zip1, "pack changed while v1 stays applied");
+            assert_eq!(read_slots(&w), slots1);
+        } else {
+            assert_eq!(applied.as_deref(), Some(v2.as_str()));
+            assert!(has(&pack_zip(&w), &big[..64]));
+        }
+        fs::remove_file(&filler).unwrap();
+    }
+    d.step();
+    assert_eq!(d.state().applied.as_deref(), Some(v2.as_str()));
+    assert!(has(&pack_zip(&w), &big[..64]));
+    assert!(fake.take_commands().iter().all(|c| c == "hot slots"));
 }

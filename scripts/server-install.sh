@@ -420,6 +420,9 @@ slots_pack() {
       SLOTS_CHANGED=1
     fi
     install -o horizon -g horizon -m 0644 "$pool" "$SRV/hot-state/pack/hot_slots.hmod"
+    # PL: Źródła z target/ zajmują setki MB, a następna budowa i tak zaczyna od zera (M7.2).
+    # EN: The sources with target/ take hundreds of MB and the next build starts from scratch (M7.2).
+    rm -rf "$src"
   fi
   touch "$SRV/horizon-mods.txt"
   grep -qx 'mod.hot_slots:true' "$SRV/horizon-mods.txt" || { printf 'mod.hot_slots:true\n' >> "$SRV/horizon-mods.txt"; SLOTS_CHANGED=1; }
@@ -604,6 +607,7 @@ engine() {
       "see chain: often the launcher's version is not prepared (no game files for the horizon user)" \
       "Prepare once as the horizon user: sudo -u horizon -H $LAUNCHER account sign-in, then sudo -u horizon -H $LAUNCHER prepare --download; rerun with --trust-native-code" \
       "the server runs on its old engine without hot mods" "out=$out"; }
+  rm -rf "$bundle"
   OUTPUT=$(hz config set "engine.path=$out/horizon-engine" 2>&1 && systemctl restart horizon-hot-server 2>&1) \
     || fail HOT-E0110 "The server cannot switch to the new engine" "config set engine.path and restart succeed" \
       "see chain" "Run: sudo -u horizon $BIN/horizon-server --dir $SRV config set engine.path=$out/horizon-engine" \

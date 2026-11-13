@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 
 use crate::classify::{classify, code_mods, plan, valid_id};
 use crate::data::{self, Staged};
+use crate::disk;
 use crate::engine::Engine;
 use crate::git::{Mirror, BUILDS_BRANCH};
 use crate::pack::{self, Look};
@@ -49,6 +50,9 @@ pub struct Config {
     /// PL: Awaria silnika w tym czasie po zastosowaniu = zły commit (D13: 60 s).
     /// EN: An engine crash within this time after applying = a bad commit (D13: 60 s).
     pub crash_window: Duration,
+    /// PL: Poniżej tylu wolnych bajtów `hotd` czeka (M7.2). EN: Below this many free bytes `hotd`
+    /// waits (M7.2).
+    pub min_free_bytes: u64,
 }
 
 impl Config {
@@ -64,6 +68,7 @@ impl Config {
             allowed_signers,
             confirm_timeout: Duration::from_secs(60),
             crash_window: Duration::from_secs(60),
+            min_free_bytes: disk::MIN_FREE_BYTES,
         }
     }
 
@@ -97,6 +102,9 @@ pub struct Daemon<E: Engine> {
     /// PL: Ostatni błąd pobierania; ten sam nie trafia do logu co 10 s.
     /// EN: The last fetch error; the same one is not logged every 10 s.
     last_fetch_error: Option<String>,
+    /// PL: Za mało miejsca na dysku od poprzedniego kroku; błąd idzie do logu raz.
+    /// EN: Low disk space since an earlier step; the error is logged once.
+    disk_low: bool,
 }
 
 impl<E: Engine> Daemon<E> {
@@ -126,6 +134,7 @@ impl<E: Engine> Daemon<E> {
             log,
             state,
             last_fetch_error: None,
+            disk_low: false,
         })
     }
 
@@ -144,6 +153,10 @@ impl<E: Engine> Daemon<E> {
     /// and to `hotd.json`.
     pub fn step(&mut self) {
         self.check_crash();
+        if self.check_disk() {
+            self.save();
+            return;
+        }
         if let Err(e) = self.mirror.fetch() {
             let f = e.fields();
             self.state.fetch_error = Some(f["what"].as_str().unwrap_or_default().to_owned());
@@ -311,7 +324,11 @@ impl<E: Engine> Daemon<E> {
             }),
         );
         self.mark_applied(head, true);
-        prune_artifacts(&self.cfg.home.join("hot-state").join("artifacts"), head);
+        prune_artifacts(
+            &self.cfg.home.join("hot-state").join("artifacts"),
+            head,
+            KEEP_ARTIFACTS,
+        );
         Ok(())
     }
 
@@ -667,6 +684,73 @@ impl<E: Engine> Daemon<E> {
         }
     }
 
+    /// PL: M7.2 (D20): za mało miejsca → sprzątanie własnych plików; gdy nadal za mało, błąd
+    /// (raz) i `true`: krok nie pobiera i nie stosuje commitów, bo `git fetch` i artefakty piszą
+    /// na dysk. Bez pomiaru (`df` nie działa) krok idzie normalnie.
+    /// EN: M7.2 (D20): low space → clean up our own files; still low → an error (once) and `true`:
+    /// the step neither fetches nor applies, as `git fetch` and artifacts write to disk. Without a
+    /// measurement (`df` fails) the step runs as usual.
+    fn check_disk(&mut self) -> bool {
+        let min = self.cfg.min_free_bytes;
+        let Some(before) = disk::free_bytes(&self.cfg.home) else {
+            return false;
+        };
+        if before >= min {
+            if std::mem::take(&mut self.disk_low) {
+                self.state.waiting = None;
+                self.log.info(
+                    "hotd has enough disk space again and resumes",
+                    json!({ "free_bytes": before, "min_free_bytes": min }),
+                );
+            }
+            return false;
+        }
+        let state = self.cfg.home.join("hot-state");
+        let applied = self.state.applied.clone().unwrap_or_default();
+        prune_artifacts(&state.join("artifacts"), &applied, 1);
+        let cores = disk::prune_core_copies(&state.join("core"));
+        let after = disk::free_bytes(&self.cfg.home).unwrap_or(before);
+        if after >= min {
+            self.log.info(
+                "hotd freed disk space by removing its old artifacts and hot-core copies",
+                json!({ "free_before": before, "free_after": after, "hot_core_copies_bytes": cores }),
+            );
+            return false;
+        }
+        let mib = |b: u64| b / (1024 * 1024);
+        self.state.waiting = Some(format!(
+            "mało miejsca na dysku: wolne {} MB, potrzeba {} MB — hotd nie pobiera i nie stosuje commitów (HOT-E0211)",
+            mib(after),
+            mib(min)
+        ));
+        if !self.disk_low {
+            self.disk_low = true;
+            let usage: serde_json::Map<String, Value> =
+                disk::usage(&self.cfg.home, &["world", "hot-state", "logs", "backups"])
+                    .into_iter()
+                    .map(|(d, kib)| (d, Value::from(kib)))
+                    .collect();
+            let e = DiagError::new(
+                codes::DISK_LOW,
+                format!(
+                    "Only {} MB free on the disk holding {}, hotd needs {} MB; its own cleanup freed {} MB",
+                    mib(after),
+                    self.cfg.home.display(),
+                    mib(min),
+                    mib(after.saturating_sub(before))
+                ),
+                "Free disk space: check df -h and the sizes in context.usage_kib; old world backups (horizon-server backups), journalctl --vacuum-size=200M, sudo apt clean. hotd resumes by itself within 10 s once enough is free",
+            )
+            .expected("free space on the server disk stays above min_free_bytes")
+            .context("free_bytes", after)
+            .context("min_free_bytes", min)
+            .context("usage_kib", Value::Object(usage))
+            .state("hotd neither fetches nor applies commits until there is space; the server and hot mods keep running");
+            self.error(&e);
+        }
+        true
+    }
+
     /// PL: D13: silnik padł (inny PID albo nie działa) w oknie po zastosowaniu → zły commit.
     /// EN: D13: the engine died (another PID or not running) within the window → a bad commit.
     fn check_crash(&mut self) {
@@ -877,9 +961,9 @@ fn url_userinfo(url: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// PL: Zostawia `KEEP_ARTIFACTS` najnowszych katalogów i zawsze bieżący.
-/// EN: Keeps the `KEEP_ARTIFACTS` newest folders and always the current one.
-fn prune_artifacts(dir: &Path, current: &str) {
+/// PL: Zostawia `current` i najnowsze z reszty, razem `keep` katalogów.
+/// EN: Keeps `current` and the newest of the rest, `keep` folders in all.
+fn prune_artifacts(dir: &Path, current: &str, keep: usize) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -889,7 +973,7 @@ fn prune_artifacts(dir: &Path, current: &str) {
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .collect();
     dirs.sort();
-    let extra = dirs.len().saturating_sub(KEEP_ARTIFACTS - 1);
+    let extra = dirs.len().saturating_sub(keep.saturating_sub(1));
     for (_, path) in dirs.into_iter().take(extra) {
         // PL: Stare kopie; `hot-core` ładuje z własnych kopii w `hot-state/gen/`.
         // EN: Old copies; `hot-core` loads from its own copies in `hot-state/gen/`.

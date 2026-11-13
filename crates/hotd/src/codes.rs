@@ -35,3 +35,7 @@ pub const POOL_FULL: Code = Code::new("HOT-E0209");
 /// PL: Paczki zasobów nie da się zbudować albo podać graczom (M5). EN: The resource pack cannot be
 /// built or served (M5).
 pub const PACK_FAILED: Code = Code::new("HOT-E0210");
+
+/// PL: Mało miejsca na dysku nawet po sprzątaniu; `hotd` wstrzymuje pobieranie i commity.
+/// EN: Low disk space even after cleanup; `hotd` pauses fetching and commits.
+pub const DISK_LOW: Code = Code::new("HOT-E0211");

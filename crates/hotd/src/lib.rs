@@ -16,6 +16,7 @@ pub mod classify;
 pub mod codes;
 pub mod daemon;
 pub mod data;
+pub mod disk;
 pub mod engine;
 pub mod git;
 pub mod pack;
