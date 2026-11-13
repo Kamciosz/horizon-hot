@@ -389,7 +389,13 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
   - Prawdziwy silnik z `hot-host` na Macu (2026-11-13, serwer testowy, Horizon `nightly-2026-11-05-66f3981`): licznik v1 przeszedł próbę („dobra”); `hot load` moda z segfaultem → silnik padł sygnałem 11, supervisor wznowił go po 5 s, `hot list` pokazał v1 („dobra”), `hot-core started` z `crash_starts: 1`. Druga awaria 50 s po starcie (`kill -9`) → po 10 s `hot list`: „Tryb bezpieczny… mody śpią: licznik”, `safe_mode: {crash_starts: 2, dormant: [licznik]}` w `status.json`, `HOT-E0408` w `hot-core.jsonl`. `horizon-server stop` i `start` → licznik v1 wrócił, `safe_mode` puste.
   - FAKT: pierwszy `kill -SEGV` wysłany z zewnątrz nie położył silnika (najpewniej łapie go handler przepełnienia stosu z biblioteki standardowej Rusta, który dla sygnału spoza strażnika stosu tylko przywraca domyślną obsługę). Do symulacji awarii służy `kill -9` albo prawdziwy błąd pamięci w modzie.
   - Nie sprawdzone: ThinkCentre (brak maszyny); `hot-proxy` trzymające graczy przy awarii to M8.4.
-- [ ] M7.2 Pełny dysk (sztucznie zapełniony) → sprzątanie i komunikat.
+- [x] M7.2 Pełny dysk (sztucznie zapełniony) → sprzątanie i komunikat.
+  - `hotd` mierzy wolne miejsce (`df -Pk`) przed każdym krokiem. Poniżej `min_free_bytes` (512 MB) usuwa swoje stare artefakty i kopie `hot-core` (zostaje najnowsza); gdy nadal brakuje, nie pobiera i nie stosuje commitów, `HOT-E0211` raz, powód w `hot status`; po zwolnieniu miejsca wraca sam. Test `low_disk_pauses_hotd_and_cleans_its_own_files` (mutacja bez `return` go czerwieni).
+  - Prawdziwie pełny dysk (obraz `hdiutil` APFS 64 MB, zmienna `HOT_FULL_DISK_DIR`, testy `full_disk_leaves_state_and_pack_whole` w `hotd` i `full_disk_start_keeps_hot_mods_running` w `hot-core`): przy zerowym wolnym miejscu pada pobieranie (`HOT-E0201`) i zapis stanu (`HOT-E0207`), a przy 6 MB wolnego zapis paczki; stan, `slots.json` i `pack.zip` zostają całe, bez paniki, a po zwolnieniu miejsca commit wchodzi i idzie `hot slots`. `hot-core` startuje na pełnym dysku, mod działa, `mods.json` bez zmian.
+  - Znalezione na pełnym dysku i poprawione: brak miejsca przy zapisie paczki oznaczał dobry commit jako nieudany (`HOT-E0210`) na zawsze; `slots.json` zapisany przed paczką gubił `hot slots` przy ponowieniu (mutacja kolejności czerwieni test); ucięte pliki `.tmp` zostawały na dysku. Teraz: `HOT-E0211` z `failed_code`, ponowienie, gdy silnik nic jeszcze nie dostał; git z `LC_ALL=C`.
+  - FAKT (APFS): miejsce po usuniętym pliku wraca z opóźnieniem, a pełny dysk nie pozwala skrócić pliku, tylko go usunąć; testy zapełniają dysk, aż miejsca przestanie przybywać.
+  - Instalator usuwa po sobie `/srv/horizon/tmp/hot-slots` i `hot-host-bundle`. Kopie świata ogranicza minutnik kopii (krok 9, `backups.keep=7`). Stare silniki w `/srv/horizon/engines` sprząta M9.
+  - Nie sprawdzone: ThinkCentre (ext4, brak maszyny).
 - [ ] M7.3 Uszkodzony świat → komunikat i polecenie przywrócenia; przywrócenie po potwierdzeniu.
 - Sprawdzenie: każdy wiersz tabeli D20 ma test, który wywołuje błąd i obserwuje reakcję.
 
@@ -516,6 +522,8 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 **2026-11-13 — M5.1 i M5.2 zrobione (na Macu):** blok moda to plik `mods/<id>/assets/blocks/<nazwa>.png`; `hotd` przydziela slot (tylko dopisywany, `hot-state/slots.json`), buduje powtarzalną paczkę zasobów bez CI, a `hotd serve-pack` ją serwuje. `hot-core` tłumaczy `<id>:<nazwa>` ↔ `hot_slots:slot_N` w `block`, `set_block`, `give` i w zdarzeniach. Sprawdzone w grze (szczegóły w M5): nowy wygląd po ponownym wejściu bez restartu silnika. **Budżet podmiany nadal niespełniony:** pula 1024/2048 wydłuża podmianę silnika do 1,16–1,34 s (S7), więc wymóg „krócej niż 1 s” (ADR 0004) czeka na M0.19; nie odhaczam go. Instalator ma krok 8 (pula, `--address`, `horizon-hot-pack`), nie sprawdzony: brak maszyny x86_64. Dalej: M7.
 
 **2026-11-13 — `tick_block`/`random_tick` przeniesione do M0.19:** w obecnym API haki nie zmienią bloku ze slotu, wymagają zmiany puli u graczy i nie mają filtra po nazwie (FAKT, szczegóły w M5.2). Decyzja przy zamrożeniu puli. Dalej: M7.
+
+**2026-11-13 — M7.2 zrobione (Mac):** wstrzymanie i sprzątanie przy małej ilości miejsca, testy na prawdziwie pełnym woluminie APFS; poprawiony błąd, przez który brak miejsca odrzucał dobry commit na zawsze. Szczegóły w M7.2. Dalej: M7.3 (uszkodzony świat).
 
 **2026-11-13 — M7.1 sprawdzone na prawdziwym silniku (Mac):** segfault moda → restart przez supervisor i v1; druga awaria (`kill -9`) → tryb bezpieczny; czysty restart → mody wracają. Szczegóły w M7.1. Nie sprawdzone: ThinkCentre.
 

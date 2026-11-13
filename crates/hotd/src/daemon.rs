@@ -105,6 +105,10 @@ pub struct Daemon<E: Engine> {
     /// PL: Za mało miejsca na dysku od poprzedniego kroku; błąd idzie do logu raz.
     /// EN: Low disk space since an earlier step; the error is logged once.
     disk_low: bool,
+    /// PL: Bieżący `apply` wysłał już coś do silnika; po tym błąd nie jest ponawiany.
+    /// EN: The current `apply` already sent something to the engine; after that an error is not
+    /// retried.
+    engine_touched: bool,
 }
 
 impl<E: Engine> Daemon<E> {
@@ -135,6 +139,7 @@ impl<E: Engine> Daemon<E> {
             state,
             last_fetch_error: None,
             disk_low: false,
+            engine_touched: false,
         })
     }
 
@@ -185,10 +190,15 @@ impl<E: Engine> Daemon<E> {
         };
         self.state.head = Some(head.clone());
         if !self.state.settled(&head) {
+            self.engine_touched = false;
             if let Err((e, reason)) = self.apply(&head) {
-                self.error(&e);
-                self.state.fail(&head, &reason);
-                self.state.waiting = None;
+                if !self.engine_touched && out_of_space(&e) {
+                    self.wait_for_space(&head, &e);
+                } else {
+                    self.error(&e);
+                    self.state.fail(&head, &reason);
+                    self.state.waiting = None;
+                }
             }
         } else if !pack::dir(&self.cfg.home).join("pack.zip").exists() {
             // PL: Pierwszy start po aktualizacji `hotd` albo skasowana paczka: odbudowa bez czekania
@@ -288,6 +298,7 @@ impl<E: Engine> Daemon<E> {
         if let Some(u) = &pack {
             self.install_pack(head, u, true)?;
         }
+        self.engine_touched = true;
         for id in &p.unload {
             self.engine
                 .command(&format!("hot unload {id}"))
@@ -411,14 +422,19 @@ impl<E: Engine> Daemon<E> {
         u: &PackUpdate,
         engine: bool,
     ) -> Result<(), (DiagError, String)> {
+        // PL: Paczka przed slotami: gdy zapis paczki się nie uda, `slots.json` zostaje stary, więc
+        // ponowiona próba znów widzi zmianę slotów i wyśle `hot slots`.
+        // EN: The pack before the slots: when the pack write fails, `slots.json` stays old, so the
+        // retry sees the slot change again and sends `hot slots`.
+        pack::install(&self.cfg.home, &u.zip)
+            .map_err(|e| (e, "nie zapisano paczki zasobów".to_owned()))?;
         if u.slots_changed {
             u.slots
                 .write(&self.slots_file())
                 .map_err(|e| (e, "nie zapisano hot-state/slots.json".to_owned()))?;
         }
-        pack::install(&self.cfg.home, &u.zip)
-            .map_err(|e| (e, "nie zapisano paczki zasobów".to_owned()))?;
         if u.slots_changed && engine {
+            self.engine_touched = true;
             let reply = self
                 .engine
                 .command("hot slots")
@@ -690,6 +706,42 @@ impl<E: Engine> Daemon<E> {
     /// EN: M7.2 (D20): low space → clean up our own files; still low → an error (once) and `true`:
     /// the step neither fetches nor applies, as `git fetch` and artifacts write to disk. Without a
     /// measurement (`df` fails) the step runs as usual.
+    /// PL: Commit nie wszedł, bo zabrakło miejsca, zanim silnik cokolwiek dostał. To nie wina
+    /// commita: nie trafia na listę nieudanych, a następny krok spróbuje znowu. Błąd idzie do
+    /// logu raz na commit.
+    /// EN: The commit did not apply because space ran out before the engine got anything. Not the
+    /// commit's fault: it is not recorded as failed and the next step tries again. The error is
+    /// logged once per commit.
+    fn wait_for_space(&mut self, head: &str, e: &DiagError) {
+        let text = format!(
+            "brak miejsca na dysku przy stosowaniu {} — ponowię, gdy się zwolni (HOT-E0211)",
+            short(head)
+        );
+        if self.state.waiting.as_deref() == Some(text.as_str()) {
+            return;
+        }
+        let f = e.fields();
+        let mut err = DiagError::new(
+            codes::DISK_LOW,
+            format!(
+                "The disk holding {} ran out of space while hotd applied commit {}",
+                self.cfg.home.display(),
+                short(head)
+            ),
+            "Free disk space (df -h; old world backups, journalctl --vacuum-size=200M, sudo apt clean); hotd applies the commit again by itself at the next step",
+        )
+        .expected("free space for the artifacts, data packs and the resource pack of the commit")
+        .context("commit", head)
+        .context("failed_code", f["code"].clone())
+        .context("failed_what", f["what"].clone())
+        .state("the commit is not marked as failed; the engine got nothing from it; hotd retries every 10 s");
+        for line in error_texts(&f) {
+            err = err.chain_line(line);
+        }
+        self.error(&err);
+        self.state.waiting = Some(text);
+    }
+
     fn check_disk(&mut self) -> bool {
         let min = self.cfg.min_free_bytes;
         let Some(before) = disk::free_bytes(&self.cfg.home) else {
@@ -981,9 +1033,49 @@ fn prune_artifacts(dir: &Path, current: &str, keep: usize) {
     }
 }
 
+/// PL: Teksty przyczyn błędu (`cause` i `chain`), bez `fix` i `what`, w których słowo „dysk”
+/// może paść bez związku z przyczyną. EN: The error's cause texts (`cause` and `chain`), not `fix`
+/// or `what`, which may mention the disk unrelated to the cause.
+fn error_texts(f: &serde_json::Map<String, Value>) -> Vec<String> {
+    let chain = f.get("chain").and_then(Value::as_array);
+    f.get("cause")
+        .into_iter()
+        .chain(chain.into_iter().flatten())
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// PL: Przyczyną jest pełny dysk: `(os error 28)` (ENOSPC na Linuksie i macOS, w każdym języku
+/// systemu) albo komunikat gita, który `hotd` uruchamia z `LC_ALL=C`.
+/// EN: The cause is a full disk: `(os error 28)` (ENOSPC on Linux and macOS, in any system
+/// language) or a git message; `hotd` runs git with `LC_ALL=C`.
+fn out_of_space(e: &DiagError) -> bool {
+    error_texts(&e.fields())
+        .iter()
+        .any(|t| t.contains("os error 28") || t.contains("No space left on device"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_cause_says_whether_the_disk_is_full() {
+        let full = DiagError::new(codes::PACK_FAILED, "x", "y")
+            .caused_by(&std::io::Error::from_raw_os_error(28));
+        assert!(out_of_space(&full));
+        let git = DiagError::new(codes::DATA_PACK_FAILED, "x", "y")
+            .chain_line("exit 128: fatal: write error: No space left on device");
+        assert!(out_of_space(&git));
+        let other = DiagError::new(
+            codes::STATE_FILE,
+            "x",
+            "check that the disk is not full (No space left on device)",
+        )
+        .caused_by(&std::io::Error::from_raw_os_error(13));
+        assert!(!out_of_space(&other));
+    }
 
     #[test]
     fn userinfo_is_found_for_masking() {

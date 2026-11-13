@@ -1146,3 +1146,71 @@ fn hot_status_shows_the_state_of_hotd() -> TestResult {
     s.stop();
     Ok(())
 }
+
+/// PL: M7.2 na prawdziwie pełnym dysku. Działa tylko ze zmienną `HOT_FULL_DISK_DIR`: katalog na
+/// małym, osobnym woluminie (np. obraz `hdiutil` 64 MB), nigdy na dysku systemu. Start `hot-core`
+/// bez miejsca na zapis stanu i logów nie może się skończyć błędem ani paniką, mody mają działać,
+/// a `mods.json` ma się dalej parsować.
+/// EN: M7.2 on a really full disk. Runs only with `HOT_FULL_DISK_DIR`: a folder on a small, separate
+/// volume (e.g. a 64 MB `hdiutil` image), never the system disk. Starting `hot-core` with no room
+/// for state and logs must not fail or panic, mods must run and `mods.json` must still parse.
+#[test]
+fn full_disk_start_keeps_hot_mods_running() -> TestResult {
+    use std::io::Write;
+    let Some(dir) = std::env::var_os("HOT_FULL_DISK_DIR") else {
+        return Ok(());
+    };
+    let dir = PathBuf::from(dir);
+    let (home, filler) = (dir.join("core-home"), dir.join("filler-core"));
+    let _ = fs::remove_file(&filler);
+    let _ = fs::remove_dir_all(&home);
+    let mut s = Server::start(&home)?;
+    s.load_and_wait(&mod_file("licznik_v1")?, |st| {
+        generation(st, "licznik") == Some(1)
+    })?;
+    for _ in 0..hot_core::GOOD_AFTER_TICKS {
+        s.tick();
+    }
+    s.stop();
+
+    // PL: APFS oddaje miejsce po usuniętych plikach z opóźnieniem: pisz, aż przestanie przybywać.
+    // EN: APFS frees the space of removed files with a delay: write until no more appears.
+    let mut f = fs::File::create(&filler)?;
+    let chunk = vec![0u8; 1 << 20];
+    loop {
+        let len = f.metadata()?.len();
+        while f.write_all(&chunk).is_ok() {}
+        while f.write_all(&chunk[..4096]).is_ok() {}
+        let _ = f.sync_all();
+        std::thread::sleep(Duration::from_millis(500));
+        if f.metadata()?.len() == len {
+            break;
+        }
+    }
+    drop(f);
+    let before = fs::read(home.join("hot-state/mods.json"))?;
+    assert!(
+        fs::write(home.join("hot-state/probe"), vec![1u8; 1 << 16]).is_err(),
+        "the disk is not full"
+    );
+    let mut s = Server::start(&home)?;
+    for _ in 0..10 {
+        s.tick();
+    }
+    let (_, replies) = s.console("hot list");
+    assert!(
+        replies.iter().any(|r| r.contains("licznik v1")),
+        "{replies:?}"
+    );
+    s.stop();
+    let after = fs::read(home.join("hot-state/mods.json"))?;
+    let mods: Value = serde_json::from_slice(&after)?;
+    assert_eq!(mods["mods"][0]["id"], "licznik", "{mods:#}");
+    assert_eq!(after, before, "mods.json was written on a full disk");
+
+    fs::remove_file(&filler)?;
+    let s = Server::start(&home)?;
+    assert_eq!(version(&s.status()?, "licznik").as_deref(), Some("v1"));
+    s.stop();
+    Ok(())
+}

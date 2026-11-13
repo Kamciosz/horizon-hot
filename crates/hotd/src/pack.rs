@@ -263,7 +263,13 @@ pub fn install(home: &Path, zip: &[u8]) -> Result<String, DiagError> {
     let sha1 = sha1_hex(zip);
     let put = |name: &str, bytes: &[u8]| {
         let tmp = dir.join(format!("{name}.tmp"));
-        fs::write(&tmp, bytes).and_then(|()| fs::rename(&tmp, dir.join(name)))
+        fs::write(&tmp, bytes)
+            .and_then(|()| fs::rename(&tmp, dir.join(name)))
+            .inspect_err(|_| {
+                // PL: Ucięty plik zabrałby miejsce potrzebne do ponowienia.
+                // EN: A torn file would hold the space the retry needs.
+                let _ = fs::remove_file(&tmp);
+            })
     };
     fs::create_dir_all(&dir)
         .and_then(|()| put("pack.zip", zip))

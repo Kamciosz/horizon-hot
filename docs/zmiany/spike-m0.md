@@ -49,10 +49,11 @@
 - Tryb bezpieczny `hot-core` (M7.1): po drugiej awarii serwera z rzędu, każdej w ciągu 5 minut od startu, mody gorące nie startują, a serwer działa dalej; `hot load`, `hot unload` albo czysty restart go kończą. Kod `HOT-E0408`, pola `started_ms` i `crash_starts` w `hot-state/mods.json`, `safe_mode` w `status.json`, linia w `hot status`.
 - Test z prawdziwym segfaultem moda gorącego w procesie potomnym.
 - `hotd` sprawdza wolne miejsce na dysku przed każdym krokiem (M7.2). Gdy jest go mniej niż 512 MB, usuwa swoje stare artefakty i stare kopie `hot-core`. Jeśli to nie wystarczy, nie pobiera i nie stosuje commitów, zapisuje `HOT-E0211` raz i pokazuje powód w `hot status`. Gdy miejsce wróci, wznawia pracę sam.
-- Test `hotd` na prawdziwie pełnym dysku: działa tylko ze zmienną `HOT_FULL_DISK_DIR`, czyli na osobnym, małym woluminie.
+- Testy `hotd` i `hot-core` na prawdziwie pełnym dysku: działają tylko ze zmienną `HOT_FULL_DISK_DIR`, czyli na osobnym, małym woluminie.
 
 ### Zmienione
 - Instalator usuwa po sobie źródła puli slotów i pakiet `hot-host` z `/srv/horizon/tmp`.
+- `hotd`: brak miejsca na dysku w trakcie commita, zanim silnik coś dostał, nie odrzuca już commita na zawsze (wcześniej `HOT-E0210` przy zapisie paczki). Commit czeka i jest ponawiany, a log dostaje `HOT-E0211` z kodem kroku, który padł. Paczka zasobów jest zapisywana przed `slots.json`, ucięte pliki tymczasowe znikają, a git działa z `LC_ALL=C`.
 - CI uruchamia się też po pushu na gałęzie `spike/**`, nie tylko na `main` i w PR-ach.
 - `tick_block` i `random_tick` przeniesione do M5: bez slotów hak na każdym bloku kosztowałby wywołanie przez ABI bez korzyści (D5).
 - `hot load` moda, który nie jest aktywny, bierze stan zostawiony przez `hot unload` albo wyłączenie po panice w `hot-state/saved/`.

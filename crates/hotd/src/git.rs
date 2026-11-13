@@ -221,8 +221,13 @@ fn run_git(dir: Option<&Path>, args: &[&str]) -> Result<String, GitError> {
     if let Some(dir) = dir {
         cmd.arg("--git-dir").arg(dir);
     }
-    // PL: Bez pytań o hasło: usługa nie ma terminala. EN: No password prompts: no terminal.
-    cmd.args(args).env("GIT_TERMINAL_PROMPT", "0");
+    // PL: Bez pytań o hasło: usługa nie ma terminala. `LC_ALL=C`: komunikaty po angielsku, żeby
+    // log był ten sam na każdym serwerze, a pełny dysk rozpoznawalny (`out_of_space`).
+    // EN: No password prompts: no terminal. `LC_ALL=C`: English messages, so the log is the same
+    // on every server and a full disk is recognisable (`out_of_space`).
+    cmd.args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C");
     let command = format!("git {}", args.join(" "));
     match cmd.output() {
         Ok(out) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),

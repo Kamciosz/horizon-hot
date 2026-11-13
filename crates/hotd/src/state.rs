@@ -171,7 +171,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), DiagError> {
         .map_or(Ok(()), fs::create_dir_all)
         .and_then(|()| fs::write(&tmp, bytes))
         .and_then(|()| fs::rename(&tmp, path))
-        .map_err(|e| state_error(path, "write").caused_by(&e))
+        .map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            state_error(path, "write").caused_by(&e)
+        })
 }
 
 fn state_error(path: &Path, what: &str) -> DiagError {

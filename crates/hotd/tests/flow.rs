@@ -908,17 +908,26 @@ fn noise(len: usize) -> Vec<u8> {
         .collect()
 }
 
-/// PL: Zapisuje `file`, aż system plików odmówi; przy `slack` > 0 zapisuje go od nowa o tyle
+/// PL: Zapisuje `file`, aż system plików odmówi i miejsca przestanie przybywać (APFS oddaje
+/// miejsce po usuniętych plikach z opóźnieniem). Przy `slack` > 0 zapisuje go od nowa o tyle
 /// krótszy (APFS na pełnym dysku nie skraca pliku, ale usunąć go pozwala).
-/// EN: Writes `file` until the file system refuses; with `slack` > 0 writes it again that much
-/// shorter (APFS on a full disk refuses to shorten a file but lets it be removed).
+/// EN: Writes `file` until the file system refuses and no more space appears (APFS frees the
+/// space of removed files with a delay). With `slack` > 0 writes it again that much shorter (APFS
+/// on a full disk refuses to shorten a file but lets it be removed).
 fn fill_disk(file: &Path, slack: u64) {
     use std::io::Write;
     let chunk = vec![0u8; 1 << 20];
     let mut f = fs::File::create(file).unwrap();
-    while f.write_all(&chunk).is_ok() {}
-    while f.write_all(&chunk[..4096]).is_ok() {}
-    let _ = f.sync_all();
+    loop {
+        let len = f.metadata().unwrap().len();
+        while f.write_all(&chunk).is_ok() {}
+        while f.write_all(&chunk[..4096]).is_ok() {}
+        let _ = f.sync_all();
+        std::thread::sleep(Duration::from_millis(500));
+        if f.metadata().unwrap().len() == len {
+            break;
+        }
+    }
     let full = f.metadata().unwrap().len();
     if slack == 0 {
         return;
@@ -965,33 +974,40 @@ fn full_disk_leaves_state_and_pack_whole() {
     assert_eq!(d.state().applied.as_deref(), Some(v1.as_str()));
     let (zip1, slots1) = (pack_zip(&w), read_slots(&w));
 
+    fake.take_commands();
     let mut big = png("v2");
     big.extend(noise(4 << 20));
-    let v2 = w.commit_bytes(&[(LADA, &big)], &[]);
+    // PL: Nowy blok zmienia przydział slotów, więc wznowienie musi wysłać `hot slots`.
+    // EN: A new block changes the slot assignment, so the retry must send `hot slots`.
+    let nowy = "mods/wyglad/assets/blocks/nowy.png";
+    let v2 = w.commit_bytes(&[(LADA, &big), (nowy, &png("n"))], &[]);
     // PL: 0 = pada już pobieranie; 6 MB = pobranie (~4 MB) wchodzi, paczka (~4 MB) już nie.
     // EN: 0 = the fetch fails; 6 MB = the fetch (~4 MB) fits, the pack (~4 MB) does not.
     for slack in [0, 6 << 20] {
         fill_disk(&filler, slack);
         d.step();
         let applied = open().state().applied.clone();
-        let last = d.state().errors.last().map(|e| e["code"].clone());
-        let why = format!("slack {slack}: applied {applied:?}, last error {last:?}");
+        let errors: Vec<Value> = d.state().errors.iter().map(|e| e["code"].clone()).collect();
+        let why = format!("slack {slack}: applied {applied:?}, errors {errors:?}");
         assert_eq!(
             d.state().applied,
             applied,
             "state file differs from memory; {why}"
         );
-        if applied.as_deref() == Some(v1.as_str()) {
-            assert_eq!(pack_zip(&w), zip1, "pack changed while v1 stays applied");
-            assert_eq!(read_slots(&w), slots1);
-        } else {
-            assert_eq!(applied.as_deref(), Some(v2.as_str()));
-            assert!(has(&pack_zip(&w), &big[..64]));
-        }
+        assert_eq!(applied.as_deref(), Some(v1.as_str()), "{why}");
+        assert_eq!(pack_zip(&w), zip1, "{why}");
+        assert_eq!(read_slots(&w), slots1, "{why}");
+        assert!(d.state().failed.is_empty(), "{why}: {:?}", d.state().failed);
+        assert!(fake.take_commands().is_empty(), "{why}");
         fs::remove_file(&filler).unwrap();
     }
+    let codes: Vec<Value> = d.state().errors.iter().map(|e| e["code"].clone()).collect();
+    assert!(codes.contains(&json!("HOT-E0211")), "{codes:?}");
+    assert!(!codes.contains(&json!("HOT-E0210")), "{codes:?}");
     d.step();
     assert_eq!(d.state().applied.as_deref(), Some(v2.as_str()));
+    assert!(d.state().waiting.is_none());
     assert!(has(&pack_zip(&w), &big[..64]));
-    assert!(fake.take_commands().iter().all(|c| c == "hot slots"));
+    assert_eq!(read_slots(&w)["blocks"]["wyglad:nowy"], 1);
+    assert_eq!(fake.take_commands(), ["hot slots"]);
 }

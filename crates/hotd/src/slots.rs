@@ -121,7 +121,10 @@ impl Slots {
         let tmp = path.with_extension("json.tmp");
         fs::write(&tmp, text + "\n")
             .and_then(|()| fs::rename(&tmp, path))
-            .map_err(|e| state_error(path, &e.to_string()))
+            .map_err(|e| {
+                let _ = fs::remove_file(&tmp);
+                state_error(path, &e.to_string()).caused_by(&e)
+            })
     }
 
     /// PL: Dopisuje sloty dla nowych bloków; zwraca te, które dostały slot teraz. Usunięte bloki
