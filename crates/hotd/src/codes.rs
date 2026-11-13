@@ -65,6 +65,23 @@ pub const HORIZON_ROLLED_BACK: Code = Code::new("HOT-E0703");
 /// EN: The new Horizon revision cannot be checked (`git ls-remote`, `Cargo.lock`).
 pub const HORIZON_CHECK_FAILED: Code = Code::new("HOT-E0704");
 
+/// PL: Nowej wersji horizon-hot nie da się sprawdzić, zbudować ani podmienić; ponowienie po dobie
+/// (D19). EN: The new horizon-hot version cannot be checked, built or put in place; retried after a
+/// day (D19).
+pub const UPGRADE_CHECK_FAILED: Code = Code::new("HOT-E0705");
+
+/// PL: Nowa wersja horizon-hot wymaga instalatora (silnik, ABI, instalacja, pula slotów).
+/// EN: The new horizon-hot version needs the installer (engine, ABI, install, slot pool).
+pub const UPGRADE_NEEDS_INSTALLER: Code = Code::new("HOT-E0706");
+
+/// PL: Nowy `hot-core` się nie wczytał; działa poprzedni. EN: The new `hot-core` did not load;
+/// the previous one runs.
+pub const UPGRADE_CORE_FAILED: Code = Code::new("HOT-E0707");
+
+/// PL: Po wdrożeniu nowej wersji usługi nie wstały; wróciła poprzednia.
+/// EN: After deploying the new version the services did not come up; the previous one is back.
+pub const UPGRADE_ROLLED_BACK: Code = Code::new("HOT-E0708");
+
 /// PL: Nowy silnik nie przygotował się do podmiany; gracze zostali na starym (D11).
 /// EN: The new engine did not get ready for the swap; the players stayed on the old one (D11).
 pub const SWAP_NOT_STARTED: Code = Code::new("HOT-E0606");

@@ -50,7 +50,7 @@ Nowe Nightly Horizona: kontener sprawdza je co godzinę i pokazuje w `hot status
 - Logi: `docker compose logs server`, błędy w formacie D27: `/srv/horizon/logs/container.jsonl`.
 - Komenda konsoli: `docker compose exec -u horizon server /opt/horizon/horizon-server --dir /srv/horizon/server cmd "list"`.
 - Zatrzymanie: `docker compose stop`. Kolejność: `hotd`, silnik (zapisuje świat), proxy, paczka.
-- Aktualizacja horizon-hot: `git pull && docker compose up -d --build`. Świat i klucze zostają w wolumenie.
+- Aktualizacja horizon-hot: `git pull && docker compose up -d --build`. Świat i klucze zostają w wolumenie. Kontener sam się nie aktualizuje, bo programy są w obrazie; na Ubuntu robi to `hotd upgrade` (ADR 0014).
 
 ## Kody wyjścia
 

@@ -32,6 +32,8 @@ pub mod swap;
 pub mod trial;
 pub mod update;
 pub mod update_env;
+pub mod upgrade;
+pub mod upgrade_env;
 pub mod world;
 
 /// PL: Wersja `hotd` w logach i w `hotd.json`. EN: The `hotd` version in logs and `hotd.json`.

@@ -28,6 +28,8 @@ Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtó
 
 Nowe wersje Horizona serwer sprawdza sam co godzinę. Domyślnie tylko pokazuje je w `hot status`. Z `--trust-native-code --auto-update-horizon` sam je buduje, testuje na kopii świata z botami, podmienia, gdy nikt nie gra (najpóźniej po 24 h), i wraca na starą wersję, gdy nowa padnie albo zwolni (`docs/aktualizacje.md`).
 
+Sam horizon-hot serwer aktualizuje raz na dobę z gałęzi podanej w `--hot-ref`: poprawka `hot-core` wchodzi od razu, bez restartu, a reszta, gdy nikt nie gra. Zmiana silnika albo instalatora czeka na właściciela i `hot status` mówi, co zrobić. Tag albo commit w `--hot-ref` wyłącza aktualizacje (ADR 0014).
+
 `--address` to adres, który gracze wpisują w grze. Z niego gra pobiera paczkę zasobów z wyglądem bloków modów (port 8131).
 
 Gracze łączą się z portem 25565 (`--port`). Słucha na nim `hot-proxy`: sprawdza w usłudze sesji Microsoftu, czy gracz ma kupioną grę, i dopiero wtedy wpuszcza go do silnika. Silnik słucha tylko na `127.0.0.1:25566` (`--engine-port`; druga strona silnika przy podmianie na 25567), więc z sieci nie da się go ominąć. Zapora otwiera tylko SSH, 25565 i 8131.

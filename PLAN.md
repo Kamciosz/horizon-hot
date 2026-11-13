@@ -181,7 +181,7 @@ Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je 
 - `hot-host` używa tylko nazwanych haków i `[transfer]`, nie łatek na dowolne funkcje (R23 — duży churn); dlatego aktualizacje rzadko będą się zatrzymywać.
 
 **D19. Aktualizacja naszego systemu.**
-`hotd`, `hot-proxy`, `hot-pack`, `hot-core` mają wydania w repo `horizon-hot`; `hotd` sprawdza je raz na dobę. `hot-core` → przeładowanie (D2). `hotd`, `hot-pack` → restart usługi, gra nie zauważa. `hot-proxy` → przekazanie gniazd i stanu szyfrowania do nowego procesu (`SCM_RIGHTS`); do czasu M13 aktualizacja proxy czeka na moment bez graczy online.
+`hotd`, `hot-proxy`, `hot-pack`, `hot-core` mają wydania w repo `horizon-hot`; `hotd` sprawdza je raz na dobę. `hot-core` → przeładowanie (D2). `hot-proxy` → przekazanie gniazd i stanu szyfrowania do nowego procesu (`SCM_RIGHTS`); do czasu M13 aktualizacja proxy czeka na moment bez graczy online. Zmiana z M10.1 (ADR 0014): wydanie to głowa gałęzi z `--hot-ref`; od M8.3 restart usługi silnika (`hotd engine`) zatrzymuje grę, więc `hotd` i `hot-pack` też czekają na pusty serwer i wszystkie programy zmieniają się naraz. Zmiana `hot-host`, `hot-abi`, instalatora albo puli slotów czeka na właściciela.
 
 **D20. Samonaprawa — tabela.**
 
@@ -482,6 +482,13 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 
 ### M10 — Aktualizacja naszego systemu (D19)
 - [ ] M10.1 Wydania `horizon-hot`, sprawdzanie raz na dobę, aktualizacja `hot-core`, `hotd`, `hot-pack`; `hot-proxy` przy braku graczy.
+  - Zrobione (2026-11-13): `hotd upgrade` (`crates/hotd/src/upgrade.rs` z logiką za cechą `Env`, `upgrade_env.rs` z prawdziwym światem), usługa `horizon-hot-upgrade` z minutnikiem w instalatorze, wiersz w `hot status`, kody `HOT-E0705`–`HOT-E0708`, ADR 0014, opis w `docs/aktualizacje.md`. Testy: `crates/hotd/tests/upgrade.rs` (10; mutacja bramki graczy czerwieni 3), podział plików w `upgrade.rs`, usługa w `crates/hot-proxy/tests/installer.rs`.
+  - Na Macu, FAKT. Lokalne repo źródłowe z commitami testowymi, klon `src` ze starą wersją zbudowaną wcześniej (jak po instalatorze), `hotd engine` z silnikiem `hot-host`, `horizon-bots`:
+    - commit tylko w `hot-core`, 5 botów w grze: `hot core load` w 2 s, silnik odpowiada nowym tekstem (znacznik w `hot x`), `hot-version` przesunięty, 5 z 5 botów bez rozłączenia; drugi przebieg tego samego dnia nic nie robi;
+    - commit w `hotd`, 2 boty w grze: budowa 30 s, faza `staged`, programy w `bin/.next/`; po wyjściu botów następny krok podmienia pliki i zapisuje wersję;
+    - commit w instalatorze → `HOT-E0706`, nic się nie buduje, `hot status` podaje powód;
+    - tag w `--ref` → `pinned`.
+  - Nie sprawdzone: brak maszyny — restart `horizon-hot-server` z prawdziwym silnikiem pod systemd (w maszynie wirtualnej nie ma plików gry); kontener nie spełnia M10.1 z założenia (aktualizacja przez przebudowę obrazu).
 - Sprawdzenie: nowa wersja każdego składnika wchodzi sama; gracze w grze nie zauważają (poza proxy, które czeka).
 
 ### M11 — Aplikacja gracza `hot-play` (D26)
@@ -597,7 +604,17 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 
 **2026-11-13 — M0.20 zrobione na Macu: pula 4096/8192.** Z rozgrzanym silnikiem pula prawie nie zmienia pauzy: 480–549 ms na tym samym silniku, 505–573 ms na nowym pliku silnika z pustym cache; rośnie rozgrzanie (do 4,4 s, przed zamrożeniem) i pamięć czekającego silnika (ok. 515 MB). `hotd::slots` ma 4096/8192, bez slotów z tickiem (`docs/sloty.md`). Mixin `wait_for_world` kończy czekanie po SIGTERM, bo samo `stop` czekało 120 s; `hotd` przerywa podmianę przez `stop` + SIGTERM. Nie sprawdzone: ThinkCentre (M0.11). Dalej: M8.
 
-**2026-11-13 — M9.1: serwer sam przechodzi na nowe Nightly (bez prawdziwej budowy).** `hotd horizon` wykrywa nowe Nightly, odrzuca je bez `libloading`, po zgodzie właściciela buduje silnik, testuje go na kopii świata z botami, podmienia w oknie klientów i wraca na stary silnik, gdy nowy padnie albo zwolni. Na Macu z atrapą launchera sprawdzone wszystkie gałęzie: przejście, spowolniony silnik (`HOT-E0702`), zepsuty test (`HOT-E0704`, ponowienie), awaria po podmianie (`HOT-E0703`, powrót). Samodzielne budowanie wymaga osobnej zgody (ADR 0013). Przy okazji: niestabilny test `swap.lock` (deskryptor dziedziczony przez dziecko innego wątku do `exec`). M9.1 nie jest odhaczone: prawdziwa budowa i przejście z graczami czekają na właściciela. Dalej: M10.1.
+**2026-11-13 — M10.1: serwer sam aktualizuje horizon-hot.** `hotd upgrade` raz na dobę bierze głowę gałęzi z `--hot-ref` i dzieli zmianę po plikach: sam `hot-core` wchodzi od razu przez `hot core load`, reszta czeka na pusty serwer i wchodzi naraz z restartem usług i powrotem do poprzednich plików, a zmiany silnika i instalatora czekają na właściciela (ADR 0014). Na Macu sprawdzone z prawdziwym silnikiem i botami: rdzeń bez rozłączeń, bramka graczy, blokada, przypięcie. M10.1 nie jest odhaczone: restart silnika pod systemd wymaga maszyny z plikami gry. Dalej: M11.1.
+
+- [ ] M10.1 Wydania `horizon-hot`, sprawdzanie raz na dobę, aktualizacja `hot-core`, `hotd`, `hot-pack`; `hot-proxy` przy braku graczy.
+  - Zrobione (2026-11-13): `hotd upgrade` (`crates/hotd/src/upgrade.rs` z logiką za cechą `Env`, `upgrade_env.rs` z prawdziwym światem), usługa `horizon-hot-upgrade` z minutnikiem w instalatorze, wiersz w `hot status`, kody `HOT-E0705`–`HOT-E0708`, ADR 0014, opis w `docs/aktualizacje.md`. Testy: `crates/hotd/tests/upgrade.rs` (10; mutacja bramki graczy czerwieni 3), podział plików w `upgrade.rs`, usługa w `crates/hot-proxy/tests/installer.rs`.
+  - Na Macu, FAKT. Lokalne repo źródłowe z commitami testowymi, klon `src` ze starą wersją zbudowaną wcześniej (jak po instalatorze), `hotd engine` z silnikiem `hot-host`, `horizon-bots`:
+    - commit tylko w `hot-core`, 5 botów w grze: `hot core load` w 2 s, silnik odpowiada nowym tekstem (znacznik w `hot x`), `hot-version` przesunięty, 5 z 5 botów bez rozłączenia; drugi przebieg tego samego dnia nic nie robi;
+    - commit w `hotd`, 2 boty w grze: budowa 30 s, faza `staged`, programy w `bin/.next/`; po wyjściu botów następny krok podmienia pliki i zapisuje wersję;
+    - commit w instalatorze → `HOT-E0706`, nic się nie buduje, `hot status` podaje powód;
+    - tag w `--ref` → `pinned`.
+  - Nie sprawdzone: brak maszyny — restart `horizon-hot-server` z prawdziwym silnikiem pod systemd (w maszynie wirtualnej nie ma plików gry); kontener nie spełnia M10.1 z założenia (aktualizacja przez przebudowę obrazu).
+ na nowe Nightly (bez prawdziwej budowy).** `hotd horizon` wykrywa nowe Nightly, odrzuca je bez `libloading`, po zgodzie właściciela buduje silnik, testuje go na kopii świata z botami, podmienia w oknie klientów i wraca na stary silnik, gdy nowy padnie albo zwolni. Na Macu z atrapą launchera sprawdzone wszystkie gałęzie: przejście, spowolniony silnik (`HOT-E0702`), zepsuty test (`HOT-E0704`, ponowienie), awaria po podmianie (`HOT-E0703`, powrót). Samodzielne budowanie wymaga osobnej zgody (ADR 0013). Przy okazji: niestabilny test `swap.lock` (deskryptor dziedziczony przez dziecko innego wątku do `exec`). M9.1 nie jest odhaczone: prawdziwa budowa i przejście z graczami czekają na właściciela. Dalej: M10.1.
 
 **2026-11-13 — M8.5: pamięć starych generacji wraca przez podmianę.** `hot-core` podaje, ile bajtów zajmują nieużywane generacje modów w procesie silnika, a `hotd engine` po przekroczeniu progu sam podmienia silnik na ten sam plik. Na Macu po 200 przeładowaniach RSS wrócił do poziomu startowego (574 → 505 MB) bez restartu i bez rozłączenia graczy. Dalej: M9.1.
 

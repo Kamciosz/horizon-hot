@@ -147,6 +147,37 @@ Ograniczenia, o których trzeba wiedzieć:
 - Pamięć na drugi silnik w teście chroni tylko `horizon-bg.slice` (D16). Osobnego sprawdzenia wolnej pamięci przed testem nie ma.
 - Binaria `horizon-server` i `horizon-bots` zostają w wersji z instalacji. Czy nowe Nightly wymaga też nowego `horizon-server`, nie wiadomo.
 
+## Jak serwer sam aktualizuje horizon-hot (`hotd upgrade`, M10.1)
+
+Decyzja i powody: ADR 0014. Timer `horizon-hot-upgrade.timer` co 10 minut uruchamia jako root jednorazową usługę:
+
+```bash
+hotd upgrade --home /srv/horizon/server --root /srv/horizon --src /srv/horizon/src/horizon-hot \
+  --bin /srv/horizon/bin --source https://github.com/Kamciosz/horizon-hot.git --ref main \
+  --engine /srv/horizon/bin/horizon-server --user horizon \
+  --unit horizon-hot-server.service --unit horizon-hot-proxy.service …
+```
+
+Instalator wpisuje te same `--hot-source` i `--hot-ref`, z których zbudował serwer, oraz tylko włączone usługi, silnik pierwszy. Stan leży w `hot-state/upgrade.json`, log w `logs/hotd-upgrade.jsonl`, a `hot status` pokazuje wiersz `horizon-hot <wersja>: …`.
+
+1. **Raz na dobę** `git fetch` w klonie `--src` i głowa gałęzi `--ref`. Gdy `--ref` to tag albo commit, serwer jest przypięty i nic się nie dzieje.
+2. **Podział** po `git diff --name-only <wersja z /srv/horizon/hot-version> <nowa>` (`plan` w `crates/hotd/src/upgrade.rs`):
+   - same dokumenty, testy, `spikes/`, `.github/`, pliki kontenera, `crates/hot-sdk`: nowa wersja zapisuje się bez budowy;
+   - tylko `crates/hot-core`: tryb `core`;
+   - `crates/hot-host`, `crates/hot-abi`, instalator, `templates/`, `crates/hotd/src/slots.rs`: nic się nie wdraża, `HOT-E0706`;
+   - reszta: tryb `full`.
+3. **Budowa** jako `horizon` (`runuser`, ten sam `HOME` i `PATH` co instalator), w tle (`horizon-bg.slice`, `nice`, hamulec MSPT). Nieudana budowa albo sieć: `HOT-E0705`, ponowienie po dobie.
+4. **Tryb `core`:** nowy plik obok starego (`libhot_core.so.next`), `hot core load` w działającym silniku, przy graczach. Po „Rdzeń podmieniony” nowy plik zastępuje stary. Odrzucony rdzeń: `HOT-E0707`, działa poprzedni, wersja na liście `bad`.
+5. **Tryb `full`:** programy w `bin/.next/`, każdy musi odpowiedzieć na `--help` (jako `horizon`). Co 10 minut sprawdza liczbę graczy (gniazdo `hot-proxy`, potem `status --json` silnika). Przy zerze: stare pliki dostają końcówkę `.previous`, nowe wchodzą na ich miejsce, usługi restartują się w podanej kolejności, a `hotd upgrade` czeka do 3 minut, aż wszystkie będą aktywne, a silnik w fazie `running`.
+6. **Powrót:** gdy któraś usługa nie wstanie, wracają pliki `.previous`, usługi restartują się jeszcze raz, wersja trafia na listę `bad` (`HOT-E0708`).
+
+Ograniczenia, o których trzeba wiedzieć:
+
+- Każdy push na gałąź z `--hot-ref` trafia na serwer najpóźniej po dobie. Instaluj z gałęzi, na którą trafia tylko kod z zielonym CI, albo przypnij tag.
+- W trybie `full` gracz, który wejdzie między sprawdzeniem liczby graczy a restartem, zostanie rozłączony. Okno trwa kilka sekund.
+- Kontener nie aktualizuje się sam: programy są w obrazie (`docs/docker.md`).
+- Polecenie instalatora z ostatniego przebiegu leży w `/srv/horizon/install-command` (tylko root, bo w `--repo` może być token). Z niego uruchamiasz instalator, gdy `hot status` o to prosi.
+
 ## Czego nie sprawdzono
 
 - Kompilacji `hot-host` ani próby S3/S4 z `fdc87ae`. Porównanie dotyczy katalogu i sygnatur, nie całego builda.
@@ -154,6 +185,7 @@ Ograniczenia, o których trzeba wiedzieć:
 - Przełączania modów z #10217 na serwerze dedykowanym.
 - `hotd horizon` na prawdziwej budowie nowego Nightly: wymaga `--trust-native-code`, więc agent jej nie uruchamia. Na Macu sprawdzone z atrapą launchera (silnik `update-*` to kopia działającego silnika).
 - Klienta na starszym Nightly z serwerem na nowszym (`content_identity`, D18).
+- `hotd upgrade` w trybie `full` z prawdziwym silnikiem pod systemd (restart `horizon-hot-server` i czekanie na `running`): na Macu nie ma systemd, a w maszynie wirtualnej nie ma plików gry.
 
 ## Powtórzenie
 

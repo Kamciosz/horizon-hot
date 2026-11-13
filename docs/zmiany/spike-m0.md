@@ -72,6 +72,8 @@
 
 - `hotd horizon` (M9.1, D18): serwer sam sprawdza co godzinę najnowsze Nightly (`nightly-source/…`), odrzuca rewizję bez `libloading`, buduje silnik po zgodzie właściciela, testuje go na kopii świata z botami, podmienia w oknie klientów i wraca na stary silnik, gdy nowy padnie albo zwolni (`crates/hotd/src/update.rs`, `update_env.rs`, `trial.rs`, `docs/aktualizacje.md`). Kody `HOT-E0701`–`HOT-E0704` i `docs/bledy/HOT-E0701.md`–`HOT-E0704.md`.
 - Instalator: opcja `--auto-update-horizon` (razem z `--trust-native-code`) i usługa `horizon-hot-horizon`; kontener: `HOT_AUTO_UPDATE_HORIZON=1`. Instalator i obraz budują też `horizon-bots` do testu na kopii świata.
+- `hotd upgrade` (M10.1, D19, ADR 0014): serwer sam aktualizuje horizon-hot raz na dobę z gałęzi `--hot-ref`. Zmiana samego `hot-core` wchodzi od razu przez `hot core load`, przy graczach; reszta programów czeka na chwilę bez graczy, potem wszystkie zmieniają się naraz, a usługi restartują się razem i wracają do poprzednich plików, gdy któraś nie wstanie. Zmiana silnika, instalatora albo puli slotów czeka na właściciela. `crates/hotd/src/upgrade.rs`, `upgrade_env.rs`, testy w `crates/hotd/tests/upgrade.rs`, kody `HOT-E0705`–`HOT-E0708` i ich strony w `docs/bledy/`.
+- Instalator: usługa `horizon-hot-upgrade` z minutnikiem co 10 minut oraz plik `/srv/horizon/install-command` (tylko root) z poleceniem do ponownego uruchomienia instalatora.
 
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
@@ -108,6 +110,10 @@
 - Instalator i obraz budują silnik przez `hotd build-engine` zamiast `horizon-launcher install <tag>`: wydanie `nightly-2026-11-05-66f3981` zniknęło z GitHuba, więc czysta instalacja padłaby na kroku 13. Folder silnika nazywa się od rewizji Horizona, a paczka `hot-host` zostaje w `/srv/horizon/hot-host-bundle`.
 - `hot status` pokazuje stan aktualizacji Horizona (faza, powód, kod błędu) z `hot-state/horizon.json`.
 - Test `a_commit_waits_for_an_engine_swap` czeka do 2 s na zwolnienie `swap.lock`. Przy równoległych testach dziecko innego wątku trzyma kopię deskryptora aż do `exec`, więc zwolniona blokada wracała po kilkunastu ms, a test padał w mniej więcej co drugim przebiegu.
+- `hot status` pokazuje też stan samoaktualizacji horizon-hot z `hot-state/upgrade.json`.
+- Instalator zatrzymuje samoaktualizację na czas swojej pracy w klonie `src/horizon-hot`.
 
 ### Uwagi
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.
+- D19 zakładał, że restart `hotd` jest dla graczy niewidoczny. Od M8.3 usługa `horizon-hot-server` to `hotd engine`, który trzyma silnik, więc każda aktualizacja poza samym `hot-core` czeka na pusty serwer (ADR 0014).
+- Kody samoaktualizacji leżą w zakresie `E07xx` (aktualizacje), bo `E08xx` jest zarezerwowany na sprzęt i hamulec MSPT.

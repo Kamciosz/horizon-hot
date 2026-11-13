@@ -147,6 +147,9 @@ pub fn render(home: &Path) -> String {
     if let Some(horizon) = crate::update::status_lines(home) {
         out.push_str(&horizon);
     }
+    if let Some(upgrade) = crate::upgrade::status_lines(home) {
+        out.push_str(&upgrade);
+    }
     out
 }
 

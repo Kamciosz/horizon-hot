@@ -331,6 +331,9 @@ rust_ready() {
 hot_build() {
   step 5/13 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag, hot-proxy"
   rust_ready
+  # PL: Samoaktualizacja nie może pracować w klonie razem z instalatorem; self_updates włącza ją z powrotem.
+  # EN: The self-update must not work in the clone together with the installer; self_updates turns it back on.
+  systemctl stop horizon-hot-upgrade.timer horizon-hot-upgrade.service 2>/dev/null || true
   if [ ! -d "$SRC/.git" ]; then
     OUTPUT=$(as_horizon git clone -q "$HOT_SOURCE" "$SRC" 2>&1) \
       || fail HOT-E0106 "horizon-hot cannot be cloned from $HOT_SOURCE" "git clone succeeds" "see chain" \
@@ -833,6 +836,51 @@ WantedBy=multi-user.target" && systemctl daemon-reload && systemctl enable -q ho
   systemctl enable -q --now horizon-hot-horizon
 }
 
+# PL: Samoaktualizacja horizon-hot (D19, M10.1, ADR 0014, `hotd upgrade`). Jednorazowa usługa
+#     jako root co 10 minut: git, cargo i nowe programy jako horizon, restart usług przez
+#     systemctl. Restartuje tylko włączone usługi, silnik pierwszy. Polecenie instalatora trafia do
+#     pliku tylko dla roota (w --repo może być token): z niego właściciel uruchamia instalator
+#     ponownie, gdy hot status o to prosi (HOT-E0706).
+# EN: The horizon-hot self-update (D19, M10.1, ADR 0014, `hotd upgrade`). A oneshot service as
+#     root every 10 minutes: git, cargo and the new programs as horizon, service restarts through
+#     systemctl. It restarts only enabled services, the engine first. The installer command goes to
+#     a root-only file (--repo may hold a token): the owner reruns the installer from it when hot
+#     status asks (HOT-E0706).
+self_updates() {
+  local u flags=""
+  for u in horizon-hot-server horizon-hot-proxy horizon-hot-pack horizon-hot-hotd horizon-hot-horizon; do
+    systemctl is-enabled -q "$u.service" 2>/dev/null && flags+=" --unit $u.service"
+  done
+  ( umask 077; printf '%s\n' "$RERUN" > "$ROOT/install-command" )
+  write_if_changed /etc/systemd/system/horizon-hot-upgrade.service "[Unit]
+Description=horizon-hot: self-update once a day (hotd upgrade, D19)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Slice=horizon-bg.slice
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+Environment=HOT_HOME=$SRV
+ExecStart=$BIN/hotd upgrade --home $SRV --root $ROOT --src $SRC --bin $BIN --source $HOT_SOURCE --ref $HOT_REF --engine $BIN/horizon-server --user horizon$flags"
+  write_if_changed /etc/systemd/system/horizon-hot-upgrade.timer "[Unit]
+Description=horizon-hot: self-update check every 10 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target"
+  systemctl daemon-reload
+  OUTPUT=$(systemctl enable -q --now horizon-hot-upgrade.timer 2>&1) \
+    || fail HOT-E0109 "systemd cannot start horizon-hot-upgrade.timer" "systemctl enable --now succeeds" \
+      "see chain" "Run journalctl -u horizon-hot-upgrade -n 50, fix the cause, then rerun the installer" \
+      "the other services run; horizon-hot does not update itself" "units=horizon-hot-upgrade"
+}
+
 # --- PL: Krok 12: autotest. EN: Step 12: self test. -----------------------------------------
 
 autotest() {
@@ -929,6 +977,7 @@ summary() {
   say "Gracze, raz: pobierz http://$ADDRESS:$PACK_PORT/hot_slots.hmod do folderu horizon-mods/ swojej instancji,"
   say "  dopisz mod.hot_slots:true do horizon-mods.txt obok, a przy wejściu przyjmij paczkę zasobów serwera."
   say "Stan: sudo -u horizon $BIN/hotd status --home $SRV"
+  say "horizon-hot aktualizuje się sam z gałęzi $HOT_REF raz na dobę (tag albo commit w --hot-ref: nigdy)."
 }
 
 main() {
@@ -947,6 +996,7 @@ main() {
   engine
   # PL: Po zbudowaniu silnika test jeszcze raz, już z hot-core. EN: Test again, now with hot-core.
   if engine_has_hot_host; then autotest 13/13 "Autotest z hot-core"; fi
+  self_updates
   summary
 }
 
@@ -962,7 +1012,7 @@ main() {
 #     prints the plan. Running it again breaks nothing.
 uninstall() {
   [ "$(id -u)" = 0 ] || { say "Uruchom przez sudo: … | sudo bash -s -- --uninstall" >&2; exit 2; }
-  local units="horizon-hot-horizon.service horizon-hot-hotd.service horizon-hot-proxy.service horizon-hot-pack.service horizon-hot-server.service horizon-hot-backup.timer horizon-hot-backup.service"
+  local units="horizon-hot-upgrade.timer horizon-hot-upgrade.service horizon-hot-horizon.service horizon-hot-hotd.service horizon-hot-proxy.service horizon-hot-pack.service horizon-hot-server.service horizon-hot-backup.timer horizon-hot-backup.service"
   local slices="horizon-bg.slice horizon-game.slice horizon.slice"
   local game_port pack_port path u left=""
   pack_port=$(sed -n 's/.*serve-pack .*--port \([0-9]*\).*/\1/p' /etc/systemd/system/horizon-hot-pack.service 2>/dev/null || true)
@@ -972,7 +1022,7 @@ uninstall() {
   [ -n "$game_port" ] || game_port=$(sed -n 's/^port *= *\([0-9]*\).*/\1/p' "$SRV/server.toml" 2>/dev/null | head -n 1 || true)
   game_port=${game_port:-$PORT}
   local remove=("$BIN" "$HZ" "$HZ_SRC" "$ROOT/src" "$ROOT/tmp" "$ENGINES" "$SHARE" "$KEYS" "$ROOT/.cargo" "$ROOT/.rustup"
-    "$ROOT/.ssh" "$ROOT/hot-version" "$ROOT/cargo-horizon-mod-version" "$SRV/hot-core" "$SRV/hot-state"
+    "$ROOT/.ssh" "$ROOT/hot-version" "$ROOT/install-command" "$ROOT/cargo-horizon-mod-version" "$SRV/hot-core" "$SRV/hot-state"
     "$SRV/hot-keys" "$SRV/horizon-mods/hot_slots.hmod")
   say "Usunę:"
   say "  usługi i slice'y systemd: $units $slices"

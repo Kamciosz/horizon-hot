@@ -29,6 +29,8 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
        hotd horizon --home DIR --launcher FILE --bundle DIR --engines DIR [--engine horizon-server]
                     [--bots horizon-bots] [--trial-bots 10] [--trial-seconds 300]
                     [--horizon-repo URL] [--trust-native-code] [--once]
+       hotd upgrade --home DIR --root DIR --src DIR --bin DIR --source URL --ref NAME
+                    [--engine horizon-server] [--user horizon] [--unit NAME]... [--every 86400]
 
 --home is the engine's HOT_HOME (hot-state/ and logs/ live there; default $HOT_HOME).
 --engine-dir is the horizon-server --dir of the engine (default: --home); mod data packs go
@@ -47,7 +49,14 @@ horizon is the Horizon update (D18): once an hour it checks the newest Nightly (
 builds it into --engines, tries it on a copy of the world with horizon-bots, swaps the engine within
 24 h (sooner when nobody plays), watches it for 10 minutes and goes back when it is worse. State:
 <home>/hot-state/horizon.json; logs: <home>/logs/hotd-horizon.jsonl. Without --trust-native-code it
-stops before the build and says so in hot status.";
+stops before the build and says so in hot status.
+upgrade is the horizon-hot self-update (D19, ADR 0014), one step per run (a systemd timer runs it
+every 10 minutes as root): at most once per --every seconds it fetches the head of branch --ref
+from --source into the clone --src and builds it; a change of hot-core alone is loaded into the
+running engine at once, other changes wait for a moment without players, then the programs in
+--bin change and the --unit services restart in the given order (the previous files come back
+when one does not come up). git, cargo and the new programs run as --user. State:
+<home>/hot-state/upgrade.json; logs: <home>/logs/hotd-upgrade.jsonl.";
 
 struct Args {
     command: String,
@@ -129,6 +138,9 @@ fn main() -> ExitCode {
     }
     if argv.peek().map(String::as_str) == Some("horizon") {
         return horizon(argv.skip(1));
+    }
+    if argv.peek().map(String::as_str) == Some("upgrade") {
+        return upgrade(argv.skip(1));
     }
     let args = match parse(argv) {
         Ok(a) => a,
@@ -386,6 +398,90 @@ fn horizon(mut it: impl Iterator<Item = String>) -> ExitCode {
 
 /// PL: Usługa paczki zasobów; błąd portu idzie do `logs/hotd-pack.jsonl` z kodem `HOT-E0210`.
 /// EN: The resource pack service; a port error goes to `logs/hotd-pack.jsonl` as `HOT-E0210`.
+/// PL: `hotd upgrade`: jeden krok samoaktualizacji (ADR 0014). EN: `hotd upgrade`: one step of the
+/// self-update (ADR 0014).
+fn upgrade(mut it: impl Iterator<Item = String>) -> ExitCode {
+    let mut home = std::env::var_os("HOT_HOME").map(PathBuf::from);
+    let (mut root, mut src, mut bin, mut source, mut git_ref) = (None, None, None, None, None);
+    let mut server = PathBuf::from("horizon-server");
+    let (mut user, mut units, mut every) = (None, Vec::new(), hotd::upgrade::EVERY);
+    while let Some(flag) = it.next() {
+        let Some(value) = it.next() else {
+            eprintln!("hotd: {flag} needs a value\n\n{USAGE}");
+            return ExitCode::from(2);
+        };
+        match flag.as_str() {
+            "--home" => home = Some(value.into()),
+            "--root" => root = Some(PathBuf::from(value)),
+            "--src" => src = Some(PathBuf::from(value)),
+            "--bin" => bin = Some(PathBuf::from(value)),
+            "--source" => source = Some(value),
+            "--ref" => git_ref = Some(value),
+            "--engine" => server = value.into(),
+            "--user" => user = Some(value),
+            "--unit" => units.push(value),
+            "--every" => {
+                let Ok(n) = value.parse() else {
+                    eprintln!("hotd: --every: not a number\n\n{USAGE}");
+                    return ExitCode::from(2);
+                };
+                every = n;
+            }
+            other => {
+                eprintln!("hotd: unknown option {other}\n\n{USAGE}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let (Some(home), Some(root), Some(src), Some(bin), Some(source), Some(git_ref)) =
+        (home, root, src, bin, source, git_ref)
+    else {
+        eprintln!(
+            "hotd: upgrade needs --home, --root, --src, --bin, --source and --ref\n\n{USAGE}"
+        );
+        return ExitCode::from(2);
+    };
+    let abs = |p: PathBuf| std::path::absolute(&p).unwrap_or(p);
+    let home = abs(home);
+    let log = match hot_diag::Logger::open(
+        hot_diag::LogConfig::new("hotd-upgrade", hotd::VERSION, home.join("logs")),
+        hot_diag::Redactor::new(),
+    ) {
+        Ok(l) => std::sync::Arc::new(l),
+        Err(e) => {
+            eprintln!("hotd: {}", serde_json::Value::Object(e.fields()));
+            return ExitCode::FAILURE;
+        }
+    };
+    hot_diag::install_panic_hook(std::sync::Arc::clone(&log));
+    let mut env = hotd::upgrade_env::Real {
+        home: home.clone(),
+        root: abs(root),
+        src: abs(src),
+        bin: abs(bin),
+        source,
+        git_ref,
+        server,
+        user,
+        units,
+        log: std::sync::Arc::clone(&log),
+    };
+    let probe = env.status_probe();
+    let brake_log = std::sync::Arc::clone(&log);
+    std::thread::spawn(move || hotd::brake::run(probe, &brake_log));
+    let mut state = hotd::upgrade::Upgrade::load(&home);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    state.step(&mut env, now, every);
+    if let Err(e) = state.save(&home) {
+        log.error(&e);
+        return ExitCode::FAILURE;
+    }
+    println!("{}", state.to_json());
+    ExitCode::SUCCESS
+}
+
 fn serve_pack(home: &std::path::Path, port: u16) -> ExitCode {
     let log = match hot_diag::Logger::open(
         hot_diag::LogConfig::new("hotd-pack", hotd::VERSION, home.join("logs")),

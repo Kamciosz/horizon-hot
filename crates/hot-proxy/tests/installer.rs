@@ -166,3 +166,44 @@ fn new_horizon_versions_build_on_their_own_only_with_both_consents() {
     );
     assert!(!DOCKERFILE.contains("HOT_AUTO_UPDATE_HORIZON"));
 }
+
+/// PL: Samoaktualizacja (ADR 0014): ta sama gałąź i to samo źródło co krok 5, nowy kod nigdy jako
+/// root, żadnej pracy w klonie razem z instalatorem, odinstalowanie zabiera ją razem z resztą.
+/// EN: The self-update (ADR 0014): the same branch and source as step 5, new code never as root,
+/// no work in the clone together with the installer, uninstalling takes it with the rest.
+#[test]
+fn the_self_update_builds_the_installed_branch_as_horizon() {
+    let unit = &INSTALLER[position(INSTALLER, "horizon-hot-upgrade.service \"[Unit]")..];
+    let unit = &unit[..position(unit, "\"\n")];
+    let exec = &unit[position(unit, "ExecStart=")..];
+    assert!(
+        exec.starts_with(
+            "ExecStart=$BIN/hotd upgrade --home $SRV --root $ROOT --src $SRC --bin $BIN \
+             --source $HOT_SOURCE --ref $HOT_REF --engine $BIN/horizon-server --user horizon$flags"
+        ),
+        "{exec}"
+    );
+    assert!(unit.contains("Type=oneshot") && unit.contains("Slice=horizon-bg.slice"));
+    let stop = position(
+        INSTALLER,
+        "systemctl stop horizon-hot-upgrade.timer horizon-hot-upgrade.service",
+    );
+    let build = position(INSTALLER, "hot_build() {");
+    let clone = position(INSTALLER, "as_horizon git clone");
+    assert!(build < stop && stop < clone);
+    let main = &INSTALLER[position(INSTALLER, "main() {")..];
+    assert!(position(main, "autotest 13/13") < position(main, "self_updates"));
+    assert!(
+        INSTALLER.contains("( umask 077; printf '%s\\n' \"$RERUN\" > \"$ROOT/install-command\" )")
+    );
+    let uninstall = &INSTALLER[position(INSTALLER, "uninstall() {")..];
+    for needle in [
+        "horizon-hot-upgrade.timer",
+        "horizon-hot-upgrade.service",
+        "\"$ROOT/install-command\"",
+    ] {
+        assert!(uninstall.contains(needle), "{needle}");
+    }
+    // PL: Kontener aktualizuje przebudowa obrazu. EN: The container updates by rebuilding the image.
+    assert!(!CONTAINER.contains("hotd upgrade"));
+}
