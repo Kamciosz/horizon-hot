@@ -14,12 +14,13 @@ use horizon_protocol::{
     packets::{
         handshake,
         login::{self, Property},
-        Empty,
+        status, Empty,
     },
     rsa::RsaPublicKey,
 };
 use hot_proxy::config::Config;
 use hot_proxy::forwarding::{hmac_sha256, CHANNEL};
+use hot_proxy::ping;
 use hot_proxy::session::Proxy;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -27,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 const SECRET: &[u8] = b"test-secret";
 const TESTER: u128 = 0x069a_79f4_44e9_4726_a5be_fca9_0e38_aaf5;
@@ -397,4 +399,37 @@ fn offline_mode_on_loopback_uses_the_offline_uuid() {
     c.recv().unwrap();
     c.send(&body(4, b"x")).unwrap();
     assert_eq!(engine_rx.recv().unwrap().uuid, offline_uuid("Dev"));
+}
+
+/// PL: Atrapa silnika, która odpowiada tylko na pytanie o status. EN: A stand-in engine answering status only.
+fn status_engine() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let mut e = Connection::from_stream(stream).unwrap();
+            let Ok((_, _)) = e.recv() else { continue };
+            if e.recv().is_ok() {
+                let answer = status::Clientbound::StatusResponse(status::StatusResponse {
+                    json: r#"{"version":{"name":"26.3","protocol":777}}"#.into(),
+                });
+                let _ = e.send(&answer.encode());
+            }
+        }
+    });
+    address
+}
+
+#[test]
+fn ping_reaches_the_engine_through_the_proxy() {
+    let logs = log_dir("ping");
+    let proxy = proxy(status_engine(), true, "http://127.0.0.1:9/none", &logs);
+    let json = ping::status(proxy, Duration::from_secs(10)).unwrap();
+    assert!(json.contains(r#""protocol":777"#), "{json}");
+    // PL: Nikt nie słucha: błąd, nie zawieszenie. EN: Nothing listens: an error, not a hang.
+    let closed = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    assert!(ping::status(closed, Duration::from_secs(2)).is_err());
 }

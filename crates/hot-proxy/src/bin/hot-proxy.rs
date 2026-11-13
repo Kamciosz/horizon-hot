@@ -15,12 +15,16 @@ use std::sync::Arc;
 const USAGE: &str = "\
 Usage: hot-proxy --engine 127.0.0.1:PORT --secret FILE --home DIR
                  [--listen 0.0.0.0:25565] [--discovery URL] [--offline]
+       hot-proxy ping HOST:PORT
 
 --engine    the engine (online_mode = false, the same forwarding.secret).
 --secret    the engine's forwarding.secret.
 --home      HOT_HOME: logs go to <home>/logs/hot-proxy.jsonl (default $HOT_HOME).
 --discovery the session service discovery document (tests only; default: the game's).
---offline   no purchase check, for a local test; refused unless --listen is 127.0.0.1.";
+--offline   no purchase check, for a local test; refused unless --listen is 127.0.0.1.
+
+ping        prints the status JSON of HOST:PORT, as the game's server list asks for it
+            (exit 1 when there is no answer within 10 s).";
 
 struct Args {
     listen: SocketAddr,
@@ -59,8 +63,31 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
     Ok(a)
 }
 
+/// PL: `hot-proxy ping`: status serwera na wyjściu, kod 1 bez odpowiedzi.
+/// EN: `hot-proxy ping`: the server status on stdout, exit 1 without an answer.
+fn ping(address: Option<String>) -> ExitCode {
+    let Some(Ok(address)) = address.map(|a| a.parse::<SocketAddr>()) else {
+        eprintln!("hot-proxy: ping needs an address like 127.0.0.1:25565\n\n{USAGE}");
+        return ExitCode::from(2);
+    };
+    match hot_proxy::ping::status(address, std::time::Duration::from_secs(10)) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("hot-proxy: ping {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
-    let args = match parse(std::env::args().skip(1)) {
+    let mut argv = std::env::args().skip(1).peekable();
+    if argv.peek().map(String::as_str) == Some("ping") {
+        return ping(argv.nth(1));
+    }
+    let args = match parse(argv) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("hot-proxy: {e}\n\n{USAGE}");

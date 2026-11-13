@@ -37,6 +37,7 @@ LAUNCHER=
 TRUST_NATIVE=0
 EULA=0
 PORT=25565
+ENGINE_PORT=25566
 PACK_PORT=8131
 ADDRESS=
 OP=
@@ -53,7 +54,8 @@ USAGE="Użycie: server-install.sh --repo URL --eula [opcje]
   --trust-native-code     przeczytałeś kod crates/hot-host i ufasz mu: buduje silnik z hot-host
   --launcher PATH         horizon-launcher dla Linuxa x86-64 (domyślnie z PATH)
   --op NAME               pierwszy operator; włącza whitelistę z tym graczem
-  --port N                port gry (domyślnie 25565)
+  --port N                port dla graczy: tu słucha hot-proxy (domyślnie 25565)
+  --engine-port N         port silnika, tylko na 127.0.0.1 (domyślnie 25566)
   --address HOST          adres, pod którym gracze widzą serwer (IP albo nazwa); z niego
                           gra pobiera paczkę zasobów: http://HOST:8131/pack.zip
   --hot-ref REF           wersja horizon-hot: gałąź, tag albo commit (domyślnie main)
@@ -138,6 +140,7 @@ while [ $# -gt 0 ]; do
     --launcher) LAUNCHER=${2:?"--launcher potrzebuje ścieżki"}; shift 2 ;;
     --op) OP=${2:?"--op potrzebuje nazwy gracza"}; shift 2 ;;
     --port) PORT=${2:?"--port potrzebuje numeru"}; shift 2 ;;
+    --engine-port) ENGINE_PORT=${2:?"--engine-port potrzebuje numeru"}; shift 2 ;;
     --address) ADDRESS=${2:?"--address potrzebuje adresu serwera"}; shift 2 ;;
     --hot-ref) HOT_REF=${2:?"--hot-ref potrzebuje gałęzi, tagu albo commita"}; shift 2 ;;
     --hot-source) HOT_SOURCE=${2:?"--hot-source potrzebuje adresu"}; shift 2 ;;
@@ -150,6 +153,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$REPO" ] || [ "$UNINSTALL" = 1 ] || { say "Brakuje --repo." >&2; say "$USAGE" >&2; exit 2; }
+[ "$PORT" != "$ENGINE_PORT" ] && [ "$PORT" != "$PACK_PORT" ] && [ "$ENGINE_PORT" != "$PACK_PORT" ] \
+  || { say "--port, --engine-port i port paczki ($PACK_PORT) muszą być różne." >&2; exit 2; }
 
 # PL: Ponowne uruchomienie z tymi samymi opcjami i z tej samej wersji skryptu (do komunikatów).
 # EN: The rerun command: the same options and the same version of this script.
@@ -161,7 +166,7 @@ RERUN="curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/$HOT_RE
 port_owner() { ss -Hltnp "sport = :$1" 2>/dev/null | head -n 1; }
 
 preflight() {
-  step 1/12 "Sprawdzenie maszyny"
+  step 1/13 "Sprawdzenie maszyny"
   [ "$(id -u)" = 0 ] || { say "Uruchom przez sudo: … | sudo bash -s -- …" >&2; exit 2; }
   local id="" ver="" arch mem_gb disk_gb
   # shellcheck disable=SC1091
@@ -188,26 +193,30 @@ preflight() {
       "Free disk space (sudo apt clean, journalctl --vacuum-size=200M) or use a bigger disk" \
       "nothing was changed" "free_gb=$disk_gb"
   fi
-  local p unit owner
-  for p in "$PORT:horizon-hot-server" "$PACK_PORT:horizon-hot-pack"; do
-    unit=${p#*:} p=${p%%:*}
+  local p units owner ours u
+  # PL: Port gracza zajmował silnik przed proxy (M8.1b), więc przy aktualizacji należy do niego.
+  # EN: The engine held the players' port before the proxy (M8.1b), so on an update it owns it.
+  for p in "$PORT:horizon-hot-proxy horizon-hot-server" "$ENGINE_PORT:horizon-hot-server" "$PACK_PORT:horizon-hot-pack"; do
+    units=${p#*:} p=${p%%:*}
     owner=$(port_owner "$p")
     # PL: Port zajęty przez naszą własną usługę przy ponownym uruchomieniu jest w porządku.
     # EN: A port held by our own service on a rerun is fine.
-    if [ -n "$owner" ] && ! systemctl is-active -q "$unit" 2>/dev/null; then
+    ours=0
+    for u in $units; do systemctl is-active -q "$u" 2>/dev/null && ours=1; done
+    if [ -n "$owner" ] && [ "$ours" = 0 ]; then
       OUTPUT=$owner fail HOT-E0102 "TCP port $p is already in use by another program" \
         "port $p is free" "another Minecraft server or program listens on it" \
-        "Stop that program (ss -ltnp 'sport = :$p' shows it) or rerun with --port N" \
+        "Stop that program (ss -ltnp 'sport = :$p' shows it) or rerun with another port (--port N for players, --engine-port N for the engine)" \
         "nothing was changed" "port=$p"
     fi
   done
-  say "Ubuntu $ver, $arch, ${mem_gb} GB RAM, ${disk_gb} GB wolnego miejsca, porty $PORT i $PACK_PORT wolne."
+  say "Ubuntu $ver, $arch, ${mem_gb} GB RAM, ${disk_gb} GB wolnego miejsca, porty $PORT, $ENGINE_PORT i $PACK_PORT wolne."
 }
 
 # --- PL: Krok 2: użytkownik i katalogi. EN: Step 2: user and folders. -----------------------
 
 user_and_dirs() {
-  step 2/12 "Użytkownik horizon i katalogi w $ROOT"
+  step 2/13 "Użytkownik horizon i katalogi w $ROOT"
   if ! id horizon >/dev/null 2>&1; then
     OUTPUT=$(useradd --system --home-dir "$ROOT" --create-home --shell /usr/sbin/nologin horizon 2>&1) \
       || fail HOT-E0103 "The system user horizon cannot be created" "useradd succeeds" "see chain" \
@@ -225,7 +234,7 @@ user_and_dirs() {
 # --- PL: Krok 3: pakiety. EN: Step 3: packages. --------------------------------------------
 
 packages() {
-  step 3/12 "Pakiety systemowe"
+  step 3/13 "Pakiety systemowe"
   local want="git curl ca-certificates openssh-client build-essential ufw tar" missing="" p
   for p in $want; do
     dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || missing+=" $p"
@@ -243,7 +252,7 @@ packages() {
 # --- PL: Krok 4: Horizon. EN: Step 4: Horizon. ---------------------------------------------
 
 horizon() {
-  step 4/12 "Horizon $HORIZON_VERSION"
+  step 4/13 "Horizon $HORIZON_VERSION"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
   if [ "$(readlink "$HZ/current" 2>/dev/null)" = "$HZ/releases/$HORIZON_VERSION" ] && [ -x "$BIN/horizon-server" ]; then
     say "Już jest."; return
@@ -262,7 +271,7 @@ horizon() {
 # --- PL: Krok 5: horizon-hot ze źródeł. EN: Step 5: horizon-hot from source. -----------------
 
 hot_build() {
-  step 5/12 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag"
+  step 5/13 "horizon-hot ($HOT_REF): hotd, hot-core, hot-diag, hot-proxy"
   if [ ! -x "$ROOT/.cargo/bin/rustup" ]; then
     say "Instaluję Rusta dla użytkownika horizon (rustup)…"
     OUTPUT=$(curl -fsSL https://sh.rustup.rs -o "$ROOT/tmp/rustup.sh" 2>&1 && chown horizon:horizon "$ROOT/tmp/rustup.sh" \
@@ -271,8 +280,8 @@ hot_build() {
         "no network to static.rust-lang.org" "Check the network, then rerun the installer" \
         "nothing of horizon-hot was built" "step=rustup"
   fi
-  # PL: `cargo horizon-mod` (krok 8) działa poza repo, gdzie nie ma rust-toolchain.toml, więc
-  #     potrzebuje domyślnego toolchainu. EN: `cargo horizon-mod` (step 8) runs outside the repo,
+  # PL: `cargo horizon-mod` (krok 9) działa poza repo, gdzie nie ma rust-toolchain.toml, więc
+  #     potrzebuje domyślnego toolchainu. EN: `cargo horizon-mod` (step 9) runs outside the repo,
   #     where there is no rust-toolchain.toml, so it needs a default toolchain.
   if ! as_horizon rustup default > /dev/null 2>&1; then
     OUTPUT=$(as_horizon rustup default stable 2>&1) \
@@ -296,17 +305,17 @@ hot_build() {
       "a typo or a branch that was deleted" "Rerun with --hot-ref main (or an existing tag or commit)" \
       "the version built before stays" "step=ref"
   HOT_SHA=$sha
-  if [ "$(cat "$ROOT/hot-version" 2>/dev/null)" = "$sha" ] && [ -x "$BIN/hotd" ] && [ -f "$SRV/hot-core/libhot_core.so" ]; then
+  if [ "$(cat "$ROOT/hot-version" 2>/dev/null)" = "$sha" ] && [ -x "$BIN/hotd" ] && [ -x "$BIN/hot-proxy" ] && [ -f "$SRV/hot-core/libhot_core.so" ]; then
     say "Już zbudowany: ${sha:0:7}."; return
   fi
   as_horizon git -C "$SRC" checkout -q --detach "$sha"
   say "Buduję ${sha:0:7} (kilka minut przy pierwszym razie)…"
-  OUTPUT=$(cd "$SRC" && as_horizon rustup toolchain install 2>&1 && as_horizon cargo build --release -q -p hotd -p hot-core -p hot-diag 2>&1) \
+  OUTPUT=$(cd "$SRC" && as_horizon rustup toolchain install 2>&1 && as_horizon cargo build --release -q -p hotd -p hot-core -p hot-diag -p hot-proxy 2>&1) \
     || fail HOT-E0106 "horizon-hot ${sha:0:7} does not compile on this server" "cargo build --release succeeds" \
       "see chain: usually a missing system package or not enough memory" \
       "Fix what chain names (sudo apt install build-essential; free memory), then rerun the installer" \
       "the version built before stays" "step=cargo" "commit=$sha"
-  install -o horizon -g horizon -m 0755 "$SRC/target/release/hotd" "$SRC/target/release/hot-diag" "$BIN/"
+  install -o horizon -g horizon -m 0755 "$SRC/target/release/hotd" "$SRC/target/release/hot-diag" "$SRC/target/release/hot-proxy" "$BIN/"
   install -o horizon -g horizon -m 0644 "$SRC/target/release/libhot_core.so" "$SRV/hot-core/libhot_core.so"
   printf '%s\n' "$sha" > "$ROOT/hot-version"
   HOT_REBUILT=1
@@ -318,7 +327,7 @@ hot_build() {
 ssh_repo() { case "$REPO" in git@*|ssh://*) return 0 ;; *) return 1 ;; esac; }
 
 keys() {
-  step 6/12 "Klucze i pliki do repo serwera"
+  step 6/13 "Klucze i pliki do repo serwera"
   if [ ! -f "$KEYS/hot-ci" ]; then
     ssh-keygen -q -t ed25519 -N '' -C hot-ci -f "$KEYS/hot-ci"
     say "Nowy klucz podpisu CI: $KEYS/hot-ci."
@@ -353,7 +362,7 @@ resources_present() {
 }
 
 world() {
-  step 7/12 "Pliki gry i świat"
+  step 7/13 "Pliki gry i świat"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięte (--test-no-horizon)."; return; fi
   if ! resources_present; then
     if [ -z "$RESOURCES" ]; then
@@ -374,10 +383,10 @@ world() {
     [ "$EULA" = 1 ] || wait_for_operator HOT-E0108 "The Minecraft EULA has not been accepted" \
       "the installer runs with --eula" "only the owner can accept it" \
       "Read https://aka.ms/MinecraftEULA, then rerun the installer with --eula" \
-      "everything before the world is installed" "port=$PORT"
+      "everything before the world is installed" "port=$ENGINE_PORT"
     local players=(--no-whitelist)
     [ -n "$OP" ] && players=(--whitelist --player "$OP" --op "$OP")
-    OUTPUT=$(hz init --eula --world world --port "$PORT" --yes "${players[@]}" 2>&1) \
+    OUTPUT=$(hz init --eula --world world --port "$ENGINE_PORT" --yes "${players[@]}" 2>&1) \
       || fail HOT-E0108 "horizon-server init cannot create the server in $SRV" "init writes $SRV/server.toml" \
         "see chain" "Fix what chain says, remove $SRV/server.toml if half written, then rerun the installer" \
         "no world was created" "dir=$SRV"
@@ -389,7 +398,55 @@ world() {
       "the server runs with its old backup settings" "dir=$SRV"
 }
 
-# --- PL: Krok 8: pula slotów i paczka zasobów. EN: Step 8: slot pool and resource pack. ----
+# --- PL: Krok 8: proxy z kontrolą zakupu. EN: Step 8: the proxy with the purchase check. -----
+
+# PL: Gracze łączą się z hot-proxy na porcie $PORT. Proxy sprawdza w usłudze sesji, czy gracz ma
+#     kupioną grę, i podpisuje silnikowi jego dane wspólnym sekretem (przekazywanie Velocity,
+#     PLAN M8). Silnik słucha tylko na 127.0.0.1 i sam kont nie sprawdza (`online_mode = false`).
+#     Kolejność jest celowa: najpierw sekret, potem adres lokalny, tryb offline na końcu. Krok
+#     przerwany w połowie nie zostawia silnika otwartego dla każdego: bez sekretu nie ma trybu
+#     offline, a silnik z sekretem wpuszcza tylko graczy podpisanych przez proxy.
+# EN: Players connect to hot-proxy on port $PORT. The proxy asks the session service whether the
+#     player owns the game and signs the player's data for the engine with a shared secret
+#     (Velocity forwarding, PLAN M8). The engine listens on 127.0.0.1 only and checks no accounts
+#     itself (`online_mode = false`). The order is deliberate: the secret first, then the local
+#     address, offline mode last. A step cut short never leaves the engine open to anyone: no
+#     secret means no offline mode, and an engine with the secret admits only proxy-signed players.
+proxy_setup() {
+  step 8/13 "Proxy z kontrolą zakupu"
+  local secret=$SRV/forwarding.secret before
+  if [ -z "$(tr -d '[:space:]' 2>/dev/null < "$secret")" ]; then
+    OUTPUT=$( (umask 077 && head -c 32 /dev/urandom | base64 | tr -d '/+=\n' > "$secret") 2>&1) || true
+    ENGINE_CHANGED=1
+  fi
+  chown horizon:horizon "$secret" 2>/dev/null || true
+  chmod 0600 "$secret" 2>/dev/null || true
+  [ -n "$(tr -d '[:space:]' 2>/dev/null < "$secret")" ] || fail HOT-E0114 "The forwarding secret $secret cannot be written" \
+    "a non-empty $secret owned by horizon, mode 0600" "see chain: a full disk or a read-only file system" \
+    "Free disk space (df -h $SRV), then rerun the installer" \
+    "server.toml is unchanged: the engine keeps checking accounts itself" "file=$secret"
+  if [ "$TEST_NO_HORIZON" = 1 ]; then say "Sekret w $secret; server.toml pominięty (--test-no-horizon)."; return; fi
+  before=$(cksum < "$SRV/server.toml")
+  OUTPUT=$(hz config set server.bind=127.0.0.1 "server.port=$ENGINE_PORT" 2>&1) \
+    || fail HOT-E0114 "The engine cannot be moved to 127.0.0.1:$ENGINE_PORT" "config set server.bind and server.port succeed" \
+      "see chain" "Run: sudo -u horizon $BIN/horizon-server --dir $SRV config set server.bind=127.0.0.1 server.port=$ENGINE_PORT; then rerun" \
+      "online_mode is unchanged: the engine keeps checking accounts itself" "engine_port=$ENGINE_PORT"
+  OUTPUT=$(hz config 2>&1) || true
+  # PL: Tryb offline tylko na adresie lokalnym. EN: Offline mode only on the local address.
+  grep -qx 'server.bind = "127.0.0.1"' <<< "$OUTPUT" || fail HOT-E0114 \
+    "The engine is not bound to 127.0.0.1 after config set" 'horizon-server config prints server.bind = "127.0.0.1"' \
+    "see chain: another horizon-server version spells the key differently" \
+    "Set bind = \"127.0.0.1\" under [server] in $SRV/server.toml, then rerun" \
+    "online_mode is unchanged: the engine keeps checking accounts itself"
+  OUTPUT=$(hz config set server.online_mode=false 2>&1) \
+    || fail HOT-E0114 "online_mode cannot be turned off for the engine behind the proxy" "config set server.online_mode=false succeeds" \
+      "see chain" "Run: sudo -u horizon $BIN/horizon-server --dir $SRV config set server.online_mode=false; then rerun" \
+      "the engine checks accounts itself and refuses players coming through the proxy"
+  [ "$(cksum < "$SRV/server.toml")" = "$before" ] || ENGINE_CHANGED=1
+  say "Silnik: 127.0.0.1:$ENGINE_PORT, sekret w $secret; gracze: hot-proxy na porcie $PORT."
+}
+
+# --- PL: Krok 9: pula slotów i paczka zasobów. EN: Step 9: slot pool and resource pack. ----
 
 # PL: Pula slotów (`hot_slots.hmod`) dla serwera i graczy oraz adres paczki w `server.toml`.
 #     Plik buduje `cargo horizon-mod` z tej samej wersji Horizona co serwer; build jest powtarzalny,
@@ -416,7 +473,7 @@ set_pack_url() {
 }
 
 slots_pack() {
-  step 8/12 "Pula slotów i paczka zasobów"
+  step 9/13 "Pula slotów i paczka zasobów"
   local rev=${HORIZON_VERSION##*-} pool=$SRV/horizon-mods/hot_slots.hmod src=$ROOT/tmp/hot-slots
   if [ "$(cat "$ROOT/cargo-horizon-mod-version" 2>/dev/null)" != "$rev" ] || [ ! -x "$ROOT/.cargo/bin/cargo-horizon-mod" ]; then
     say "Instaluję cargo-horizon-mod (Horizon $rev)…"
@@ -464,10 +521,10 @@ slots_pack() {
   say "Pula $(sed -n 's/^version = "\(.*\)"/\1/p' "$src/horizon-mod.toml" 2>/dev/null || true) w $pool; paczka: $url"
 }
 
-# --- PL: Krok 9: usługi systemd. EN: Step 9: systemd units. ----------------------------------
+# --- PL: Krok 10: usługi systemd. EN: Step 10: systemd units. --------------------------------
 
 units() {
-  step 9/12 "Usługi systemd"
+  step 10/13 "Usługi systemd"
   local changed=0 git_ssh=""
   ssh_repo && git_ssh="Environment=\"GIT_SSH_COMMAND=ssh -i $ROOT/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new\""
   # PL: Gra ma pierwszeństwo, tło pracuje z resztek (D16). Myślnik w nazwie buduje drzewo:
@@ -512,6 +569,24 @@ ExecStart=$BIN/horizon-server run --dir $SRV
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target" && changed=1
+  # PL: Bez trybu offline: proxy zawsze sprawdza zakup gry (test crates/hot-proxy/tests/installer.rs).
+  # EN: Never offline: the proxy always checks the purchase (test crates/hot-proxy/tests/installer.rs).
+  write_if_changed /etc/systemd/system/horizon-hot-proxy.service "[Unit]
+Description=horizon-hot: the players' port with the purchase check (hot-proxy)
+After=horizon-hot-server.service network-online.target
+Wants=network-online.target
+
+[Service]
+Slice=horizon-game.slice
+User=horizon
+Group=horizon
+Environment=HOT_HOME=$SRV
+ExecStart=$BIN/hot-proxy --listen 0.0.0.0:$PORT --engine 127.0.0.1:$ENGINE_PORT --secret $SRV/forwarding.secret --home $SRV
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target" && changed=1
@@ -580,8 +655,12 @@ WantedBy=timers.target" && changed=1
     if [ "$TEST_NO_HORIZON" = 0 ]; then
       systemctl enable -q horizon-hot-server
       # PL: Pula i adres paczki silnik czyta tylko przy starcie. EN: The engine reads the pool and pack address only at start.
-      if [ "$changed" = 1 ] || [ "$SLOTS_CHANGED" = 1 ]; then systemctl restart horizon-hot-server; else systemctl start horizon-hot-server; fi
+      if [ "$changed" = 1 ] || [ "$SLOTS_CHANGED" = 1 ] || [ "$ENGINE_CHANGED" = 1 ]; then systemctl restart horizon-hot-server; else systemctl start horizon-hot-server; fi
     fi
+    # PL: Po silniku: przy aktualizacji silnik zwalnia port graczy dopiero po restarcie.
+    # EN: After the engine: on an update the engine frees the players' port only on its restart.
+    systemctl enable -q horizon-hot-proxy
+    if [ "$changed" = 1 ] || [ "$HOT_REBUILT" = 1 ] || [ "$ENGINE_CHANGED" = 1 ]; then systemctl restart horizon-hot-proxy; else systemctl start horizon-hot-proxy; fi
     # PL: hotd rusza dopiero przy silniku z hot-host; bez niego commity z modami byłyby
     #     oznaczane jako nieudane. EN: hotd starts only with a hot-host engine.
     if engine_has_hot_host || [ "$TEST_NO_HORIZON" = 1 ]; then
@@ -592,14 +671,14 @@ WantedBy=timers.target" && changed=1
   } 2>&1) || fail HOT-E0109 "systemd cannot start the horizon-hot services" "systemctl enable --now succeeds" \
     "see chain; journalctl -u horizon-hot-server -n 50 shows why a unit stopped" \
     "Run journalctl -u horizon-hot-server -u horizon-hot-hotd -n 80, fix the cause, then rerun the installer" \
-    "the unit files are in /etc/systemd/system" "units=horizon-hot-server,horizon-hot-hotd,horizon-hot-pack,horizon-hot-backup"
-  say "Włączone: horizon-hot-backup.timer, horizon-hot-pack$([ "$TEST_NO_HORIZON" = 0 ] && printf ', horizon-hot-server')$( (engine_has_hot_host || [ "$TEST_NO_HORIZON" = 1 ]) && printf ', horizon-hot-hotd')."
+    "the unit files are in /etc/systemd/system" "units=horizon-hot-server,horizon-hot-proxy,horizon-hot-hotd,horizon-hot-pack,horizon-hot-backup"
+  say "Włączone: horizon-hot-backup.timer, horizon-hot-pack$([ "$TEST_NO_HORIZON" = 0 ] && printf ', horizon-hot-server'), horizon-hot-proxy$( (engine_has_hot_host || [ "$TEST_NO_HORIZON" = 1 ]) && printf ', horizon-hot-hotd')."
 }
 
-# --- PL: Krok 10: zapora. EN: Step 10: firewall. ----------------------------------------------
+# --- PL: Krok 11: zapora. EN: Step 11: firewall. ----------------------------------------------
 
 firewall() {
-  step 10/12 "Zapora (ufw)"
+  step 11/13 "Zapora (ufw)"
   local p
   # PL: Najpierw SSH na każdym porcie, na którym słucha sshd, żeby nie odciąć operatora.
   # EN: SSH first, on every port sshd listens on, so the operator is never locked out.
@@ -613,7 +692,7 @@ firewall() {
   OUTPUT=$(ufw --force enable 2>&1) || fail HOT-E0109 "ufw cannot be enabled" "ufw --force enable succeeds" \
     "see chain: often a kernel without netfilter in a container" "Run: sudo ufw status verbose; fix the cause, then rerun" \
     "the firewall rules are added but may be inactive"
-  say "Otwarte: SSH, $PORT (gra), $PACK_PORT (paczka zasobów)."
+  say "Otwarte: SSH, $PORT (gracze, przez proxy), $PACK_PORT (paczka zasobów). Silnik ($ENGINE_PORT) tylko lokalnie."
 }
 
 # PL: Czeka do 120 s na fazę running silnika. EN: Waits up to 120 s for the engine's running phase.
@@ -625,14 +704,14 @@ wait_running() {
   return 1
 }
 
-# --- PL: Krok 10: silnik z hot-host. EN: Step 10: the engine with hot-host. ------------------
+# --- PL: Krok 13: silnik z hot-host. EN: Step 13: the engine with hot-host. ------------------
 
 engine_has_hot_host() {
   [ -f "$SRV/server.toml" ] && grep -q "^path = \"$ENGINES/" "$SRV/server.toml" 2>/dev/null
 }
 
 engine() {
-  step 12/12 "Silnik z hot-host"
+  step 13/13 "Silnik z hot-host"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
   local out=$ENGINES/${HOT_SHA:0:12}-$HORIZON_VERSION
   if grep -q "^path = \"$out/horizon-engine\"" "$SRV/server.toml" 2>/dev/null && [ -x "$out/horizon-engine" ]; then
@@ -675,7 +754,7 @@ engine() {
   say "Silnik z hot-host: $out."
 }
 
-# --- PL: Krok 11: autotest. EN: Step 11: self test. -----------------------------------------
+# --- PL: Krok 12: autotest. EN: Step 12: self test. -----------------------------------------
 
 autotest() {
   step "$1" "$2"
@@ -711,6 +790,26 @@ autotest() {
       "The server did not reach the running phase within 120 s" "horizon-server status --json says running" \
       "see chain (the service log)" "Read journalctl -u horizon-hot-server -n 200, fix the cause, then rerun the installer" \
       "the services stay installed"
+  fi
+  # PL: Gracze dochodzą przez proxy, a silnik słucha tylko lokalnie. EN: Players get through the proxy; the engine is local only.
+  ok=0
+  for _ in $(seq 1 15); do [[ "$(port_owner "$PORT")" == *'"hot-proxy"'* ]] && { ok=1; break; }; sleep 1; done
+  [ "$ok" = 1 ] || OUTPUT=$(journalctl -u horizon-hot-proxy -n 40 --no-pager 2>&1) fail HOT-E0111 \
+    "hot-proxy does not listen on the players' port $PORT" "ss shows hot-proxy on port $PORT" \
+    "see chain (the service log); often the port is still held by another program" \
+    "Read journalctl -u horizon-hot-proxy -n 80 and $SRV/logs/hot-proxy.jsonl, fix the cause, then rerun the installer" \
+    "players cannot join" "port=$PORT"
+  if [ "$TEST_NO_HORIZON" = 0 ]; then
+    local open
+    open=$(ss -Hltn "sport = :$ENGINE_PORT" 2>/dev/null | awk '$4 !~ /^127\.0\.0\.1:/ { print $4 }')
+    [ -z "$open" ] || OUTPUT=$open fail HOT-E0111 "The engine listens on $open, not only on 127.0.0.1" \
+      "the engine port $ENGINE_PORT is bound to 127.0.0.1 only" "server.toml lost bind = \"127.0.0.1\"" \
+      "Rerun the installer (step 8 sets it again)" "the engine may be reachable without the purchase check" "engine_port=$ENGINE_PORT"
+    OUTPUT=$(as_horizon "$BIN/hot-proxy" ping "127.0.0.1:$PORT" 2>&1) || fail HOT-E0111 \
+      "The engine does not answer through hot-proxy" "hot-proxy ping 127.0.0.1:$PORT prints the server status" \
+      "see chain: the engine port in the proxy unit differs from server.toml, or the engine is down" \
+      "Compare --engine in /etc/systemd/system/horizon-hot-proxy.service with server.port in $SRV/server.toml, then rerun the installer" \
+      "players cannot join" "port=$PORT" "engine_port=$ENGINE_PORT"
   fi
   if engine_has_hot_host; then
     local before after
@@ -761,13 +860,14 @@ main() {
   hot_build
   keys
   world
+  proxy_setup
   slots_pack
   units
   firewall
-  autotest 11/12 "Autotest serwera"
+  autotest 12/13 "Autotest serwera"
   engine
   # PL: Po zbudowaniu silnika test jeszcze raz, już z hot-core. EN: Test again, now with hot-core.
-  if engine_has_hot_host; then autotest 12/12 "Autotest z hot-core"; fi
+  if engine_has_hot_host; then autotest 13/13 "Autotest z hot-core"; fi
   summary
 }
 
@@ -783,12 +883,14 @@ main() {
 #     prints the plan. Running it again breaks nothing.
 uninstall() {
   [ "$(id -u)" = 0 ] || { say "Uruchom przez sudo: … | sudo bash -s -- --uninstall" >&2; exit 2; }
-  local units="horizon-hot-hotd.service horizon-hot-pack.service horizon-hot-server.service horizon-hot-backup.timer horizon-hot-backup.service"
+  local units="horizon-hot-hotd.service horizon-hot-proxy.service horizon-hot-pack.service horizon-hot-server.service horizon-hot-backup.timer horizon-hot-backup.service"
   local slices="horizon-bg.slice horizon-game.slice horizon.slice"
   local game_port pack_port path u left=""
   pack_port=$(sed -n 's/.*serve-pack .*--port \([0-9]*\).*/\1/p' /etc/systemd/system/horizon-hot-pack.service 2>/dev/null || true)
   pack_port=${pack_port:-$PACK_PORT}
-  game_port=$(sed -n 's/^port *= *\([0-9]*\).*/\1/p' "$SRV/server.toml" 2>/dev/null | head -n 1 || true)
+  # PL: Port graczy ma proxy; przed M8.1b miał go silnik. EN: The proxy holds the players' port; before M8.1b the engine did.
+  game_port=$(sed -n 's/.*hot-proxy --listen [^ ]*:\([0-9]*\) .*/\1/p' /etc/systemd/system/horizon-hot-proxy.service 2>/dev/null || true)
+  [ -n "$game_port" ] || game_port=$(sed -n 's/^port *= *\([0-9]*\).*/\1/p' "$SRV/server.toml" 2>/dev/null | head -n 1 || true)
   game_port=${game_port:-$PORT}
   local remove=("$BIN" "$HZ" "$ROOT/src" "$ROOT/tmp" "$ENGINES" "$SHARE" "$KEYS" "$ROOT/.cargo" "$ROOT/.rustup"
     "$ROOT/.ssh" "$ROOT/hot-version" "$ROOT/cargo-horizon-mod-version" "$SRV/hot-core" "$SRV/hot-state"
@@ -798,6 +900,7 @@ uninstall() {
   say "  reguły zapory dla portów $game_port i $pack_port (SSH zostaje)"
   for path in "${remove[@]}"; do [ -e "$path" ] && say "  $path"; done
   say "  mod.hot_slots z $SRV/horizon-mods.txt i adres paczki zasobów z $SRV/server.toml"
+  [ -e "$SRV/forwarding.secret" ] && say "  $SRV/forwarding.secret; silnik w server.toml wraca na port $game_port, wszystkie adresy i online_mode = true"
   say "Zostawię: świat i ustawienia w $SRV, kopie w $SRV/backups i $BACKUPS, logi w $LOGS, użytkownika horizon."
   if [ "$YES" != 1 ]; then
     say "Nic nie zmienione. Żeby usunąć, uruchom jeszcze raz z --uninstall --yes."
@@ -815,6 +918,15 @@ uninstall() {
     say "Kopia stanu modów: $copy"
   fi
   for u in $units; do systemctl disable -q --now "$u" 2>/dev/null || true; done
+  # PL: Silnik bez proxy sprawdza konta sam; najpierw online_mode, potem adres. Zanim zniknie $BIN.
+  # EN: Without the proxy the engine checks accounts itself; online_mode first, then the address. Before $BIN goes.
+  if [ -e "$SRV/forwarding.secret" ] && [ -f "$SRV/server.toml" ] && [ -x "$BIN/horizon-server" ]; then
+    OUTPUT=$(hz config set server.online_mode=true 2>&1 && hz config set server.bind= "server.port=$game_port" 2>&1) \
+      || fail HOT-E0113 "server.toml cannot be switched back to an engine without the proxy" "config set succeeds" \
+        "see chain" "Run: sudo -u horizon $BIN/horizon-server --dir $SRV config set server.online_mode=true server.bind= server.port=$game_port; then rerun with --uninstall --yes" \
+        "the services are stopped; nothing was removed"
+  fi
+  rm -f "$SRV/forwarding.secret"
   # PL: Slice bez pliku zostałby aktywny do restartu. EN: A slice without its file stays active until reboot.
   for u in $slices; do systemctl stop "$u" 2>/dev/null || true; done
   for u in $units $slices; do rm -f "/etc/systemd/system/$u"; done
@@ -845,6 +957,7 @@ if [ "$UNINSTALL" = 1 ]; then uninstall; exit 0; fi
 HOT_SHA=
 HOT_REBUILT=0
 SLOTS_CHANGED=0
+ENGINE_CHANGED=0
 # PL: Przy `curl | bash` skrypt płynie przez stdin; polecenia w środku nie mogą go czytać.
 # EN: With `curl | bash` the script comes through stdin; commands inside must not read it.
 main </dev/null
