@@ -62,6 +62,14 @@ struct Fields {
     source: String,
 }
 
+/// PL: Miejsce w kodzie jako ścieżka z repo z `/`, także w programach zbudowanych na Windows
+/// (tam `file!()` daje `\`), żeby `source` dało się wkleić tak samo na każdym systemie.
+/// EN: A code location as a repo path with `/`, also in programs built on Windows (where
+/// `file!()` gives `\`), so `source` reads the same on every system.
+fn repo_path(file: &str, line: u32) -> String {
+    format!("{}:{line}", file.replace('\\', "/"))
+}
+
 impl DiagError {
     /// PL: `what` i `fix` pełnymi zdaniami, bez skrótów projektowych (`docs/STANDARD_KODU.md`).
     /// `source` to miejsce wywołania.
@@ -81,7 +89,7 @@ impl DiagError {
                 cause: None,
                 chain: Vec::new(),
                 state: None,
-                source: format!("{}:{}", at.file(), at.line()),
+                source: repo_path(at.file(), at.line()),
             }),
         }
     }
@@ -140,7 +148,7 @@ impl DiagError {
     /// EN: A code location other than the `new` call, e.g. where a panic happened.
     #[must_use]
     pub fn source_at(mut self, file: &str, line: u32) -> Self {
-        self.f.source = format!("{file}:{line}");
+        self.f.source = repo_path(file, line);
         self
     }
 

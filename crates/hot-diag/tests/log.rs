@@ -21,6 +21,22 @@ fn entries(path: &Path) -> Vec<Value> {
         .collect()
 }
 
+/// PL: Program zbudowany na Windows podaje `file!()` z `\\`; w logu ma być ścieżka z repo z `/`.
+/// EN: A program built on Windows gives `file!()` with `\\`; the log needs the repo path with `/`.
+#[test]
+fn source_uses_forward_slashes_on_every_system() -> Result<(), DiagError> {
+    let dir = temp_dir("slashes");
+    let log = Logger::open(LogConfig::new("hot-play", "0.1.0", &dir), Redactor::new())?;
+    log.error(
+        &DiagError::new(codes::PANIC, "A test error", "Nothing to fix")
+            .source_at("crates\\hot-play\\src\\real.rs", 12),
+    );
+    let e = &entries(&log.path())[0];
+    assert_eq!(e["source"], "crates/hot-play/src/real.rs:12");
+    let _ = fs::remove_dir_all(dir);
+    Ok(())
+}
+
 #[test]
 fn error_entry_has_every_d27_field() -> Result<(), DiagError> {
     let dir = temp_dir("fields");
