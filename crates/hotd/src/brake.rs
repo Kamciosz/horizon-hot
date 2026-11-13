@@ -60,14 +60,20 @@ fn registry() -> std::sync::MutexGuard<'static, Registry> {
     REGISTRY.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// PL: Wysyła sygnał do grupy procesów przez `kill`, bez nowej zależności.
-/// EN: Sends a signal to a process group with `kill`, with no new dependency.
-fn signal(group: u32, name: &str) {
-    let _ = Command::new("kill")
-        .args(["-s", name, "--", &format!("-{group}")])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+/// PL: Wysyła sygnał do grupy procesów wywołaniem systemowym. Nie przez program `kill`: ten z
+/// procps 4.0.4 (Ubuntu 24.04) źle czyta ujemny numer grupy i może trafić w grupę 1 (ADR 0009).
+/// Grupa 0 i 1 nigdy nie dostaje sygnału.
+/// EN: Sends a signal to a process group with the system call. Not through the `kill` program:
+/// the one from procps 4.0.4 (Ubuntu 24.04) misreads a negative group number and may hit
+/// group 1 (ADR 0009). Groups 0 and 1 never get a signal.
+fn signal(group: u32, sig: libc::c_int) {
+    let Ok(group) = libc::pid_t::try_from(group) else {
+        return;
+    };
+    if group > 1 {
+        // SAFETY: `kill` reads no memory of ours; a group that is gone only gives ESRCH.
+        unsafe { libc::kill(-group, sig) };
+    }
 }
 
 /// PL: Jak [`Command::output`], ale proces jest w tle: własna grupa procesów, którą hamulec może
@@ -87,7 +93,7 @@ pub fn output(cmd: &mut Command) -> io::Result<Output> {
         let child = cmd.spawn()?;
         reg.groups.push(child.id());
         if reg.engaged {
-            signal(child.id(), "STOP");
+            signal(child.id(), libc::SIGSTOP);
         }
         child
     };
@@ -112,7 +118,7 @@ pub fn hold(on: bool, note: Option<String>) -> usize {
     reg.engaged = on;
     reg.note = note;
     for g in &reg.groups {
-        signal(*g, if on { "STOP" } else { "CONT" });
+        signal(*g, if on { libc::SIGSTOP } else { libc::SIGCONT });
     }
     reg.groups.len()
 }

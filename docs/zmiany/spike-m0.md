@@ -56,6 +56,7 @@
 - Hamulec MSPT w `hotd` (M6.2): gdy p95 czasu ticku przekroczy 35 ms, ciężkie procesy tła `hotd` stają, a po 10 s poniżej 25 ms ruszają dalej. Mody wczytują się bez przerwy. `hot status` pokazuje wiersz „hamulec”.
 
 ### Zmienione
+- Hamulec MSPT wysyła `SIGSTOP`/`SIGCONT` wywołaniem systemowym (`libc`, ADR 0009) zamiast programem `kill`, który na Ubuntu 24.04 źle czyta ujemny numer grupy procesów.
 - Instalator ustawia `stable` jako domyślny toolchain użytkownika `horizon`, gdy go brakuje; bez tego `cargo horizon-mod` (pula slotów) nie startował.
 - Ponowne uruchomienie instalatora nie odrzuca już portu 8131, gdy zajmuje go nasza własna usługa `horizon-hot-pack`.
 - Instalator usuwa po sobie źródła puli slotów i pakiet `hot-host` z `/srv/horizon/tmp`.

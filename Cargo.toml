@@ -12,6 +12,7 @@ repository = "https://github.com/Kamciosz/horizon-hot"
 # PL: Wersje zależności w jednym miejscu. Nowa zależność wymaga ADR (docs/adr/).
 # EN: Dependency versions in one place. A new dependency needs an ADR (docs/adr/).
 [workspace.dependencies]
+libc = "0.2.191"
 libloading = "0.8.9"
 serde_json = "1.0.151"
 

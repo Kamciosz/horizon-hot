@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 hot-diag = { path = "../hot-diag" }
+libc.workspace = true
 serde_json.workspace = true
 
 [lints]
