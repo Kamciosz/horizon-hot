@@ -38,7 +38,24 @@ Na końcu skrypt pokazuje, co raz dodać w repo serwera: `hot.yml` w `.github/wo
 
 Odinstalowanie: `sudo bash server-install.sh --uninstall` pokazuje, co zniknie, a z `--yes` to usuwa. Świat, kopie, logi i użytkownik `horizon` zostają, a stan modów trafia najpierw do `/srv/horizon/backups/`.
 
-Każdy gracz raz: pobiera `http://<IP-serwera>:8131/hot_slots.hmod` do folderu `horizon-mods/` swojej instancji Horizona, dopisuje `mod.hot_slots:true` do `horizon-mods.txt` obok i przy wejściu przyjmuje paczkę zasobów serwera. Bez tego pliku serwer go nie wpuści („Your mods don't match”). Później zrobi to aplikacja gracza.
+## Gracze
+
+Każdy gracz potrzebuje konta Microsoft z kupionym Minecraft: Java Edition. Aplikację `hot-play` instaluje jedną linijką w terminalu (`ADRES` to adres serwera, np. `serwer.pl`):
+
+```bash
+# macOS i Linux
+curl -fsSL https://github.com/Kamciosz/horizon-hot/releases/download/hot-play/install.sh | sh -s -- ADRES
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://github.com/Kamciosz/horizon-hot/releases/download/hot-play/install.ps1 -OutFile $env:TEMP\hot-play-install.ps1
+powershell -ExecutionPolicy Bypass -File $env:TEMP\hot-play-install.ps1 ADRES
+```
+
+Na pulpicie pojawia się skrót „Graj”. Menu ma trzy pozycje: „Graj” (instaluje i naprawia launcher Horizona, wersję gry, plik bloków serwera i listę serwerów, za pierwszym razem prosi o logowanie, potem łączy z serwerem), „Napraw” (sprawdza wszystko od nowa i zapisuje na pulpicie `hot-play-raport.md` do wysłania właścicielowi) i „Wyjdź”. Aplikacja sama się aktualizuje przy starcie (ADR 0016). Bez pliku bloków serwera (`hot_slots.hmod`) serwer nie wpuści gracza („Your mods don't match”), dlatego „Graj” zawsze go sprawdza.
+
+Wydanie `hot-play` na GitHubie powstaje dopiero po pierwszym merge'u na `main`: wcześniej linki wyżej nie działają, a pliki są tylko w artefaktach przebiegów workflow `hot-play`.
 
 ## Testy
 ```bash

@@ -48,10 +48,11 @@ examples/sklep/    przykład: komenda /sklep, monety, give, tell poza komendą
 examples/teleport-blok/  przykład: klik w magnetyt, set_block, particles, run_later
 crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; data/ → paczki danych świata; assets/ → sloty i paczka zasobów; hotd status
 scripts/           server-install.sh (instalator serwera na Ubuntu, D25); hot-build.sh i
-                   hot-publish.sh (budowa modów w CI repo serwera, ADR 0008)
+                   hot-publish.sh (budowa modów w CI repo serwera, ADR 0008); install.sh
+                   i install.ps1 (instalacja hot-play u gracza, ADR 0016)
 templates/server-repo/  pliki do repo serwera: hot.yml (kopiuje instalator) i README z układem repo dla autorów modów
 crates/hot-proxy/  proxy: logowanie online, podpis Velocity dla silnika, przekazywanie ruchu (M8.1; podmiana silnika od M8.2)
-crates/hot-play/   aplikacja gracza: menu, „Graj”, „Napraw” nad horizon-launcher (M11, ADR 0015)
+crates/hot-play/   aplikacja gracza: menu, „Graj”, „Napraw” nad horizon-launcher, samoaktualizacja (M11, ADR 0015, 0016)
 docs/bledy/        katalog kodów błędów HOT-EXXXX (test: crates/hot-diag/tests/catalog.rs)
 docs/adr/          decyzje (jedna decyzja = jeden plik)
 docs/zmiany/       wpisy do changelogu z pull requestów

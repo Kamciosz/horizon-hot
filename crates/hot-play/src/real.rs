@@ -394,7 +394,7 @@ impl World for Real {
     }
 }
 
-fn get(url: &str, code: Code) -> Result<Vec<u8>, DiagError> {
+pub(crate) fn get(url: &str, code: Code) -> Result<Vec<u8>, DiagError> {
     let agent = ureq::AgentBuilder::new()
         .user_agent("hot-play")
         .timeout_connect(Duration::from_secs(10))

@@ -8,12 +8,12 @@
 
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 use hot_diag::report::{build_report, ReportInput};
 use hot_diag::{DiagError, LogConfig, Logger, Redactor};
 use hot_play::real::Real;
-use hot_play::{codes, data_dir, game, load_state, player_redactor, save_state, Config};
+use hot_play::{codes, data_dir, game, load_state, player_redactor, save_state, update, Config};
 use serde_json::json;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -32,6 +32,12 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let data = data_dir();
     let log = open_log(&data);
+    if matches!(
+        args.first().map(String::as_str),
+        None | Some("graj" | "napraw" | "sprawdz")
+    ) {
+        self_update(log.as_ref());
+    }
     match args.first().map(String::as_str) {
         None => menu(&data, log),
         Some("graj") => done(run(&data, log, false, true)),
@@ -46,6 +52,72 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::from(2)
         }
+    }
+}
+
+/// PL: Nowa wersja z wydania `hot-play` (ADR 0016): wstawia ją i uruchamia program od nowa z tymi
+/// samymi argumentami. Każdy błąd idzie tylko do logu, a program działa dalej na obecnej wersji.
+/// EN: A new version from the `hot-play` release (ADR 0016): puts it in place and starts the
+/// program again with the same arguments. Every error only goes to the log, and the program goes
+/// on with the current version.
+fn self_update(log: Option<&Logger>) {
+    let Some((url, asset)) = update::source() else {
+        return;
+    };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    update::cleanup(&exe);
+    let failed = |e: &DiagError| {
+        if let Some(log) = log {
+            log.error(e);
+        }
+    };
+    let bytes = match update::check(&url, asset, &exe) {
+        Ok(None) => return,
+        Ok(Some(bytes)) => bytes,
+        Err(e) => return failed(&e),
+    };
+    println!("Wstawiam nową wersję hot-play…");
+    if let Err(e) = update::replace(&exe, &bytes) {
+        println!("{}", codes::for_player(codes::UPDATE));
+        return failed(
+            &DiagError::new(
+                codes::UPDATE,
+                "the new hot-play cannot be put in place of the old one",
+                "nothing; the next start tries again",
+            )
+            .context("file", exe.display().to_string())
+            .caused_by(&e),
+        );
+    }
+    if let Some(log) = log {
+        log.info(
+            "hot-play updated",
+            json!({ "file": asset, "sha256": update::sha256_hex(&bytes) }),
+        );
+    }
+    let mut again = Command::new(&exe);
+    again
+        .args(std::env::args_os().skip(1))
+        .env(update::OFF, "1");
+    #[cfg(unix)]
+    let started = {
+        use std::os::unix::process::CommandExt;
+        Err::<std::process::ExitStatus, _>(again.exec())
+    };
+    #[cfg(not(unix))]
+    let started = again.status();
+    match started {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(e) => failed(
+            &DiagError::new(
+                codes::UPDATE,
+                "the new hot-play did not start; this run goes on with the old one",
+                "nothing; the next start uses the new file",
+            )
+            .caused_by(&e),
+        ),
     }
 }
 

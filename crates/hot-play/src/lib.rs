@@ -9,6 +9,7 @@ pub mod codes;
 pub mod game;
 pub mod real;
 pub mod servers;
+pub mod update;
 
 use std::fs;
 use std::path::{Path, PathBuf};

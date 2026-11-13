@@ -32,6 +32,11 @@ pub const SLOTS: Code = Code::new("HOT-E0907");
 /// PL: Launcher nie uruchomił gry. EN: The launcher did not start the game.
 pub const PLAY: Code = Code::new("HOT-E0908");
 
+/// PL: Nowej wersji `hot-play` nie da się sprawdzić, pobrać albo wstawić; gra idzie na obecnej.
+/// EN: A new `hot-play` version cannot be checked, downloaded or put in place; play goes on with
+/// the current one.
+pub const UPDATE: Code = Code::new("HOT-E0909");
+
 /// PL: Zdanie dla gracza do kodu: co się stało i co zrobić. EN: A sentence for the player per code:
 /// what happened and what to do.
 #[must_use]
@@ -45,6 +50,7 @@ pub fn for_player(code: Code) -> &'static str {
         "HOT-E0906" => "Nie udało się ustawić folderu gry. Wybierz [2] Napraw.",
         "HOT-E0907" => "Nie udało się pobrać bloków serwera. Wybierz [2] Napraw; jeśli to nie pomoże, wyślij plik z logiem właścicielowi serwera.",
         "HOT-E0908" => "Launcher nie uruchomił gry. Wybierz [2] Napraw i wyślij plik z logiem właścicielowi serwera.",
+        "HOT-E0909" => "Nie udało się zaktualizować hot-play; gram na obecnej wersji.",
         _ => "Coś poszło nie tak. Wybierz [2] Napraw i wyślij plik z logiem właścicielowi serwera.",
     }
 }

@@ -37,4 +37,4 @@ Wybieramy **opcję 2** (`crates/hot-play`):
 - Kontrola zakupu zostaje w launcherze i na serwerze (proxy); `hot-play` nie ma plików Mojanga, a `prepare --download` pobiera je tylko dla konta, które ma grę.
 - Gracz może grać na innym Nightly niż serwer, gdy wersji serwera już nie ma do pobrania (HIPOTEZA wyżej).
 - `hot-play` nie zna stanu konta poza „jest/nie ma”; wygasłe logowanie kończy się `HOT-E0908` i komunikatem launchera.
-- Samoaktualizacja `hot-play`, skrypty instalacyjne i budowa w CI to M11.3.
+- Samoaktualizacja `hot-play`, skrypty instalacyjne i budowa w CI: ADR 0016 (M11.3).

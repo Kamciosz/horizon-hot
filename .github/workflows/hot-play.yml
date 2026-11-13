@@ -1,0 +1,122 @@
+# PL: Aplikacja gracza `hot-play` (M11.3, ADR 0016). Każdy push: testy i pliki na cztery systemy
+# (artefakty przebiegu). Push na `main` (czyli merge właściciela) dodatkowo publikuje pliki
+# w publicznym wydaniu `hot-play` na GitHubie; stamtąd biorą je `install.sh`, `install.ps1`
+# i samoaktualizacja.
+# EN: The `hot-play` player app (M11.3, ADR 0016). Every push: tests and files for four systems
+# (run artifacts). A push to `main` (the owner's merge) also publishes the files in the public
+# `hot-play` GitHub release; `install.sh`, `install.ps1` and self-update take them from there.
+name: hot-play
+
+on:
+  push:
+    branches: [main, "spike/**"]
+    paths:
+      - "crates/hot-play/**"
+      - "crates/hot-diag/**"
+      - "scripts/install.sh"
+      - "scripts/install.ps1"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/hot-play.yml"
+  pull_request:
+    paths:
+      - "crates/hot-play/**"
+      - "crates/hot-diag/**"
+      - "scripts/install.sh"
+      - "scripts/install.ps1"
+      - ".github/workflows/hot-play.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: hot-play-macos-arm64
+            test: true
+          - os: macos-14
+            target: x86_64-apple-darwin
+            asset: hot-play-macos-x64
+            test: false
+          # PL: Starsze Ubuntu = starsza glibc, więc plik działa też u graczy na starszych
+          # systemach. EN: Older Ubuntu = older glibc, so the file also runs on older systems.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            asset: hot-play-linux-x64
+            test: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: hot-play-windows-x64.exe
+            test: true
+    runs-on: ${{ matrix.os }}
+    env:
+      HOT_PLAY_ASSET: ${{ matrix.asset }}
+      HOT_PLAY_UPDATE_URL: https://github.com/${{ github.repository }}/releases/download/hot-play
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: hot-play-${{ matrix.target }}
+      - name: Lint
+        if: matrix.test
+        run: cargo clippy -p hot-play -p hot-diag --all-targets -q -- -D warnings
+      - name: Testy
+        if: matrix.test
+        run: cargo test -p hot-play -p hot-diag -q
+      - name: Build
+        run: cargo build --release -p hot-play --target ${{ matrix.target }}
+      - name: Plik
+        shell: bash
+        run: |
+          mkdir out
+          src=target/${{ matrix.target }}/release/hot-play
+          [ -f "$src.exe" ] && src="$src.exe"
+          cp "$src" "out/${{ matrix.asset }}"
+          if [ "${{ matrix.test }}" = true ]; then "out/${{ matrix.asset }}" --version; fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    name: Wydanie hot-play
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: hot-play-release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+      - name: Sumy i skrypty
+        run: |
+          cp scripts/install.sh scripts/install.ps1 out/
+          cd out
+          sha256sum hot-play-* install.sh install.ps1 > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publikacja
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="hot-play z commita ${GITHUB_SHA::7}. Instalacja: README, sekcja „Gracze”."
+          if ! gh release view hot-play >/dev/null 2>&1; then
+            gh release create hot-play --prerelease --title "hot-play" --notes "$notes" --target "$GITHUB_SHA"
+          fi
+          gh release upload hot-play out/* --clobber
+          gh release edit hot-play --notes "$notes"

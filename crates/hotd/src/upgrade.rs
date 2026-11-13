@@ -59,8 +59,8 @@ pub enum Plan {
 /// PL: Pliki, które nie trafiają na serwer z pakietu `hotd upgrade`. EN: Files that do not reach
 /// the server through `hotd upgrade`.
 fn ignored(file: &str) -> bool {
-    // PL: `crates/hot-play` to aplikacja gracza; na serwer nie trafia. EN: `crates/hot-play` is the
-    // player app; it never reaches the server.
+    // PL: `crates/hot-play` i `scripts/install.*` to aplikacja gracza; na serwer nie trafia.
+    // EN: `crates/hot-play` and `scripts/install.*` are the player app; it never reaches the server.
     const PREFIXES: [&str; 5] = [
         "docs/",
         "spikes/",
@@ -68,11 +68,13 @@ fn ignored(file: &str) -> bool {
         "examples/",
         "crates/hot-play/",
     ];
-    const FILES: [&str; 5] = [
+    const FILES: [&str; 7] = [
         "Dockerfile",
         ".dockerignore",
         "compose.yaml",
         "scripts/container-entrypoint.sh",
+        "scripts/install.sh",
+        "scripts/install.ps1",
         "LICENSE",
     ];
     PREFIXES.iter().any(|p| file.starts_with(p))
@@ -521,7 +523,9 @@ mod tests {
                 "docs/a.md",
                 "PLAN.md",
                 "crates/hotd/tests/flow.rs",
-                "crates/hot-play/src/game.rs"
+                "crates/hot-play/src/game.rs",
+                "scripts/install.sh",
+                "scripts/install.ps1"
             ])),
             Plan::Nothing
         );
