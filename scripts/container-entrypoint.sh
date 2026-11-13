@@ -261,10 +261,13 @@ hot_engine() {
 declare -A PID=() CMD=()
 STOPPING=0
 
+# PL: exec w podpowłoce: zapisany PID to sam program, więc SIGTERM trafia do niego, nie do basha.
+# EN: exec in the subshell: the saved PID is the program itself, so SIGTERM reaches it, not bash.
 start() {
   local name=$1
   # shellcheck disable=SC2086
-  as_horizon ${CMD[$name]} </dev/null &
+  ( exec setpriv --reuid=horizon --regid=horizon --init-groups \
+      env HOME="$ROOT" HOT_HOME="$SRV" PATH="$HOTBIN:$HZBIN:/usr/local/bin:/usr/bin:/bin" ${CMD[$name]} ) </dev/null &
   PID[$name]=$!
   say "$name: pid ${PID[$name]}"
 }
