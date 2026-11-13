@@ -203,7 +203,7 @@ fn main() -> ExitCode {
         let e = hot_diag::DiagError::new(
             hot_proxy::codes::CONFIG,
             format!("hot-proxy cannot open its control socket: {e}"),
-            "Another hot-proxy with the same --home runs (stop it), or HOT_HOME is not writable for this user",
+            "Another hot-proxy with the same --home runs (stop it), HOT_HOME is not writable for this user, or its path is too long for a Unix socket (keep <home>/hot-proxy.sock under 104 bytes, like /srv/horizon)",
         )
         .context("socket", hot_proxy::control::socket_path(&home).display().to_string())
         .state("The proxy did not start");
