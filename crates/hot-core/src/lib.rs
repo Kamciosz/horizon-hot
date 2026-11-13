@@ -21,7 +21,9 @@ mod slots;
 pub mod store;
 mod wrap;
 
-pub use crate::core::{Core, GOOD_AFTER_TICKS};
+pub use crate::core::{
+    crash_starts, Core, CRASH_LOOP_WINDOW_MS, GOOD_AFTER_TICKS, SAFE_MODE_AFTER,
+};
 
 /// PL: Wersja z `Cargo.toml`. EN: The version from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

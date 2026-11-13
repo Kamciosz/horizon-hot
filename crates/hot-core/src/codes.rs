@@ -19,3 +19,7 @@ pub const STATE_FILE: Code = Code::new("HOT-E0404");
 
 /// PL: Mod sam zgłosił błąd (`Host::error`). EN: The mod reported an error itself.
 pub const MOD_ERROR: Code = Code::new("HOT-E0405");
+
+/// PL: Serwer padł kilka razy z rzędu krótko po starcie; mody gorące śpią (tryb bezpieczny).
+/// EN: The server crashed several times in a row soon after starting; hot mods sleep (safe mode).
+pub const CRASH_LOOP: Code = Code::new("HOT-E0408");

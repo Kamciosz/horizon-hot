@@ -105,6 +105,15 @@ pub fn render(home: &Path) -> String {
                     if m["good"] == true { "dobra" } else { "na próbie" }
                 );
             }
+            if let Some(dormant) = c["safe_mode"]["dormant"].as_array() {
+                let ids: Vec<&str> = dormant.iter().filter_map(Value::as_str).collect();
+                let _ = writeln!(
+                    out,
+                    "  TRYB BEZPIECZNY: serwer padł {} razy z rzędu krótko po starcie, mody śpią: {} (HOT-E0408)",
+                    c["safe_mode"]["crash_starts"],
+                    ids.join(", ")
+                );
+            }
             for e in c["recent_errors"].as_array().into_iter().flatten().rev().take(3) {
                 let _ = writeln!(
                     out,
@@ -130,4 +139,27 @@ pub fn render(home: &Path) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_mode_is_shown() -> std::io::Result<()> {
+        let home = std::env::temp_dir().join(format!("hotd-status-{}", std::process::id()));
+        let state = home.join("hot-state");
+        std::fs::create_dir_all(&state)?;
+        std::fs::write(
+            state.join("status.json"),
+            r#"{"version":"0.1.0","tick":0,"updated":"t","mods":[],"safe_mode":{"crash_starts":2,"dormant":["sklep","licznik"]},"recent_errors":[]}"#,
+        )?;
+        let out = render(&home);
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(
+            out.contains("TRYB BEZPIECZNY: serwer padł 2 razy z rzędu krótko po starcie, mody śpią: sklep, licznik"),
+            "{out}"
+        );
+        Ok(())
+    }
 }

@@ -151,6 +151,7 @@ Gracze łączą się z `hot-proxy` (Rust, na `horizon-protocol`) na porcie 25565
 **D13. Ochrona przed pętlą awarii i wznowienie po awarii.**
 - Przy starcie `hot-core` ładuje tylko generacje oznaczone jako ostatnie dobre (przeżyły 5 min).
 - `hotd` oznacza commit jako zły, gdy silnik padł ≤ 60 s od jego załadowania; nie aplikuje go ponownie.
+- Pętla awarii (M7.1, 2026-11-13): druga awaria z rzędu, każda w ciągu 5 min od startu `hot-core`, włącza tryb bezpieczny: żaden mod gorący nie startuje, wpisy zostają w `mods.json` i wracają po czystym restarcie albo `hot load` (`HOT-E0408`). FAKT (`horizon-server/src/supervisor.rs`): supervisor Horizona wznawia grę po awarii z przerwą 5, 10, 20… s i poddaje się po 5 awariach w 10 min; tryb bezpieczny zatrzymuje pętlę wcześniej, a serwer działa dalej bez modów gorących. SIGTERM (systemd) zatrzymuje grę czysto (`signals.rs`).
 - Po awarii silnika proxy trzyma połączenia graczy (świat stoi, bez ekranu ładowania), potem wprowadza ich jak w D11. Cel: nikt nie traci połączenia, jeśli silnik wstanie w < 30 s (limit ciszy klienta `READ_TIMEOUT` = 30 s, potwierdzone w kodzie w S8; proxy wysyła w tym czasie keep-alive, więc limit dotyczy tylko proxy).
 
 ### Budowa i zasoby
@@ -381,7 +382,11 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 - Sprawdzenie: czysta maszyna wirtualna Ubuntu (multipass, wersja jak na ThinkCentre) → jedno polecenie → „Działa”; drugie uruchomienie bez zmian; `stress-ng` w `horizon-bg.slice` + 10 botów → p99 MSPT < 50 ms; potem to samo na ThinkCentre.
 
 ### M7 — Samonaprawa (D13, D20)
-- [ ] M7.1 Segfault w module testowym → ostatnie dobre generacje, brak pętli.
+- [x] M7.1 Segfault w module testowym → ostatnie dobre generacje, brak pętli.
+  - Test `segfault_brings_back_last_good_generation`: proces potomny wczytuje mod, który po 3 tickach pisze pod adres 8; proces kończy się sygnałem 11, a następny start bierze ostatnią dobrą generację.
+  - Test `second_crash_in_a_row_puts_hot_mods_to_sleep`: druga awaria z rzędu → brak modów, `safe_mode` w `status.json`, `HOT-E0408`, linia w `hot list`; czysty restart przywraca mody. `load_and_unload_end_safe_mode_for_a_mod`: `hot load` i `hot unload` kończą tryb bezpieczny dla jednego moda. Oba padają, gdy tryb bezpieczny jest wyłączony (sprawdzone mutacją `SAFE_MODE_AFTER = 99`).
+  - `hot status` w terminalu pokazuje „TRYB BEZPIECZNY” z listą uśpionych modów.
+  - Nie sprawdzone: awaria prawdziwego silnika z `hot-host` (Mac i ThinkCentre); `hot-proxy` trzymające graczy przy awarii to M8.4.
 - [ ] M7.2 Pełny dysk (sztucznie zapełniony) → sprzątanie i komunikat.
 - [ ] M7.3 Uszkodzony świat → komunikat i polecenie przywrócenia; przywrócenie po potwierdzeniu.
 - Sprawdzenie: każdy wiersz tabeli D20 ma test, który wywołuje błąd i obserwuje reakcję.
@@ -509,3 +514,5 @@ Zasada dla kroków M1–M13: każdy nowy błąd dostaje kod i wpis w katalogu, a
 **2026-11-13 — M5.1 i M5.2 zrobione (na Macu):** blok moda to plik `mods/<id>/assets/blocks/<nazwa>.png`; `hotd` przydziela slot (tylko dopisywany, `hot-state/slots.json`), buduje powtarzalną paczkę zasobów bez CI, a `hotd serve-pack` ją serwuje. `hot-core` tłumaczy `<id>:<nazwa>` ↔ `hot_slots:slot_N` w `block`, `set_block`, `give` i w zdarzeniach. Sprawdzone w grze (szczegóły w M5): nowy wygląd po ponownym wejściu bez restartu silnika. **Budżet podmiany nadal niespełniony:** pula 1024/2048 wydłuża podmianę silnika do 1,16–1,34 s (S7), więc wymóg „krócej niż 1 s” (ADR 0004) czeka na M0.19; nie odhaczam go. Instalator ma krok 8 (pula, `--address`, `horizon-hot-pack`), nie sprawdzony: brak maszyny x86_64. Dalej: M7.
 
 **2026-11-13 — `tick_block`/`random_tick` przeniesione do M0.19:** w obecnym API haki nie zmienią bloku ze slotu, wymagają zmiany puli u graczy i nie mają filtra po nazwie (FAKT, szczegóły w M5.2). Decyzja przy zamrożeniu puli. Dalej: M7.
+
+**2026-11-13 — M7.1 zrobione (bez silnika):** prawdziwy segfault moda gorącego w procesie potomnym → następny start z ostatniej dobrej generacji; druga awaria z rzędu w ciągu 5 min od startu → tryb bezpieczny bez modów gorących (`HOT-E0408`), wyjście przez `hot load`, `hot unload` albo czysty restart. Testy w `crates/hot-core/tests/reload.rs`, mutacja je czerwieni. Dalej: M7.2 (pełny dysk).

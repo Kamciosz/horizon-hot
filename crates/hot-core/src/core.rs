@@ -28,6 +28,16 @@ use crate::{codes, VERSION};
 /// EN: A generation is good after 5 minutes without a panic (D13): 5 × 60 × 20 TPS.
 pub const GOOD_AFTER_TICKS: u64 = 6000;
 
+/// PL: Awaria w ciągu tylu ms od startu liczy się jako kolejna z rzędu (D13, tyle co próba).
+/// EN: A crash within this many ms of the start counts as one more in a row (D13, the probation).
+pub const CRASH_LOOP_WINDOW_MS: u64 = 5 * 60 * 1000;
+
+/// PL: Od tylu awarii z rzędu mody gorące śpią (tryb bezpieczny, M7.1): pierwsza awaria daje
+/// ostatnie dobre generacje, druga znaczy, że i one nie pomagają.
+/// EN: From this many crashes in a row hot mods sleep (safe mode, M7.1): the first crash brings
+/// the last good generations, the second means they do not help either.
+pub const SAFE_MODE_AFTER: u32 = 2;
+
 /// PL: Ile ostatnich błędów trzyma `status.json`. EN: How many recent errors `status.json` keeps.
 const RECENT_ERRORS: usize = 10;
 
@@ -79,6 +89,11 @@ pub struct Core {
     warned: BTreeSet<(String, String)>,
     /// PL: Nazwy bloków modów z `hot-state/slots.json` (M5.1). EN: Mod block names (M5.1).
     slots: SlotNames,
+    /// PL: Mody uśpione w trybie bezpiecznym; wracają po czystym restarcie albo `hot load`.
+    /// EN: Mods asleep in safe mode; they return after a clean restart or `hot load`.
+    dormant: Vec<ModRecord>,
+    started_ms: u64,
+    crash_starts: u32,
 }
 
 impl HotMod for Core {
@@ -112,6 +127,9 @@ impl HotMod for Core {
             cancelled_by: None,
             warned: BTreeSet::new(),
             slots: SlotNames::default(),
+            dormant: Vec::new(),
+            started_ms: 0,
+            crash_starts: 0,
         };
         core.read_slots();
         core.restore(host.raw());
@@ -234,8 +252,15 @@ impl Core {
                 ModsFile::default()
             }
         };
-        for record in &file.mods {
-            self.restore_one(api, record, file.clean_stop);
+        let now = now_ms();
+        self.started_ms = now;
+        self.crash_starts = crash_starts(&file, now);
+        if self.crash_starts >= SAFE_MODE_AFTER && !file.mods.is_empty() {
+            self.enter_safe_mode(&file);
+        } else {
+            for record in &file.mods {
+                self.restore_one(api, record, file.clean_stop);
+            }
         }
         let keep: Vec<PathBuf> = self
             .mods
@@ -246,6 +271,12 @@ impl Core {
                     m.good.as_ref().map(|(g, _)| g.file.clone()),
                 ]
             })
+            .chain(self.dormant.iter().flat_map(|r| {
+                [
+                    Some(r.current.clone()),
+                    r.good.as_ref().map(|(g, _)| g.clone()),
+                ]
+            }))
             .flatten()
             .collect();
         store::prune_generations(&self.paths, &keep);
@@ -255,8 +286,35 @@ impl Core {
         self.write_status();
         self.log.info(
             "hot-core started",
-            json!({ "home": self.paths.home.display().to_string(), "mods": self.mods.iter().map(|m| m.gen.id.clone()).collect::<Vec<_>>(), "after_clean_stop": file.clean_stop }),
+            json!({ "home": self.paths.home.display().to_string(), "mods": self.mods.iter().map(|m| m.gen.id.clone()).collect::<Vec<_>>(), "after_clean_stop": file.clean_stop, "crash_starts": self.crash_starts }),
         );
+    }
+
+    /// PL: Tryb bezpieczny (M7.1): silnik padł drugi raz z rzędu krótko po starcie, mimo
+    /// ostatnich dobrych generacji. Żaden mod gorący nie startuje, żeby przerwać pętlę awarii;
+    /// wpisy zostają w `mods.json` i wracają po czystym restarcie albo `hot load`.
+    /// EN: Safe mode (M7.1): the engine crashed a second time in a row soon after starting, even
+    /// with the last good generations. No hot mod starts, to break the crash loop; the records
+    /// stay in `mods.json` and return after a clean restart or `hot load`.
+    fn enter_safe_mode(&mut self, file: &ModsFile) {
+        self.dormant.clone_from(&file.mods);
+        let ids: Vec<&str> = file.mods.iter().map(|r| r.id.as_str()).collect();
+        let e = DiagError::new(
+            codes::CRASH_LOOP,
+            format!(
+                "The server crashed {} times in a row, each within {} min of starting; hot mods {} stay off (safe mode) to stop a crash loop",
+                self.crash_starts,
+                CRASH_LOOP_WINDOW_MS / 60_000,
+                ids.join(", ")
+            ),
+            "Read logs/latest.log (the crash and the lines before it) and logs/hot-core.jsonl. If a hot mod crashed: fix it and push a commit, hotd loads it; or run hot load <file> for each mod you trust. If the crash is not from a hot mod: fix that first. A clean restart of the server (systemctl restart horizon-hot-server) loads all of these mods again",
+        )
+        .expected("The server runs longer than the probation after a start")
+        .context("mods", ids.join(","))
+        .context("crash_starts", self.crash_starts)
+        .context("previous_start_ms", file.started_ms)
+        .state("hot-core runs without hot mods; the records stay in hot-state/mods.json");
+        self.error(&e);
     }
 
     /// PL: Po czystym zatrzymaniu wraca bieżąca generacja, po awarii ostatnia dobra (D13).
@@ -663,6 +721,9 @@ impl Core {
     /// EN: A new generation replaces the old one (or a new mod). The old state passes over.
     fn switch(&mut self, outer: &HostApi, gen: Gen) {
         self.warn_shared_commands(&gen);
+        // PL: `hot load` uśpionego moda kończy dla niego tryb bezpieczny. EN: `hot load` of a
+        // sleeping mod ends safe mode for it.
+        self.dormant.retain(|r| r.id != gen.id);
         let Some(i) = self.mods.iter().position(|m| m.gen.id == gen.id) else {
             // PL: Stan zostawiony przez `hot unload` albo wyłączenie po panice. Gdy start się nie
             // uda, wraca do `saved/`. EN: The state left by `hot unload` or a turn-off after a
@@ -761,6 +822,17 @@ impl Core {
                     out.push(format!(
                         "Mod {rest} wyłączony; stan zapisany na następne ładowanie."
                     ));
+                } else if self.dormant.iter().any(|r| r.id == rest) {
+                    self.dormant.retain(|r| r.id != rest);
+                    self.write_mods(false);
+                    self.write_status();
+                    self.log.info(
+                        &format!("Hot mod \"{rest}\", asleep in safe mode, was removed by the hot unload command"),
+                        json!({ "mod": rest }),
+                    );
+                    out.push(format!(
+                        "Mod {rest} spał w trybie bezpiecznym; usunięty z listy, nie wróci po restarcie."
+                    ));
                 } else {
                     out.push(format!("Nie ma aktywnego moda {rest}."));
                 }
@@ -788,6 +860,14 @@ impl Core {
                     out.push(format!(
                         "  {} {} — generacja {}, {probation}",
                         m.gen.id, m.gen.version, m.generation
+                    ));
+                }
+                if !self.dormant.is_empty() {
+                    let ids: Vec<&str> = self.dormant.iter().map(|r| r.id.as_str()).collect();
+                    out.push(format!(
+                        "Tryb bezpieczny: serwer padł {} razy z rzędu krótko po starcie, więc te mody śpią: {}. Wrócą po hot load albo po czystym restarcie serwera; opis: HOT-E0408.",
+                        self.crash_starts,
+                        ids.join(", ")
                     ));
                 }
                 out.extend(hotd_lines(&self.paths.state().join("hotd.json")));
@@ -889,7 +969,10 @@ impl Core {
                     current: m.gen.file.clone(),
                     good: m.good.as_ref().map(|(g, n)| (g.file.clone(), *n)),
                 })
+                .chain(self.dormant.iter().cloned())
                 .collect(),
+            started_ms: self.started_ms,
+            crash_starts: self.crash_starts,
         };
         if let Err(e) = store::write_mods(&self.paths, &file) {
             self.error(&e);
@@ -920,6 +1003,10 @@ impl Core {
             "tick": self.tick,
             "mods": mods,
             "pending": self.pending.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+            "safe_mode": (!self.dormant.is_empty()).then(|| json!({
+                "crash_starts": self.crash_starts,
+                "dormant": self.dormant.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+            })),
             "recent_errors": self.errors,
         });
         if let Err(e) = store::write_atomic(&self.paths.status(), format!("{v:#}\n").as_bytes()) {
@@ -963,6 +1050,29 @@ fn hotd_lines(path: &std::path::Path) -> Vec<String> {
     out
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// PL: Która to awaria z rzędu (D13): 0 po czystym zatrzymaniu i bez zapisanego startu
+/// (pierwszy start, plik sprzed M7.1); po awarii o jeden więcej niż poprzednio, gdy poprzedni
+/// start był niedawno, inaczej 1. Zegar cofnięty w tył też liczy się jako „niedawno”.
+/// EN: Which crash in a row this is (D13): 0 after a clean stop or with no recorded start (first
+/// start, a file from before M7.1); after a crash one more than before when the previous start was
+/// recent, otherwise 1. A clock set back counts as recent.
+pub fn crash_starts(file: &ModsFile, now_ms: u64) -> u32 {
+    if file.clean_stop || file.started_ms == 0 {
+        return 0;
+    }
+    if now_ms.saturating_sub(file.started_ms) < CRASH_LOOP_WINDOW_MS {
+        file.crash_starts.saturating_add(1)
+    } else {
+        1
+    }
+}
+
 /// PL: `panicked at src/lib.rs:12:5: ...` → (`src/lib.rs`, 12). EN: Parses the panic place.
 fn panic_place(first: &str) -> Option<(String, u32)> {
     let rest = first.strip_prefix("panicked at ")?;
@@ -982,4 +1092,32 @@ fn take_buf(gen: &Gen, buf: Buf) -> Vec<u8> {
     let bytes = unsafe { std::slice::from_raw_parts(buf.ptr, buf.len) }.to_vec();
     (gen.vtable.free_buf)(buf);
     bytes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(clean_stop: bool, started_ms: u64, crash_starts: u32) -> ModsFile {
+        ModsFile {
+            mods: Vec::new(),
+            clean_stop,
+            started_ms,
+            crash_starts,
+        }
+    }
+
+    #[test]
+    fn crashes_in_a_row_count_only_soon_after_a_start() {
+        let t = 10 * CRASH_LOOP_WINDOW_MS;
+        assert_eq!(crash_starts(&file(true, t - 1, 5), t), 0);
+        assert_eq!(crash_starts(&file(false, t - 1000, 0), t), 1);
+        assert_eq!(crash_starts(&file(false, t - 1000, 1), t), 2);
+        assert_eq!(
+            crash_starts(&file(false, t - CRASH_LOOP_WINDOW_MS, 1), t),
+            1
+        );
+        assert_eq!(crash_starts(&file(false, 0, 1), t), 0);
+        assert_eq!(crash_starts(&file(false, t + 1000, 1), t), 2);
+    }
 }

@@ -43,6 +43,12 @@ pub struct ModsFile {
     pub mods: Vec<ModRecord>,
     /// PL: Rdzeń zatrzymał się sam (nie awaria). EN: The core stopped cleanly (no crash).
     pub clean_stop: bool,
+    /// PL: Kiedy rdzeń ostatnio wystartował (ms od 1970; 0 = nie wiadomo).
+    /// EN: When the core last started (ms since 1970; 0 = unknown).
+    pub started_ms: u64,
+    /// PL: Ile startów z rzędu było po awarii, każda krótko po poprzednim starcie (D13).
+    /// EN: How many starts in a row followed a crash soon after the previous start (D13).
+    pub crash_starts: u32,
 }
 
 /// PL: Ścieżki plików stanu. EN: State file paths.
@@ -114,7 +120,7 @@ pub fn read_mods(paths: &Paths) -> Result<ModsFile, DiagError> {
             format!("The hot mod list {} is not valid JSON of the expected shape", path.display()),
             "Look at the moved file to see what broke it; hotd loads the mods again from the server repository, or run hot load for each mod",
         )
-        .expected("{\"clean_stop\": bool, \"mods\": [{\"id\", \"version\", \"generation\", \"source\", \"current\", \"good\": null | {\"file\", \"generation\"}}]}")
+        .expected("{\"clean_stop\": bool, \"started_ms\"?: number, \"crash_starts\"?: number, \"mods\": [{\"id\", \"version\", \"generation\", \"source\", \"current\", \"good\": null | {\"file\", \"generation\"}}]}")
         .context("path", path.display().to_string())
         .context("moved_to", if moved { aside.display().to_string() } else { String::new() })
         .state("hot-core started without hot mods")
@@ -142,7 +148,18 @@ fn parse_mods(text: &str) -> Option<ModsFile> {
             },
         });
     }
-    Some(ModsFile { mods, clean_stop })
+    // PL: Pola dopisane w M7.1; starszy plik ich nie ma. EN: Added in M7.1; older files lack them.
+    let started_ms = v.get("started_ms").and_then(Value::as_u64).unwrap_or(0);
+    let crash_starts = v
+        .get("crash_starts")
+        .and_then(Value::as_u64)
+        .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX));
+    Some(ModsFile {
+        mods,
+        clean_stop,
+        started_ms,
+        crash_starts,
+    })
 }
 
 /// PL: Zapisuje `mods.json`. EN: Writes `mods.json`.
@@ -166,7 +183,12 @@ pub fn write_mods(paths: &Paths, file: &ModsFile) -> Result<(), DiagError> {
             })
         })
         .collect();
-    let v = json!({ "clean_stop": file.clean_stop, "mods": mods });
+    let v = json!({
+        "clean_stop": file.clean_stop,
+        "started_ms": file.started_ms,
+        "crash_starts": file.crash_starts,
+        "mods": mods,
+    });
     write_atomic(&paths.mods(), format!("{v:#}\n").as_bytes())
 }
 

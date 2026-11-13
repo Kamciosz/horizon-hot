@@ -46,6 +46,8 @@
 - `hotd` sprawdza odpowiedź na `hot slots`; `hot-core` starszy niż `hotd` to błąd `HOT-E0205`, a nie cisza. `hot status` pokazuje bloki modów i ich sloty.
 - `hotd serve-pack` podaje też `/hot_slots.hmod`, a przed pierwszą paczką paczkę bez bloków.
 - Instalator, krok 8: `cargo-horizon-mod` z wersji Horizona serwera, budowa i instalacja `hot_slots.hmod`, adres paczki w `server.toml` (nowa opcja `--address`), usługa `horizon-hot-pack`; kod `HOT-E0112`.
+- Tryb bezpieczny `hot-core` (M7.1): po drugiej awarii serwera z rzędu, każdej w ciągu 5 minut od startu, mody gorące nie startują, a serwer działa dalej; `hot load`, `hot unload` albo czysty restart go kończą. Kod `HOT-E0408`, pola `started_ms` i `crash_starts` w `hot-state/mods.json`, `safe_mode` w `status.json`, linia w `hot status`.
+- Test z prawdziwym segfaultem moda gorącego w procesie potomnym.
 
 ### Zmienione
 - CI uruchamia się też po pushu na gałęzie `spike/**`, nie tylko na `main` i w PR-ach.
