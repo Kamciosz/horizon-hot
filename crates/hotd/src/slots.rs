@@ -26,15 +26,15 @@ use serde_json::{json, Value};
 use crate::classify::valid_id;
 use crate::codes;
 
-/// PL: Bloki w puli. Tymczasowo 1024: największa pula, przy której podmiana silnika zmieści się
-/// w 1 s, wyjdzie z M0.19 (PLAN, sekcja 8). Zmiana rozmiaru zmienia wersję puli (`version`), więc
+/// PL: Bloki w puli. 4096: największa zmierzona pula, przy której podmiana silnika trwa krócej
+/// niż 1 s (M0.20, S13: 480–573 ms na Macu). Zmiana rozmiaru zmienia wersję puli (`version`), więc
 /// każdy gracz potrzebuje nowego pliku.
-/// EN: Blocks in the pool. 1024 for now: M0.19 decides the largest pool that keeps the engine swap
-/// under 1 s. A new size changes the pool version, so every player needs the new file.
-pub const BLOCKS: u32 = 1024;
+/// EN: Blocks in the pool. 4096: the largest measured pool that keeps the engine swap under 1 s
+/// (M0.20, S13). A new size changes the pool version, so every player needs the new file.
+pub const BLOCKS: u32 = 4096;
 
 /// PL: Przedmioty w puli. EN: Items in the pool.
-pub const ITEMS: u32 = 2048;
+pub const ITEMS: u32 = 8192;
 
 /// PL: Wersja układu plików w slocie; podbijana, gdy zmienia się treść slotu przy tym samym
 /// rozmiarze. EN: The slot file layout version; bumped when a slot's content changes at the same

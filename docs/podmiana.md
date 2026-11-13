@@ -17,21 +17,21 @@ Przez ok. 0,5 s świat stoi (S13, Mac). Gracz może chodzić i niszczyć bloki, 
 
 Rozgrzany silnik (D11, S13): wszystko, co nie wymaga świata, dzieje się przed zamrożeniem.
 
-| Krok | Kto | Co | Czas (Mac, pula 1024/2048) |
+| Krok | Kto | Co | Czas (Mac, pula 4096/8192) |
 |---|---|---|---|
 | 1 | `hotd` | wstrzymuje zmiany datapacków; `start` nowego silnika w tle, **bez czekania** na koniec komendy (wraca dopiero w fazie `running`) | — |
-| 2 | nowy silnik | zasoby, cache treści modów, port; przed zajęciem świata czeka (mixin `wait_for_world`), w logu „horizon-hot: waiting for the world” | 0,5 s z ciepłym cache, ok. 3 s z zimnym; **przed zamrożeniem** |
+| 2 | nowy silnik | zasoby, cache treści modów, port; przed zajęciem świata czeka (mixin `wait_for_world`), w logu „horizon-hot: waiting for the world” | 0,8–0,9 s z ciepłym cache, 4,1–4,4 s z zimnym; **przed zamrożeniem** |
 | 3 | `hot-proxy` | przestaje przekazywać ruch w obie strony; pakiety klienta odrzuca. **Początek pauzy** | — |
 | 4 | `hotd` | `save-all flush`, potem `stop` starego silnika (zapis świata i graczy, zwolnienie `session.lock`) | 0,4–0,6 s |
 | 5 | nowy silnik | zajmuje świat w ciągu 2 ms od zwolnienia, wczytuje go | ok. 0,1 s |
 | 6 | `hot-proxy` | co 20 ms próba logowania do nowego silnika jako każdy gracz; odtworzenie konfiguracji klienta, połknięcie `Login`, `PlayerLoaded` do silnika | < 30 ms |
 | 7 | `hot-proxy` | `RemoveEntities` do klienta z encjami starego silnika; zamiana id gracza; dalej zwykłe przekazywanie | — |
 
-Razem: 470–541 ms na tym samym silniku i 509–531 ms na nowym pliku silnika z pustym cache. Bez rozgrzania było 1,16–1,34 s i ok. 2,2 s.
+Razem: 480–549 ms na tym samym silniku i 505–573 ms na nowym pliku silnika z pustym cache (M0.20). Z pulą 1024/2048 było prawie tak samo: 470–541 ms i 509–531 ms. Bez rozgrzania było 1,16–1,34 s i ok. 2,2 s.
 
 Błędy:
 - `start` nowej strony z kodem różnym od 0 (wraca po 0,5–1 s) to błąd przed zamrożeniem: gracze zostają na starym silniku, `hotd` zgłasza błąd od razu.
-- Przerwana podmiana: `hotd` zatrzymuje czekający silnik. Po 120 s czekania silnik idzie dalej, dostaje błąd zajętego świata i supervisor wpada w pętlę restartów (S12).
+- Przerwana podmiana: `hotd` zatrzymuje czekający silnik przez `horizon-server stop` i jeden SIGTERM do procesu silnika. Czekający silnik nie czyta konsoli, więc samo `stop` czeka do limitu 120 s; po SIGTERM mixin przestaje czekać i silnik kończy się po ok. 0,5 s (M0.20). Bez zatrzymania silnik po 120 s idzie dalej, dostaje błąd zajętego świata i supervisor wpada w pętlę restartów (S12).
 - Każdy silnik pod nową ścieżką: nadpisanie pliku, z którego działa silnik, zabija następny start (macOS, kod 137) albo się nie udaje (Linux, „Text file busy”).
 
 ## Zasady dla `hot-proxy`

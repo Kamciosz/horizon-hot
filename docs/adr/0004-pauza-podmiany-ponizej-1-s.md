@@ -54,3 +54,7 @@ Dwie zmiany względem opisu opcji 3:
 - Czekający silnik zajmuje 363 MB RSS przez 0,5 s z ciepłym cache albo ok. 3 s z zimnym.
 
 Zapas na Macu to ok. 0,3 s. Większość pauzy to `stop` starego silnika, który zależy od dysku, więc ThinkCentre trzeba zmierzyć (M0.11). Rozmiar puli rozstrzyga M0.20.
+
+## Wynik M0.20 (2026-11-13)
+
+Pula 4096/8192 z rozgrzanym silnikiem, ta sama próba: ten sam silnik 480–549 ms, nowy plik silnika z pustym cache 505–573 ms. Pula przesuwa koszt w rozgrzanie (0,8–0,9 s z ciepłym cache, 4,1–4,4 s z pustym) i w pamięć czekającego silnika (ok. 515 MB), a nie w pauzę. Pula zostaje 4096/8192 (`docs/sloty.md`).

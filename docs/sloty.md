@@ -11,7 +11,16 @@ Bloki i przedmioty z modów gorących nie mogą dopisać się do rejestrów gry 
 
 ## Rozmiar
 
-Na razie 1024 bloki i 2048 przedmiotów (stałe `hotd::slots::BLOCKS` i `ITEMS`, wersja puli `1024.2048.0`). Ostateczny rozmiar ustala M0.20: największa pula, przy której podmiana silnika trwa krócej niż 1 s (ADR 0004). Z rozgrzanym silnikiem (D11, S13) pula 1024/2048 mieści się w budżecie: 470–541 ms na tym samym silniku, 509–531 ms na nowym pliku silnika z pustym cache. Pula 4096/8192 z rozgrzanym silnikiem nie jest jeszcze zmierzona. Zmierzone na Macu bez rozgrzania (S7):
+4096 bloków i 8192 przedmioty (stałe `hotd::slots::BLOCKS` i `ITEMS`, wersja puli `4096.8192.0`, plik 7,0 MB). Rozmiar ustalił M0.20: to największa zmierzona pula, przy której podmiana silnika trwa krócej niż 1 s (ADR 0004). Większej nie mierzono. Rozgrzany silnik (D11, S13), Mac, gracz w grze, `save-all flush`, po 6 podmian w każdym wierszu:
+
+| Pula | Ten sam silnik | Nowy plik silnika, pusty cache | Rozgrzanie: ciepły / pusty cache | Czekający silnik |
+|---|---|---|---|---|
+| 1024/2048 | 470–541 ms | 509–531 ms | 0,5 s / 2,8–3,0 s | 363 MB |
+| 4096/8192 | 480–549 ms | 505–573 ms | 0,8–0,9 s / 4,1–4,4 s | ok. 515 MB (1 pomiar) |
+
+Pula prawie nie zmienia pauzy, bo jej koszt przechodzi w rozgrzanie, a to dzieje się przed zamrożeniem. Rośnie za to pamięć: czekający silnik i oba procesy w czasie podmiany. ThinkCentre (M0.11) może wymusić mniejszą pulę. Byłaby to wtedy nowa wersja puli, a przydział w `slots.json` zostaje, dopóki zajęte sloty mieszczą się w mniejszej.
+
+Dla porównania pomiary na Macu bez rozgrzania (S7):
 
 | Pula (bloki/przedmioty) | `.hmod` | Start klienta | Podmiana silnika | Podmiana z nowym silnikiem |
 |---|---|---|---|---|
@@ -19,10 +28,19 @@ Na razie 1024 bloki i 2048 przedmiotów (stałe `hotd::slots::BLOCKS` i `ITEMS`,
 | 1024/2048 | 1,7 MB | nie mierzono | 1,16–1,34 s | ok. 2,2 s (szacunek) |
 | 4096/8192 | 7,0 MB | 2,04–2,12 s | 1,45–1,82 s | 3,85 s (1 pomiar) |
 
-- Rozgrzany silnik buduje cache przed zamrożeniem, więc czas z tej tabeli przestaje być pauzą: z pulą 1024/2048 rozgrzanie trwa 0,5 s z ciepłym cache i ok. 3 s z zimnym, a gracz w tym czasie gra dalej (S13).
+- Rozgrzany silnik buduje cache przed zamrożeniem, więc czas z tej tabeli przestaje być pauzą, a gracz w tym czasie gra dalej (S13).
 - „Podmiana z nowym silnikiem” to podmiana z modem natywnym, nowym `hot-host` albo aktualizacją Horizona. Nowy plik programu unieważnia cache treści modów, więc silnik buduje go przy starcie. Tak jest też od Nightly 2026-11-07, w którym cache dostał osobny katalog na zestaw modów (`docs/aktualizacje.md`). Szacunek: pauza z ciepłym cache plus różnica między zimnym a ciepłym startem serwera.
 - Pamięć z pełną pulą: serwer ok. +230 MB, klient ok. +250 MB.
 - Powiększenie puli później zmienia `content_identity`. Każdy gracz potrzebuje wtedy nowego pliku (aplikacja gracza pobiera go sama) i musi wejść ponownie.
+
+## Bloki z tickiem
+
+Decyzja M0.20: pula nie ma slotów z `"random_ticks": true`. Powody (FAKT, źródła Horizona 66f3981, szczegóły w M5.2 w `PLAN.md`):
+- hak `random_tick` dostaje `LevelWriteHost`, który zmienia tylko właściwość bloku, a bloki ze slotów nie mają właściwości;
+- `LevelHost` nie zamienia `BlockStateId` na nazwę, więc `hot-core` nie odróżni slotu z tickiem od innych bloków;
+- hak dałby modom tylko cząsteczki i dźwięk, a każdy tykający blok z puli kosztowałby wywołanie przez ABI.
+
+Gdy Horizon pozwoli w haku zmienić cały blok, dojdzie osobny zakres `hot_slots:tick_N` z `"random_ticks": true`, przydzielany tylko blokom, które deklarują tick. To nowa wersja puli, więc każdy gracz pobierze nowy plik. Numery `slot_N` i przydział w `slots.json` się nie zmieniają.
 
 ## Budowa i instalacja
 

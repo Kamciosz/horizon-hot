@@ -57,6 +57,8 @@
 - Hamulec MSPT w `hotd` (M6.2): gdy p95 czasu ticku przekroczy 35 ms, ciężkie procesy tła `hotd` stają, a po 10 s poniżej 25 ms ruszają dalej. Mody wczytują się bez przerwy. `hot status` pokazuje wiersz „hamulec”.
 
 ### Zmienione
+- Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
+- Mixin `wait_for_world` przestaje czekać po pierwszym SIGTERM, więc przerwaną podmianę kończy `stop` i SIGTERM do silnika w 0,5 s zamiast 120 s.
 - D11 i `docs/podmiana.md`: nowy silnik startuje przed `stop` starego i czeka na świat; `save-all flush` przed zamrożeniem. D16: czekający silnik zajmuje 363 MB. Wniosek 3 z S12 dotyczy już tylko przerwanej podmiany i silnika bez `hot-host`. Nowy krok M0.20 (rozmiar puli i bloki z tickiem).
 - Hamulec MSPT wysyła `SIGSTOP`/`SIGCONT` wywołaniem systemowym (`libc`, ADR 0009) zamiast programem `kill`, który na Ubuntu 24.04 źle czyta ujemny numer grupy procesów.
 - Instalator ustawia `stable` jako domyślny toolchain użytkownika `horizon`, gdy go brakuje; bez tego `cargo horizon-mod` (pula slotów) nie startował.

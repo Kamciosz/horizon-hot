@@ -2,7 +2,7 @@
 
 - Data: 2026-11-13. Horizon `nightly-2026-11-05-66f3981`, macOS arm64 (Apple M4 Pro, 24 GB), klient i serwery na jednej maszynie, świat z S12 (seed 7), jeden gracz, pula slotów 1024/2048.
 - Krok planu: M0.19. Decyzja: `docs/adr/0004-pauza-podmiany-ponizej-1-s.md`.
-- Wynik: **kryterium spełnione na Macu.** Każda z 18 podmian trwała krócej niż 1 s, także 6 podmian na nowy plik silnika z pustym cache: 509–531 ms. Wcześniej było to 1,16–1,34 s na tym samym silniku i ok. 2,2 s na nowym.
+- Wynik: **kryterium spełnione na Macu.** Każda z 18 podmian trwała krócej niż 1 s, także 6 podmian na nowy plik silnika z pustym cache: 509–531 ms. Wcześniej było to 1,16–1,34 s na tym samym silniku i ok. 2,2 s na nowym. M0.20: z pulą 4096/8192 480–573 ms (12/12).
 
 ## Pomysł
 
@@ -12,11 +12,11 @@ Czekanie robi mixin `wait_for_world` w `hot-host` (`crates/hot-host/wait_for_wor
 - hak HEAD w `horizon_client::game::world_loading::WorldRequest::prepare_world`;
 - działa tylko w serwerze dedykowanym (`options.dedicated`), klienta gry nie dotyczy;
 - gdy świat jest zajęty (`SessionLock::is_locked`), sprawdza blokadę co 2 ms;
-- po 120 s przestaje czekać i silnik idzie dalej zwykłą drogą, czyli dostaje błąd zajętego świata.
+- po 120 s albo po pierwszym SIGTERM (`horizon_threads::stop_requests`, dodane w M0.20) przestaje czekać i silnik idzie dalej zwykłą drogą, czyli dostaje błąd zajętego świata albo się zatrzymuje.
 
 FAKT z kodu Horizona (`crates/horizon-client/src/save.rs`, `is_locked`): blokada to `File::try_lock`, czyli blokada systemu na otwartym pliku. Znika razem z procesem, także po `kill -9`, więc po awarii starego silnika nowy nie czeka 120 s (D13).
 
-Stary silnik zwalnia blokadę dopiero po ostatnim zapisie (`save_game`, `save.flush`), więc nowy czyta kompletny świat.
+Stary silnik serwera zwalnia blokadę dopiero wtedy, gdy kończy się jego proces, czyli po `stop_dedicated` (`game/dedicated.rs`: zapis graczy i świata), więc nowy czyta kompletny świat.
 
 ## Co sprawdzono
 
@@ -65,7 +65,7 @@ Na co idzie pauza (log proxy, podmiana 1 z `--warm`): `stop` starego silnika 405
 1. **Rozgrzany silnik spełnia budżet D11 na Macu z zapasem ok. 0,3 s.** Najgorsza pauza to 703 ms bez `--flush` i 541 ms z nim. `save-all flush` przed zamrożeniem zostaje domyślne.
 2. **Osobne uruchomienie rozgrzewające nie jest potrzebne.** Nowy silnik startuje normalnie, jeszcze przed `stop` starego, i sam buduje cache w swoim katalogu. Krok 1 rozgrzanego silnika z D11 i ADR 0004 odpada.
 3. **Wniosek 3 z S12 („`hotd` nie może startować nowego supervisora, zanim stary się zatrzyma”) nie dotyczy silnika z `hot-host`.** Taki silnik czeka na świat w miejscu i nie wpada w pętlę restartów. Wniosek zostaje ważny w dwóch przypadkach:
-   - podmiana przerwana przed zamrożeniem: `hotd` sam zatrzymuje czekający silnik, inaczej po 120 s trafi on na błąd i pętlę restartów z S12;
+   - podmiana przerwana przed zamrożeniem: `hotd` sam zatrzymuje czekający silnik (`stop` i SIGTERM, niżej „Pula 4096/8192 i zatrzymanie czekającego silnika”), inaczej po 120 s trafi on na błąd i pętlę restartów z S12;
    - silnik bez `hot-host`, np. przy powrocie do czystego Horizona.
 4. **Nieudany start nowego silnika wykrywa się po kodzie wyjścia `horizon-server start`, a nie po czasie.** `start` wrócił z kodem 1 po 0,5–1 s, a proxy w próbie czekało na log 60 s. Świat w tym czasie nie stoi, ale `hotd` ma od razu zgłosić błąd i zostawić graczy na starym silniku.
 5. **Każdy silnik pod nową ścieżką, nigdy nadpisany w miejscu.** Instalator już tak robi (`engines/<sha>-<wersja>`); to reguła także dla `hotd` w M8.
@@ -76,10 +76,28 @@ Na co idzie pauza (log proxy, podmiana 1 z `--warm`): `stop` starego silnika 405
 ## Czego nie sprawdzono
 
 - ThinkCentre (M0.11): wolniejszy procesor i dysk, czasy będą dłuższe.
-- Pula 4096/8192 w rozgrzanym silniku (M0.20).
 - Duży świat i wielu graczy: więcej do zapisania przy `stop`.
 - Prawdziwy nowy silnik z innym kodem. Próba używała kopii tego samego pliku z pustym cache.
 - Podmiana przerwana po zamrożeniu (D11, krok 5).
+
+## Pula 4096/8192 i zatrzymanie czekającego silnika (M0.20)
+
+Ta sama próba na nowym stanowisku z pulą 4096/8192 u serwerów i klienta (`setup.sh`, `swaps.sh 6`, `cold-swaps.sh … 6`), z `--warm --flush`:
+
+| Przypadek | Podmian | Pauza | Ostatni pakiet starego → pierwszy nowego |
+|---|---|---|---|
+| gracz, ten sam silnik | 6 | 480–549 ms | 535–621 ms |
+| gracz, nowy plik silnika, pusty cache | 6 | 505–573 ms | 547–644 ms |
+
+- Rozgrzanie: 0,8–0,9 s z ciepłym cache, 4,1–4,4 s z pustym (pierwsza podmiana 3,1 s, bo cel nie miał jeszcze cache).
+- Czekający silnik: ok. 515 MB RSS (jeden pomiar).
+- Wniosek: pauza prawie nie zależy od puli, bo pula wydłuża tylko rozgrzanie. Pula zostaje 4096/8192 (`docs/sloty.md`).
+
+Przy sprzątaniu wyszło, że `horizon-server stop` czekającego silnika trwa 2 minuty. Supervisor pisze `stop` na stdin silnika (`send_stop`), a silnik w mixinie nie czyta konsoli. Pierwszy SIGTERM tylko zwiększa licznik `STOP_REQUESTS`, drugi kończy proces przez `_exit(130)`. Pętla mixina sprawdza teraz `horizon_threads::stop_requests()`. Wynik na silniku z poprawką (B trzyma świat, A czeka):
+- samo `stop`: po 10 s nadal czeka, silnik żyje;
+- jeden `kill -TERM` silnika A: w logu „stop requested while waiting for the world”, `stop` wraca po 0,5 s, A w stanie `Stopped`, B dalej `Running`.
+
+`hotd` przerywa więc podmianę przez `horizon-server stop` i jeden SIGTERM do procesu silnika. Zatrzymanie przez systemd (SIGTERM do całej grupy) działa bez zmian.
 
 ## Powtórzenie
 
