@@ -293,3 +293,17 @@ fn a_server_without_a_slot_pool_is_reported() {
     assert_eq!(e.code(), codes::SLOTS);
     assert!(!w.did("play"));
 }
+
+#[test]
+fn a_server_without_a_version_says_so_and_plays_the_newest() {
+    let mut w = Fake::new();
+    w.info.horizon = None;
+    let mut s = State::default();
+    play(&mut w, &mut s).unwrap();
+    assert!(w.did("install nightly-2026-11-13-9f42064"), "{:?}", w.calls);
+    assert!(
+        w.said.iter().any(|l| l.contains("nie podał swojej wersji")),
+        "{:?}",
+        w.said
+    );
+}

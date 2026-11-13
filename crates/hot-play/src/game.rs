@@ -167,9 +167,11 @@ pub fn graj(
         .context("server_rev", info.horizon.clone().unwrap_or_default()));
     };
     if !exact {
-        world.say(&format!(
-            "Wersji serwera nie da się już pobrać; gram na najnowszej ({tag})."
-        ));
+        world.say(&if info.horizon.is_some() {
+            format!("Wersji serwera nie da się już pobrać; gram na najnowszej ({tag}).")
+        } else {
+            format!("Serwer nie podał swojej wersji Horizona; gram na najnowszej ({tag}).")
+        });
     }
     if !versions.installed.contains(&tag) {
         world.say(&format!("Instaluję Horizon {tag}…"));

@@ -323,7 +323,17 @@ pub fn play_info(home: &Path) -> Value {
     let horizon = fs::read_to_string(home.join("server.toml"))
         .ok()
         .and_then(|text| crate::swap::toml_value(&text, "engine", "path"))
-        .and_then(|engine| crate::build::engine_revision(Path::new(&engine)));
+        .and_then(|engine| crate::build::engine_revision(Path::new(&engine)))
+        // PL: Silnik bez `native-build` (zbudowany przez instalator ze źródeł) nie ma
+        // `native-mods.json`; jego rewizję zapisuje instalator. EN: An engine without
+        // `native-build` (built from source by the installer) has no `native-mods.json`; the
+        // installer writes its revision.
+        .or_else(|| {
+            fs::read_to_string(home.join("horizon-rev"))
+                .ok()
+                .map(|t| t.trim().to_owned())
+                .filter(|r| crate::build::is_revision(r))
+        });
     let slots = fs::read(dir(home).join("hot_slots.hmod"))
         .ok()
         .map(|b| sha1_hex(&b));
@@ -513,6 +523,13 @@ mod tests {
         assert!(
             info.ends_with(r#"{"horizon":null,"slots_sha1":null}"#),
             "{info}"
+        );
+        let built = "1111111111111111111111111111111111111111";
+        let _ = fs::write(home.join("horizon-rev"), format!("{built}\n"));
+        let info = get("/hot-play.json").unwrap_or_default();
+        assert!(
+            info.ends_with(&format!(r#"{{"horizon":"{built}","slots_sha1":null}}"#)),
+            "an engine built from source: {info}"
         );
         let _ = fs::write(dir(&home).join("hot_slots.hmod"), b"pula");
         let engine = home.join("engines").join("e").join("horizon-server");

@@ -278,7 +278,13 @@ mod tests {
         hold(true, Some("test".into()));
         let worker = std::thread::spawn(|| {
             let start = Instant::now();
-            let out = output(Command::new("sh").args(["-c", "echo gotowe"]));
+            // PL: Hamulec zatrzymuje proces dopiero po jego starcie. Samo `echo` na obciążonym
+            // runnerze CI kończyło się przed sygnałem (dwa czerwone przebiegi), więc proces trwa
+            // chwilę, jak git czy cargo w prawdziwej pracy tła.
+            // EN: The brake stops a process only after it starts. A bare `echo` on a busy CI
+            // runner finished before the signal (two red runs), so the process lasts a moment,
+            // like git or cargo in real background work.
+            let out = output(Command::new("sh").args(["-c", "sleep 0.5; echo gotowe"]));
             (out, start.elapsed())
         });
         // PL: Czekamy na grupę, a nie stały czas: wolny runner CI potrzebuje więcej niż 300 ms.

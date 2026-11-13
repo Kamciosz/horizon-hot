@@ -146,6 +146,10 @@ keys() {
 # --- PL: Świat (instalator, krok 7). EN: The world (installer step 7). -----------------------
 
 world() {
+  # PL: Rewizja silnika z obrazu dla `hot-play` (`/hot-play.json`). EN: The image's engine revision
+  #     for `hot-play` (`/hot-play.json`).
+  printf '%s\n' "$HORIZON_REV" > "$SRV/horizon-rev"
+  chown horizon:horizon "$SRV/horizon-rev"
   if [ ! -f "$SRV/server.toml" ]; then
     local players=(--no-whitelist)
     [ -n "$OP" ] && players=(--whitelist --player "$OP" --op "$OP")

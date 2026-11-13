@@ -75,7 +75,7 @@
 - `hotd upgrade` (M10.1, D19, ADR 0014): serwer sam aktualizuje horizon-hot raz na dobę z gałęzi `--hot-ref`. Zmiana samego `hot-core` wchodzi od razu przez `hot core load`, przy graczach; reszta programów czeka na chwilę bez graczy, potem wszystkie zmieniają się naraz, a usługi restartują się razem i wracają do poprzednich plików, gdy któraś nie wstanie. Zmiana silnika, instalatora albo puli slotów czeka na właściciela. `crates/hotd/src/upgrade.rs`, `upgrade_env.rs`, testy w `crates/hotd/tests/upgrade.rs`, kody `HOT-E0705`–`HOT-E0708` i ich strony w `docs/bledy/`. Usługa, która po restarcie zmieni `MainPID` albo `NRestarts` w ciągu 30 s, też cofa wersję. Rdzeń bez potwierdzenia silnika to ponowienie, nie odrzucenie. Polecenia idą z uid i gid `horizon` bez `runuser`, a stan i log samoaktualizacji należą do `horizon`.
 - Instalator: usługa `horizon-hot-upgrade` z minutnikiem co 10 minut oraz plik `/srv/horizon/install-command` (tylko root) z poleceniem do ponownego uruchomienia instalatora.
 - `crates/hot-play` (M11.1, M11.2, ADR 0015): aplikacja gracza z menu `[1] Graj  [2] Napraw  [3] Wyjdź` i poleceniami `graj`, `napraw`, `sprawdz`, `ustaw`. „Graj” instaluje launcher (SHA-256 z `SHA256SUMS`), wybiera wersję Horizona serwera albo najnowszy Nightly, loguje kontem Microsoft tylko za pierwszym razem, robi `prepare`, zakłada instancję `horizon-hot`, pobiera pulę slotów po SHA-1, ustawia `horizon-mods.txt` i `servers.dat` z `acceptTextures` i uruchamia `play --server`. „Napraw” robi to od nowa bez gry i zapisuje raport na pulpicie. Kody `HOT-E0901`–`HOT-E0908`. Zależność `sha1` (już w drzewie).
-- `hotd serve-pack` podaje `/hot-play.json`: rewizję Horizona silnika i SHA-1 puli slotów.
+- `hotd serve-pack` podaje `/hot-play.json`: rewizję Horizona silnika i SHA-1 puli slotów. Instalator i kontener zapisują rewizję silnika zbudowanego ze źródeł w `server/horizon-rev`.
 
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
@@ -114,6 +114,7 @@
 - Test `a_commit_waits_for_an_engine_swap` czeka do 2 s na zwolnienie `swap.lock`. Przy równoległych testach dziecko innego wątku trzyma kopię deskryptora aż do `exec`, więc zwolniona blokada wracała po kilkunastu ms, a test padał w mniej więcej co drugim przebiegu.
 - `hot status` pokazuje też stan samoaktualizacji horizon-hot z `hot-state/upgrade.json`.
 - Instalator zatrzymuje samoaktualizację na czas swojej pracy w klonie `src/horizon-hot`.
+- Test hamulca `background_work_waits_while_the_brake_holds` uruchamia proces, który trwa 0,5 s: samo `echo` kończyło się na runnerze CI przed sygnałem zatrzymania (dwa czerwone przebiegi).
 
 ### Uwagi
 

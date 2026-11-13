@@ -268,11 +268,21 @@ packages() {
 # EN: From source at the pinned revision, as Horizon's packaging/server/Dockerfile does: dated Nightly
 #     releases vanish from GitHub after a few days, the commit stays. The folder layout follows
 #     Horizon's install.sh (releases/<version>, current, small scripts in $BIN). Nothing from Mojang.
+# PL: Rewizja Horizona działającego silnika dla `hot-play` (`/hot-play.json`). Silnik z
+#     `native-build` ma ją w `native-mods.json`; silnik zbudowany tu ze źródeł nie ma, więc zapis.
+# EN: The running engine's Horizon revision for `hot-play` (`/hot-play.json`). An engine from
+#     `native-build` has it in `native-mods.json`; one built here from source does not, hence the file.
+horizon_rev_file() {
+  printf '%s\n' "$HORIZON_REV" > "$SRV/horizon-rev"
+  chown horizon:horizon "$SRV/horizon-rev"
+}
+
 horizon() {
   step 4/13 "Horizon $HORIZON_VERSION (${HORIZON_REV:0:12}) ze źródeł"
   if [ "$TEST_NO_HORIZON" = 1 ]; then say "Pominięty (--test-no-horizon)."; return; fi
   local release=$HZ/releases/$HORIZON_VERSION
   if [ "$(readlink "$HZ/current" 2>/dev/null)" = "$release" ] && [ -x "$release/horizon-engine" ] && [ -x "$BIN/horizon-server" ] && [ -x "$BIN/horizon-bots" ]; then
+    horizon_rev_file
     say "Już jest."; return
   fi
   rust_ready
@@ -302,6 +312,7 @@ horizon() {
   # PL: Boty testują nowe Nightly na kopii świata (D18). EN: Bots try a new Nightly on a world copy (D18).
   printf '#!/bin/sh\nexec "%s/current/horizon-bots" "$@"\n' "$HZ" > "$BIN/horizon-bots"
   chmod 0755 "$BIN/horizon-bots"
+  horizon_rev_file
   say "Zbudowany w $release."
 }
 
@@ -1030,7 +1041,7 @@ uninstall() {
   game_port=${game_port:-$PORT}
   local remove=("$BIN" "$HZ" "$HZ_SRC" "$ROOT/src" "$ROOT/tmp" "$ENGINES" "$SHARE" "$KEYS" "$ROOT/.cargo" "$ROOT/.rustup"
     "$ROOT/.ssh" "$ROOT/hot-version" "$ROOT/install-command" "$ROOT/cargo-horizon-mod-version" "$SRV/hot-core" "$SRV/hot-state"
-    "$SRV/hot-keys" "$SRV/horizon-mods/hot_slots.hmod")
+    "$SRV/hot-keys" "$SRV/horizon-mods/hot_slots.hmod" "$SRV/horizon-rev")
   say "Usunę:"
   say "  usługi i slice'y systemd: $units $slices"
   say "  reguły zapory dla portów $game_port i $pack_port (SSH zostaje)"
