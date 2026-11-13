@@ -558,6 +558,43 @@ fn commit_waits_while_the_engine_is_not_running() {
     assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
 }
 
+/// PL: Commit nie zaczyna się w trakcie podmiany silnika, a podmiana nie zaczyna się w trakcie
+/// commita (M8.3: `hot-state/swap.lock`). EN: A commit does not start during an engine swap, and
+/// a swap does not start during a commit (M8.3: `hot-state/swap.lock`).
+#[test]
+fn a_commit_waits_for_an_engine_swap() {
+    let w = World::new("swap-lock");
+    let fake = Fake::new(&w.home);
+    let mut d = w.daemon(fake.clone());
+    let sha = w.commit(&MOD_FILES, &[]);
+    w.publish(&sha, &["licznik"], true, false);
+
+    let swap = hotd::swap::try_swap_lock(&w.home);
+    assert!(matches!(swap, hotd::swap::SwapLock::Held(_)));
+    assert!(matches!(
+        hotd::swap::try_swap_lock(&w.home),
+        hotd::swap::SwapLock::Busy
+    ));
+    d.step();
+    assert!(fake.take_commands().is_empty(), "no command during a swap");
+    assert!(!d.state().settled(&sha), "the commit is not lost");
+    assert!(d
+        .state()
+        .waiting
+        .as_deref()
+        .unwrap()
+        .contains("podmiana silnika"));
+
+    drop(swap);
+    d.step();
+    assert!(fake.take_commands()[0].starts_with("hot load "));
+    assert_eq!(d.state().applied.as_deref(), Some(sha.as_str()));
+    assert!(matches!(
+        hotd::swap::try_swap_lock(&w.home),
+        hotd::swap::SwapLock::Held(_)
+    ));
+}
+
 const DATA_V1: (&str, &str) = (
     "mods/przepisy/data/przepisy/recipe/stol.json",
     "{\"type\": \"minecraft:crafting_shapeless\", \"v\": 1}\n",

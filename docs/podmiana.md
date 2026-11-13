@@ -70,6 +70,8 @@ sudo -u horizon /srv/horizon/bin/hotd swap --to <nowy plik silnika> --home /srv/
 - `HOT-E0606` — nowa strona nie doszła do linii czekania albo proxy odmówiło; gracze zostali na starym silniku, nic nie stanęło;
 - `HOT-E0607` — nowa strona nie zajęła świata w 10 s po zatrzymaniu starej; `hotd` zatrzymuje nową, przestawia proxy (`engine ADRES`) i uruchamia starą, a gracze trzymani w przerwie logują się już na nią.
 
+Podmiana i zastosowanie commita przez `hotd run` nie idą naraz (blokada `hot-state/swap.lock`). Commit czeka do końca podmiany (`hot status`: „trwa podmiana silnika”), a `hotd swap` czeka do 90 s na potwierdzenie commita, potem kończy się `HOT-E0606`. Podmiana dla pamięci w takiej chwili próbuje minutę później.
+
 Nowy plik silnika musi mieć `hot-host` (linię czekania pisze jego mixin) i własną ścieżkę (zob. „Błędy” wyżej). Sygnał „held” od proxy (`{"held":N}`) przychodzi, gdy proxy przestało już przekazywać pakiety starego silnika; dopiero wtedy `hotd` wysyła mu `stop`, bo inaczej `Disconnect` ze `stop` zakończyłby sesje graczy.
 
 Listy graczy na stronie `b`: `op`, `whitelist add` i `ban-ip` wydane silnikowi strony `b` zapisują się do plików strony `a`, a dowiązania zostają (sprawdzone na Macu, Nightly 66f3981). Nowsza wersja Horizona może zapisywać inaczej; po aktualizacji silnika sprawdź `ls -l engine-b/ops.json`.

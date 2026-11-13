@@ -173,6 +173,10 @@ pub fn run(
 /// PL: Podmiana na ten sam plik silnika, gdy stare generacje modów zajmują za dużo (D4).
 /// EN: A swap to the same engine file when old mod generations take too much (D4).
 fn reclaim_memory(layout: &Layout, server: &mut Server, reclaim: &mut Reclaim, log: &Logger) {
+    // PL: `hotd run` stosuje commit; spróbujemy za minutę. EN: `hotd run` applies a commit.
+    let Ok(_lock) = lock_for_swap(&layout.home, Duration::ZERO, log) else {
+        return;
+    };
     let status = std::fs::read(layout.home.join("hot-state").join("status.json"))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
@@ -199,6 +203,47 @@ fn reclaim_memory(layout: &Layout, server: &mut Server, reclaim: &mut Reclaim, l
         }
         // PL: `swap` sam zapisał błąd w logu. EN: `swap` has logged the error itself.
         Err(e) => reclaim.done(Some(e.code()), Instant::now()),
+    }
+}
+
+/// PL: Najdłużej tyle podmiana na żądanie czeka, aż `hotd run` skończy commit (potwierdzenie
+/// z `hot-core` ma limit 60 s). EN: The longest an on-request swap waits for `hotd run` to finish
+/// a commit (the `hot-core` confirmation has a 60 s limit).
+const SWAP_LOCK_WAIT: Duration = Duration::from_secs(90);
+
+/// PL: Blokada podmiany (`swap::SwapLock`); `None`, gdy pliku nie da się otworzyć.
+/// EN: The swap lock (`swap::SwapLock`); `None` when the file cannot be opened.
+fn lock_for_swap(
+    home: &Path,
+    limit: Duration,
+    log: &Logger,
+) -> Result<Option<std::fs::File>, DiagError> {
+    let deadline = Instant::now() + limit;
+    loop {
+        match swap::try_swap_lock(home) {
+            swap::SwapLock::Held(file) => return Ok(Some(file)),
+            swap::SwapLock::Unavailable(why) => {
+                log.warn(
+                    "The swap lock cannot be opened; the swap goes on without it",
+                    json!({ "why": why }),
+                );
+                return Ok(None);
+            }
+            swap::SwapLock::Busy if Instant::now() >= deadline => {
+                return Err(DiagError::new(
+                    codes::SWAP_NOT_STARTED,
+                    format!(
+                        "The engine swap did not start: hotd run has been applying a commit for over {} s",
+                        limit.as_secs()
+                    ),
+                    "Wait until hot status shows the commit as applied or failed, then swap again",
+                )
+                .expected("hot-state/swap.lock is free")
+                .context("lock", home.join("hot-state").join("swap.lock").display().to_string())
+                .state("Nothing changed; the players are on the same engine"));
+            }
+            swap::SwapLock::Busy => thread::sleep(Duration::from_millis(250)),
+        }
     }
 }
 
@@ -276,6 +321,17 @@ fn answer(layout: &Layout, program: &Path, log: &Logger, busy: &Mutex<()>, mut s
         }
         (Some("swap"), engine, None) => {
             let _one = busy.lock().unwrap_or_else(PoisonError::into_inner);
+            let _lock = match lock_for_swap(&layout.home, SWAP_LOCK_WAIT, log) {
+                Ok(lock) => lock,
+                Err(e) => {
+                    let _ = writeln!(
+                        stream,
+                        "{}",
+                        json!({ "ok": false, "error": Value::Object(e.fields()) })
+                    );
+                    return;
+                }
+            };
             let proxy = ProxySocket {
                 home: layout.home.clone(),
             };

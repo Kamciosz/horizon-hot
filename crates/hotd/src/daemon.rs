@@ -208,6 +208,18 @@ impl<E: Engine> Daemon<E> {
         };
         self.state.head = Some(head.clone());
         if !self.state.settled(&head) {
+            // PL: Trzymana do końca kroku: podmiana silnika czeka na potwierdzenie commita.
+            // EN: Held to the end of the step: an engine swap waits for the commit's confirmation.
+            let _swap = match crate::swap::try_swap_lock(&self.cfg.home) {
+                crate::swap::SwapLock::Busy => {
+                    self.state.waiting =
+                        Some("trwa podmiana silnika; commit wejdzie po niej".to_owned());
+                    self.save();
+                    return;
+                }
+                crate::swap::SwapLock::Held(file) => Some(file),
+                crate::swap::SwapLock::Unavailable(_) => None,
+            };
             self.engine_touched = false;
             if let Err((e, reason)) = self.apply(&head) {
                 if !self.engine_touched && out_of_space(&e) {

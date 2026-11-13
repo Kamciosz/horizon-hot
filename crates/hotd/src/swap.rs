@@ -39,6 +39,43 @@ use crate::state::write_atomic;
 /// EN: The `wait_for_world` mixin's line in `logs/latest.log`: the new engine is ready to swap.
 pub const WAITING_LINE: &str = "horizon-hot: waiting for the world";
 
+/// PL: Blokada `hot-state/swap.lock` (flock) między podmianą a zastosowaniem commita przez
+/// `hotd run`. Commit wysyła `hot load` albo `reload` i czeka na potwierdzenie; podmiana w tym
+/// czasie wczytałaby w nowym silniku stary stan, a `hotd` uznałby dobry commit za zły.
+/// EN: The `hot-state/swap.lock` lock (flock) between a swap and `hotd run` applying a commit. A
+/// commit sends `hot load` or `reload` and waits for the confirmation; a swap meanwhile would read
+/// the old state in the new engine, and `hotd` would call a good commit bad.
+pub enum SwapLock {
+    /// PL: Blokada trzymana do zamknięcia pliku. EN: Held until the file is closed.
+    Held(fs::File),
+    /// PL: Trzyma ją druga strona. EN: The other party holds it.
+    Busy,
+    /// PL: Pliku nie da się otworzyć; praca idzie bez blokady. EN: Cannot open; work goes on.
+    Unavailable(String),
+}
+
+/// PL: Próba wzięcia blokady bez czekania. EN: Tries to take the lock without waiting.
+#[must_use]
+pub fn try_swap_lock(home: &Path) -> SwapLock {
+    let path = home.join("hot-state").join("swap.lock");
+    let _ = fs::create_dir_all(home.join("hot-state"));
+    match fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+    {
+        Err(e) => SwapLock::Unavailable(format!("{}: {e}", path.display())),
+        Ok(file) => match file.try_lock() {
+            Ok(()) => SwapLock::Held(file),
+            Err(fs::TryLockError::WouldBlock) => SwapLock::Busy,
+            Err(fs::TryLockError::Error(e)) => {
+                SwapLock::Unavailable(format!("{}: {e}", path.display()))
+            }
+        },
+    }
+}
+
 /// PL: Pliki strony `a`, które strona `b` dzieli przez dowiązanie (świat dochodzi osobno).
 /// EN: Side `a` files that side `b` shares through a link (the world is added separately).
 const SHARED: [&str; 12] = [

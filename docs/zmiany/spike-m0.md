@@ -98,6 +98,7 @@
 - Test hamulca MSPT (`hotd`) czeka na zatrzymaną grupę procesów do 10 s zamiast stałych 300 ms; na wolnym runnerze CI grupa nie była jeszcze zapisana.
 - `hot-proxy`: gracz w przerwie przy każdej próbie loguje się pod bieżący adres silnika, więc zmiana adresu w trakcie przerwy zabiera go na nowy silnik.
 - `hotd`: zamierzona podmiana silnika w oknie po nowej wersji nie oznacza commita jako złego.
+- Podmiana silnika i zastosowanie commita nie idą naraz (`hot-state/swap.lock`): commit czeka na koniec podmiany, podmiana do 90 s na potwierdzenie commita.
 - Instalator i kontener uruchamiają silnik przez `hotd engine` zamiast `horizon-server run` (usługa `horizon-hot-server` z `KillMode=mixed`); instalator sprawdza też port drugiej strony silnika (port silnika + 1).
 - `hot-core`: gdy świat trzyma inny silnik (rozgrzany silnik przy podmianie), stan z `hot-state` czyta dopiero przy pierwszym zdarzeniu po zajęciu świata, a zatrzymany przed nim niczego nie zapisuje. Wcześniej nowy silnik brał podmianę za awarię: wczytywał ostatnią sprawdzoną generację modów, a po dwóch podmianach włączyłby tryb bezpieczny.
 
