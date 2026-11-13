@@ -62,7 +62,7 @@ Aktywną stronę zapisuje `hot-state/engine.json`. Czytają go `hotd engine` po 
 ```sh
 sudo -u horizon /srv/horizon/bin/hotd swap --home /srv/horizon/server                      # ten sam plik silnika
 sudo -u horizon /srv/horizon/bin/hotd swap --to <nowy plik silnika> --home /srv/horizon/server
-# {"ok":true,"report":{"from":"a","to":"b","warm_ms":4210,"stop_ms":512,"freeze_ms":590,"proxy":{...}}}
+# {"ok":true,"report":{"from":"a","to":"b","warm_ms":637,"stop_ms":419,"freeze_ms":746,"proxy":{...}}}
 ```
 
 `hotd swap` wysyła komendę do `<HOT_HOME>/hot-engine.sock` i czeka na koniec podmiany (do ok. 2,5 min). Kod wyjścia 1, gdy podmiana się nie udała; błąd ma pola D27:
@@ -72,7 +72,11 @@ sudo -u horizon /srv/horizon/bin/hotd swap --to <nowy plik silnika> --home /srv/
 
 Nowy plik silnika musi mieć `hot-host` (linię czekania pisze jego mixin) i własną ścieżkę (zob. „Błędy” wyżej). Sygnał „held” od proxy (`{"held":N}`) przychodzi, gdy proxy przestało już przekazywać pakiety starego silnika; dopiero wtedy `hotd` wysyła mu `stop`, bo inaczej `Disconnect` ze `stop` zakończyłby sesje graczy.
 
-Ograniczenie (do sprawdzenia na prawdziwym silniku): jeśli silnik zapisuje listy graczy przez zapis do nowego pliku i zamianę nazwy, na stronie `b` zastąpi dowiązanie zwykłym plikiem i zmiana (np. `/op`) zostanie tylko na tej stronie.
+Listy graczy na stronie `b`: `op`, `whitelist add` i `ban-ip` wydane silnikowi strony `b` zapisują się do plików strony `a`, a dowiązania zostają (sprawdzone na Macu, Nightly 66f3981). Nowsza wersja Horizona może zapisywać inaczej; po aktualizacji silnika sprawdź `ls -l engine-b/ops.json`.
+
+`hot-core` nowej strony startuje, zanim świat jest wolny. Gdy `world/session.lock` trzyma inny silnik, `hot-core` nie czyta `hot-state/` (stary silnik może jeszcze zapisać stan modów) i robi to przy pierwszym zdarzeniu po zajęciu świata. W logu: „hot-core waits for the world”.
+
+Pauza na drodze błędu jest dłuższa: przy `HOT-E0607` gracze czekają na limit przejęcia (10 s) i ponowny start starego silnika. Na Macu: 4,9 s, gracze zostali w grze. Limit „krócej niż 1 s” dotyczy udanej podmiany.
 
 ### Proxy: `hot-proxy switch`
 
