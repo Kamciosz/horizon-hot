@@ -122,6 +122,7 @@
 - Test hamulca `background_work_waits_while_the_brake_holds` uruchamia proces, który trwa 0,5 s: samo `echo` kończyło się na runnerze CI przed sygnałem zatrzymania (dwa czerwone przebiegi).
 
 ### Uwagi
+- Test hamulca `background_work_waits_while_the_brake_holds` szuka teraz własnego procesu po poleceniu. Brał pierwszą grupę ze wspólnego rejestru, a równoległy test z `du` (`disk.rs`) też tam trafia; w CI na Linuksie dawało to czerwony przebieg ze stanem cudzego procesu (`D`).
 
 - `server-install.sh`: ponowne uruchomienie kończyło się kodem 1 po kroku 13, gdy pliki usługi samoaktualizacji się nie zmieniły (`write_if_changed` przy `set -e`). Znalezione w maszynie wirtualnej, poprawione, test w `crates/hot-proxy/tests/installer.rs`.
 - `Host::tell` w haku `player_command` na serwerze dedykowanym zwraca `false`; odpowiedzi idą przez `event.replies`. Zachowanie `tell` poza hakiem gracza do sprawdzenia w M4.

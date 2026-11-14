@@ -292,13 +292,19 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut state = None;
         while Instant::now() < deadline {
-            let group = registry().groups.first().copied();
-            state = group.and_then(|g| {
+            // PL: Rejestr jest wspólny dla testów biegnących równolegle (np. `du` z `disk.rs`),
+            // więc szukamy własnego procesu po poleceniu, a nie pierwszej grupy.
+            // EN: The registry is shared by tests running in parallel (e.g. `du` from
+            // `disk.rs`), so find our own process by its command, not the first group.
+            let groups = registry().groups.clone();
+            state = groups.iter().find_map(|g| {
                 let out = Command::new("ps")
-                    .args(["-o", "stat=", "-p", &g.to_string()])
+                    .args(["-o", "stat=", "-o", "args=", "-p", &g.to_string()])
                     .output()
                     .ok()?;
-                Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+                let line = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+                line.contains("echo gotowe")
+                    .then(|| line.split_whitespace().next().unwrap_or("").to_owned())
             });
             if state.as_deref().is_some_and(|s| s.starts_with('T')) {
                 break;
