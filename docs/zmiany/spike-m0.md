@@ -78,6 +78,9 @@
 - `hotd serve-pack` podaje `/hot-play.json`: rewizję Horizona silnika i SHA-1 puli slotów. Instalator i kontener zapisują rewizję silnika zbudowanego ze źródeł w `server/horizon-rev`.
 - `hotd report` (D28): `hot report` na serwerze jednym poleceniem. Zbiera `hot status`, wersje, logi `*.jsonl`, log silnika aktywnej strony (`latest.log`, `supervisor.log`), log instalatora albo kontenera i `server.toml`. Maskuje `forwarding.secret`, klucze prywatne z `hot-keys/` i `.ssh/` oraz adresy IPv4 graczy.
 - `hot-play` dla graczy (M11.3, ADR 0016): workflow `hot-play` buduje go na macOS arm64 i x86_64, Linuksa i Windows; merge na `main` publikuje wydanie `hot-play`. `scripts/install.sh` i `scripts/install.ps1` instalują go jedną linijką ze sprawdzeniem SHA-256 i robią skrót „Graj”. Program sam się aktualizuje przy starcie (`HOT-E0909` tylko w logu).
+- Decyzje D1–D29 w `docs/adr/` (ADR 0017–0032) z indeksem `docs/adr/README.md`; test `crates/hot-diag/tests/adr.rs` pilnuje części ADR, indeksu i odwołań `D<n>`.
+- `docs/operator.md`: stan serwera, raport, kopie i przywracanie, polecenia w kontenerze.
+- Przewodniki w `docs/przewodniki/`: pierwszy mod gorący, nowy hak w ABI, nowy kod błędu, wydanie.
 
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).

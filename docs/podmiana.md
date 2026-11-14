@@ -1,6 +1,6 @@
 # Podmiana silnika bez rozłączania graczy
 
-Jak `hot-proxy` i `hotd` przenoszą graczy na nowy silnik (`horizon-server`), żeby nikt nie zobaczył ekranu ładowania ani nie stracił połączenia. Decyzje: D10–D13 w `PLAN.md`. Dowody: `docs/spike/s8-podmiana-analiza-klienta.md` (kod klienta), `docs/spike/s8-podmiana-prototyp.md` (prototyp i pomiar), `docs/spike/s12-dwa-serwery-jeden-swiat.md` (dwa silniki na jednym świecie), `docs/spike/s13-rozgrzany-silnik.md` (rozgrzany silnik).
+Jak `hot-proxy` i `hotd` przenoszą graczy na nowy silnik (`horizon-server`), żeby nikt nie zobaczył ekranu ładowania ani nie stracił połączenia. Decyzje: ADR 0022 (D10–D12) i ADR 0023 (D13). Dowody: `docs/spike/s8-podmiana-analiza-klienta.md` (kod klienta), `docs/spike/s8-podmiana-prototyp.md` (prototyp i pomiar), `docs/spike/s12-dwa-serwery-jeden-swiat.md` (dwa silniki na jednym świecie), `docs/spike/s13-rozgrzany-silnik.md` (rozgrzany silnik).
 
 ## Kiedy
 

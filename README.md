@@ -76,7 +76,7 @@ crates/hotd/      — demon serwera: repo serwera → podpisane mody z CI → ho
 scripts/          — instalator serwera (server-install.sh), budowa i publikacja modów w CI repo serwera
 examples/licznik/, examples/sklep/, examples/teleport-blok/ — przykładowe mody gorące
 docs/             — architektura, decyzje (ADR), standard kodu, katalog błędów
-PLAN.md           — plan budowy (roboczy; po zakończeniu treść przechodzi do docs/)
+PLAN.md           — plan budowy i dziennik prac (historia); decyzje są w docs/adr/
 ```
 
 ## Uruchomienie w Dockerze

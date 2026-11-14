@@ -3,7 +3,7 @@
 Każdy commit na gałęzi serwera trafia na serwer bez restartu. Ten plik opisuje, co gdzie położyć.
 
 ```
-mods/<id>/Cargo.toml     mod z kodem (Rust, hot-api); buduje go CI (.github/workflows/hot.yml)
+mods/<id>/Cargo.toml     mod z kodem (Rust, hot-sdk); buduje go CI (.github/workflows/hot.yml)
 mods/<id>/src/…
 mods/<id>/data/<przestrzeń nazw>/…   paczka danych: przepisy, łupy, tagi, funkcje, osiągnięcia
 mods/<id>/assets/blocks/<nazwa>.png  nowy blok z tą teksturą
@@ -12,6 +12,20 @@ mods/<id>/assets/lang.json           nazwy bloków w grze: {"<nazwa>": "…"}
 ```
 
 `<id>`: małe litery, cyfry, `_` i `-`, do 64 znaków. Usunięcie katalogu `mods/<id>/` wyłącza mod i usuwa jego paczkę danych.
+
+## Mod z kodem
+
+CI pobiera horizon-hot do katalogu `.hot/` w tym repo, więc mod zależy od `hot-sdk` tak:
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hot-sdk = { path = "../../.hot/crates/hot-sdk" }
+```
+
+Do budowy u siebie: `git clone https://github.com/Kamciosz/horizon-hot .hot` i `.hot/` w `.gitignore`. Cały przykład krok po kroku: `docs/przewodniki/nowy-mod.md` w horizon-hot.
 
 ## Komendy modów z kodem
 

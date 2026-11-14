@@ -32,7 +32,8 @@ Właściciel: Szymon Sosnowski. Serwer stoi na współdzielonym ThinkCentre z Ub
 | slot | z góry zarejestrowany pusty blok/przedmiot z `hot-slots.hmod`, któremu mod gorący nadaje nazwę, wygląd i zachowanie |
 | podmiana (wariant A) | przejście graczy na nowy silnik bez rozłączenia i bez ekranu ładowania |
 | MSPT | milisekundy na tick serwera; > 50 = gra laguje |
-| repo serwera | repo na GitHubie z modami (`mods/`, `native/`, `hot.toml`); to nie jest to repo |
+| repo serwera | repo na GitHubie z modami (`mods/`); `native/` i `hot.toml` serwer na razie tylko odnotowuje; to nie jest to repo |
+| `D<n>`, `M<n>`, `S<n>` | decyzja, krok planu, próba: `docs/adr/README.md` |
 
 ## 3. Mapa repo
 
@@ -60,16 +61,18 @@ docs/STANDARD_KODU.md  komentarze, błędy i logi, testy — obowiązuje w każd
 docs/operator.md   obsługa serwera: hot status, hot report, przywracanie z kopii   (planowany)
 docs/spike/       wyniki prób z etapu M0 (zbiorczo: docs/adr/0002-spike.md)
 spikes/           kod prób z M0; poza workspace, nie jest kodem produkcyjnym
-PLAN.md            plan budowy (tymczasowy; po zakończeniu treść jest w docs/); stan prac w sekcji 8
+PLAN.md            plan budowy i dziennik prac (historia); decyzje: docs/adr/README.md; stan prac w sekcji 8
 ```
 
 ## 4. Typowe zadania
 
 - **Coś nie działa:** weź `hot report` (serwer) albo raport z „Napraw” (gracz). Każdy błąd ma kod `HOT-EXXXX` → opis i naprawa w `docs/bledy/HOT-EXXXX.md`, miejsce w kodzie w polu `source`.
-- **Nowy mod gorący:** przewodnik `docs/przewodniki/nowy-mod.md` (planowany).
-- **Nowy hak w ABI:** `docs/przewodniki/nowy-hak.md` (planowany). Zmiana niezgodna wstecz = podbicie `ABI_MAJOR`.
-- **Nowy błąd:** nowy kod + wpis w `docs/bledy/` (sekcja 7).
-- **Zmiana decyzji architektonicznej:** najpierw nowy ADR w `docs/adr/`, potem kod.
+- **Nowy mod gorący:** `docs/przewodniki/nowy-mod.md`.
+- **Nowy hak w ABI:** `docs/przewodniki/nowy-hak.md`. Zmiana niezgodna wstecz = podbicie `ABI_MAJOR`.
+- **Nowy błąd:** `docs/przewodniki/nowy-kod-bledu.md` (sekcja 7).
+- **Wydanie:** `docs/przewodniki/wydanie.md`. Scalenie do `main` publikuje `hot-play`, więc decyduje właściciel.
+- **Obsługa serwera** (stan, raport, kopie): `docs/operator.md`.
+- **Zmiana decyzji architektonicznej:** najpierw nowy ADR w `docs/adr/`, potem kod. Numery `D1`–`D29` w kodzie prowadzą do ADR przez `docs/adr/README.md`.
 - **Nie wiesz, a dokumentacja nie odpowiada:** zapytaj właściciela; w sprawach z sekcji 6 nie zgaduj. Po wyjaśnieniu dopisz odpowiedź do dokumentacji.
 
 ## 5. Komendy

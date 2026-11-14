@@ -1,6 +1,6 @@
 # Pomiary sprzętowe
 
-Liczby, od których zależą decyzje w `PLAN.md`. Każdy wpis mówi, na jakiej maszynie i jakim świecie go zmierzono. Docelowy serwer to ThinkCentre (Ubuntu, x86_64); dopóki go nie ma, pomiary są z Maca dewelopera i tak są oznaczone.
+Liczby, od których zależą decyzje w `docs/adr/` (np. ADR 0022, ADR 0025). Każdy wpis mówi, na jakiej maszynie i jakim świecie go zmierzono. Docelowy serwer to ThinkCentre (Ubuntu, x86_64); dopóki go nie ma, pomiary są z Maca dewelopera i tak są oznaczone.
 
 ## `reload` paczek danych (M3, D7)
 
