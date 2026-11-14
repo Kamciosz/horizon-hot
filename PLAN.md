@@ -528,6 +528,14 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 
 ### M13 — Aktualizacja proxy bez rozłączeń (D19)
 - [ ] M13.1 Przekazanie gniazd i stanu szyfrowania (`SCM_RIGHTS`).
+  - Projekt (2026-11-14, przed kodem): zamiast drugiego procesu i `SCM_RIGHTS` — `execve` w tym samym procesie (ten sam PID, więc systemd i kontener niczego nie zauważają; zmiana mechanizmu w ADR 0033). `hot-proxy upgrade [PLIK]` przez gniazdo sterujące:
+    1. nowy plik sprawdza format stanu (`--check-resume N`); odmowa → nowy kod błędu `HOT-E06xx`, stare proxy działa dalej;
+    2. proxy przestaje przyjmować połączenia (gniazdo nasłuchu zostaje otwarte, kolejka czeka w jądrze) i czeka na trwające logowania;
+    3. każde połączenie gracza zatrzymuje się na granicy pakietu: wątek czytający oddaje bufor, a pisarze są zablokowani;
+    4. stan (sekret, rejestr CFB8 w obu kierunkach = ostatnie 16 bajtów szyfrogramu, odczytany a nieprzetworzony tekst jawny, próg kompresji, profil, nagrana konfiguracja, id i encje) idzie do pliku 0600 w `hot-state/`, usuniętego od razu po otwarciu; przechodzi tylko deskryptor;
+    5. gniazda graczy, nasłuchu i plik stanu tracą `FD_CLOEXEC`, `execve(PLIK, argumenty + --resume-fd N)`;
+    6. nowy kod odtwarza szyfrowanie i połączenia graczy, a do silnika loguje ich od nowa tą samą drogą, co po utracie silnika (połączenia z silnikiem zamyka `exec`). Błąd `execve` → wszystko wraca do pracy w starym procesie.
+  - Strona gracza ma własny odczyt i zapis (`client_io.rs`), bo `ConnReader` czyta naprzód do prywatnego, już odszyfrowanego bufora. `hotd upgrade`: zmiana tylko w `crates/hot-proxy/` → `hot-proxy upgrade` przy graczach; reszta jak w ADR 0014.
 - Sprawdzenie: nowa wersja proxy w trakcie gry, zero rozłączeń.
 
 ---

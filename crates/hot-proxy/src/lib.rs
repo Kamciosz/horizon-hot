@@ -13,6 +13,7 @@
 //! `horizon-protocol` (ADR 0010). Talks to players, the engine and the session service (HTTPS).
 
 pub mod auth;
+pub mod client_io;
 pub mod codes;
 pub mod config;
 pub mod control;

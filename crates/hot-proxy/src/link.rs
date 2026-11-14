@@ -17,6 +17,7 @@
 //!
 //! Lock order: `client` → `state` → `engine`. Nobody takes an earlier lock while holding a later one.
 
+use crate::client_io::{ClientCloser, ClientConn, ClientReader, ClientWriter};
 use crate::remap::{self, Swap};
 use crate::session::{EngineLogin, Profile, Proxy};
 use horizon_protocol::{
@@ -123,8 +124,8 @@ pub struct Link {
     profile: Profile,
     intent: Intention,
     address: IpAddr,
-    client: Mutex<ConnWriter>,
-    client_closer: Closer,
+    client: Mutex<ClientWriter>,
+    client_closer: ClientCloser,
     engine: Mutex<Option<Engine>>,
     generation: AtomicU64,
     state: Mutex<State>,
@@ -150,7 +151,7 @@ impl Link {
     /// Returns when the player leaves, with the reason.
     pub(crate) fn run(
         proxy: &Arc<Proxy>,
-        client: Connection,
+        client: ClientConn,
         engine: Connection,
         profile: Profile,
         intent: Intention,
@@ -254,7 +255,7 @@ impl Link {
         self.end(format!("the proxy disconnected the player: {reason}"));
     }
 
-    fn client_loop(&self, mut r: ConnReader) -> String {
+    fn client_loop(&self, mut r: ClientReader) -> String {
         let mut config = true;
         loop {
             let (id, mut p) = match r.recv() {

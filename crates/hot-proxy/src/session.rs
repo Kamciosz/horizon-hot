@@ -11,6 +11,7 @@
 //! towards the player), so the proxy can swap the engine under the player (`link`).
 
 use crate::auth::SessionService;
+use crate::client_io::ClientConn;
 use crate::config::{Config, COMPRESSION};
 use crate::link::{Link, Rejoin};
 use crate::{codes, forwarding};
@@ -332,9 +333,9 @@ impl Proxy {
         &self,
         stream: TcpStream,
         address: SocketAddr,
-    ) -> Result<Option<(Connection, Connection, Profile, Intention)>, Failure> {
+    ) -> Result<Option<(ClientConn, Connection, Profile, Intention)>, Failure> {
         stream.set_read_timeout(Some(LOGIN_TIMEOUT)).map_err(gone)?;
-        let mut client = Connection::from_stream(stream).map_err(gone)?;
+        let mut client = ClientConn::new(stream).map_err(gone)?;
         let (id, p) = client.recv().map_err(gone)?;
         let handshake::Serverbound::Intention(intent) =
             handshake::Serverbound::decode(id, &p).map_err(gone)?
@@ -401,7 +402,7 @@ impl Proxy {
     }
 
     /// PL: Szyfrowanie i `hasJoined` jak w serwerze gry. EN: Encryption and `hasJoined`, as the game server.
-    fn authenticate(&self, client: &mut Connection, name: &str) -> Result<Profile, Failure> {
+    fn authenticate(&self, client: &mut ClientConn, name: &str) -> Result<Profile, Failure> {
         let mut challenge = [0u8; 4];
         random_bytes(&mut challenge).map_err(gone)?;
         client
@@ -603,7 +604,7 @@ impl Proxy {
     /// połączenie: lista serwerów odpytuje często, a logowanie zgłosi problem z kodem.
     /// EN: A status query (server list) goes to the engine unchanged. A failure only ends the
     /// connection: the server list asks often, and a login reports the problem with a code.
-    fn status(&self, mut client: Connection, intent: &Intention) {
+    fn status(&self, mut client: ClientConn, intent: &Intention) {
         let Ok(stream) = TcpStream::connect_timeout(&self.engine(), CONNECT_TIMEOUT) else {
             return;
         };
@@ -655,7 +656,7 @@ fn translate(key: &str) -> String {
 
 /// PL: Odmowa w czasie logowania; błąd zapisu nic nie zmienia, bo i tak się rozłączamy.
 /// EN: A refusal during login; a failed write changes nothing, as we disconnect anyway.
-fn disconnect(client: &mut Connection, reason_json: &str) {
+fn disconnect(client: &mut ClientConn, reason_json: &str) {
     let _ = client.send(
         &login::Clientbound::Disconnect(login::Disconnect {
             reason_json: reason_json.to_owned(),
