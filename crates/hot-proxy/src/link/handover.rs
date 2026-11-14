@@ -233,6 +233,9 @@ impl Link {
         reader
             .set_read_timeout(Some(POLL))
             .map_err(|e| e.to_string())?;
+        reader
+            .set_write_timeout(Some(super::CLIENT_WRITE))
+            .map_err(|e| e.to_string())?;
         let mut properties = Vec::new();
         for p in f.list("properties")? {
             let p = Fields(p);

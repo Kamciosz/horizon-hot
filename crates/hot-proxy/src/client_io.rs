@@ -201,6 +201,13 @@ impl ClientReader {
         Ok(self.stream.set_read_timeout(timeout)?)
     }
 
+    /// PL: Termin zapisu działa na całe gniazdo, więc obejmuje też [`ClientWriter`] z tego samego
+    /// połączenia. EN: The write timeout applies to the whole socket, so it also covers the
+    /// [`ClientWriter`] of the same connection.
+    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> Result<()> {
+        Ok(self.stream.set_write_timeout(timeout)?)
+    }
+
     pub fn closer(&self) -> Result<ClientCloser> {
         Ok(ClientCloser(self.stream.try_clone()?))
     }

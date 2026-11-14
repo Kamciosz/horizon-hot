@@ -23,7 +23,9 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -437,7 +439,7 @@ fn a_file_that_cannot_take_over_is_refused_and_the_player_stays() {
 }
 
 #[test]
-fn a_player_who_stopped_reading_is_refused_in_under_a_second() {
+fn a_player_who_stopped_reading_pauses_the_others_under_a_second_then_is_dropped() {
     let discovery = session_service();
     let (engine, got) = fake_engine();
     let mut proxy = start(engine, &discovery, "stuck");
@@ -461,20 +463,81 @@ fn a_player_who_stopped_reading_is_refused_in_under_a_second() {
     }
     assert!(sent < 1024, "the flood never hung ({sent} packets)");
 
-    let start = std::time::Instant::now();
+    // PL: Drugi gracz wysyła polecenie co 20 ms, a test mierzy najdłuższą przerwę między nimi po
+    // stronie silnika: to czas, przez który podmiana go trzymała.
+    // EN: The other player sends a command every 20 ms and the test measures the longest gap
+    // between them at the engine: the time the upgrade held him.
+    let stop = Arc::new(AtomicBool::new(false));
+    let sender = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                other.send(&command(other_id)).unwrap();
+                thread::sleep(Duration::from_millis(20));
+            }
+            other
+        })
+    };
+    let watcher = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let (mut last, mut longest) = (None::<Instant>, Duration::ZERO);
+            loop {
+                match got.recv_timeout(Duration::from_millis(100)) {
+                    Ok((1, id, _)) if id == pids::serverbound::PLAYER_COMMAND => {
+                        let now = Instant::now();
+                        if let Some(last) = last {
+                            longest = longest.max(now - last);
+                        }
+                        last = Some(now);
+                    }
+                    Ok(_) => {}
+                    Err(_) if stop.load(Ordering::SeqCst) => return (got, longest),
+                    Err(_) => {}
+                }
+            }
+        })
+    };
+    thread::sleep(Duration::from_millis(300));
     let (ok, answer) = upgrade(&proxy.home, BIN);
-    let took = start.elapsed();
+    thread::sleep(Duration::from_millis(300));
+    stop.store(true, Ordering::SeqCst);
+    let mut other = sender.join().unwrap();
+    let (got, longest) = watcher.join().unwrap();
     assert!(!ok, "{answer}");
     assert!(
         answer["error"].to_string().contains("did not take writes"),
         "{answer}"
     );
-    // PL: Sprawdzenie pliku (`--check-resume`) idzie przed zatrzymaniem graczy; sama przerwa dla
-    // graczy to najwyżej 0,5 s + 0,3 s. EN: The file check runs before the players stop; the pause
-    // for the players is at most 0.5 s + 0.3 s.
-    assert!(took < Duration::from_secs(3), "took {took:?}");
+    assert!(longest < Duration::from_secs(1), "paused {longest:?}");
     assert!(proxy.child.try_wait().unwrap().is_none(), "still running");
 
+    // PL: Po terminie zapisu (15–30 s bez postępu) proxy rozłącza zawieszonego gracza i podmiana
+    // przechodzi. EN: After the write limit (15–30 s without progress) the proxy drops the hung
+    // player and the upgrade goes through.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while players(&proxy.home) != 1 {
+        assert!(
+            Instant::now() < deadline,
+            "the hung player was never dropped"
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
+    let (ok, answer) = upgrade(&proxy.home, BIN);
+    assert!(ok, "{answer}");
+    assert_eq!(answer["players"], 1, "{answer}");
+    // PL: Nowy program loguje gracza do silnika od nowa: to trzecie logowanie atrapy. Pakiety
+    // gracza z przerwy przepadają (D13), więc polecenie idzie po keep-alive nowego silnika.
+    // EN: The new program logs the player into the engine again: the stand-in's third login. The
+    // player's packets from the gap are dropped (D13), so the command goes after the new engine's
+    // keep-alive.
+    until_keep_alive(&mut other, KEEP_ALIVE + 2);
     other.send(&command(other_id)).unwrap();
-    engine_until(&got, 1, pids::serverbound::PLAYER_COMMAND);
+    engine_until(&got, 2, pids::serverbound::PLAYER_COMMAND);
+}
+
+fn players(home: &Path) -> usize {
+    let status = hot_proxy::control::request(home, "status").unwrap();
+    let status: serde_json::Value = serde_json::from_str(&status).unwrap();
+    status["players"].as_array().map_or(0, Vec::len)
 }

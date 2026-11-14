@@ -46,6 +46,18 @@ use std::time::{Duration, Instant};
 const GAP_FIRST_KEEP_ALIVE: Duration = Duration::from_secs(5);
 const GAP_KEEP_ALIVE: Duration = Duration::from_secs(10);
 
+/// PL: Termin jednego zapisu do gracza. Gracz, który przestał odbierać dane, jest rozłączany po
+/// 15–30 s: zapis, który zdążył wysłać część, kończy się po terminie bez błędu, a dopiero następny
+/// czeka cały termin i zwraca błąd. Bez tego zawieszony klient trzymałby pisarza w zapisie bez
+/// końca, a każde `upgrade` by odmawiało. Silnik wyrzuca gracza bez odpowiedzi na keep-alive też po
+/// 15–30 s.
+/// EN: The limit for one write to the player. A player who stopped taking data is dropped after
+/// 15–30 s: a write that sent a part ends at the limit without an error, and only the next one waits
+/// the whole limit and fails. Without it a hung client would hold the writer in a write forever and
+/// every `upgrade` would refuse. The engine drops a player who does not answer keep-alives after
+/// 15–30 s too.
+const CLIENT_WRITE: Duration = Duration::from_secs(15);
+
 /// PL: Przez tyle po wejściu na nowy silnik proxy ukrywa „X dołączył/opuścił grę” i `game_event` 13:
 /// to skutki podmiany, nie prawdziwe wejścia. EN: For this long after joining a new engine the proxy
 /// hides "X joined/left the game" and `game_event` 13: effects of the swap, not real joins.
@@ -175,6 +187,7 @@ impl Link {
         // EN: The login limit does not apply in game (pause menu, pack download). The player
         // reader wakes every `POLL` to notice a stop request.
         let _ = client_r.set_read_timeout(Some(POLL));
+        let _ = client_r.set_write_timeout(Some(CLIENT_WRITE));
         let _ = engine_r.set_read_timeout(None);
         let link = Arc::new(Self {
             name: profile.name.clone(),
@@ -254,7 +267,10 @@ impl Link {
             OWN_KEEP_ALIVE | st.own_keep_alive
         };
         let packet = play::Clientbound::KeepAlive(cfg::KeepAlive { id }).encode();
-        let _ = lock(&self.client).send(&packet);
+        let sent = lock(&self.client).send(&packet);
+        if let Err(e) = sent {
+            self.end(format!("the player connection ended: {e}"));
+        }
     }
 
     /// PL: Kończy połączenie z powodem widocznym dla gracza. EN: Ends the connection with a reason for the player.
@@ -358,7 +374,11 @@ impl Link {
                 continue;
             }
             if let Err(e) = client.send(&body(id, &p)) {
-                break format!("the player connection ended: {e}");
+                // PL: Zapis mógł zejść tylko w części, więc szyfrowany strumień jest zepsuty.
+                // EN: The write may have gone out only in part, so the encrypted stream is broken.
+                drop(client);
+                self.end(format!("the player connection ended: {e}"));
+                return;
             }
             drop(client);
             if kicked {
@@ -484,8 +504,11 @@ impl Link {
             let removed = old.len();
             out.push(play::Clientbound::RemoveEntities(play::RemoveEntities { ids: old }).encode());
             for packet in out {
-                if client.send(&packet).is_err() {
+                if let Err(e) = client.send(&packet) {
+                    drop(st);
+                    drop(client);
                     closer.close();
+                    self.end(format!("the player connection ended: {e}"));
                     return Rejoin::Superseded;
                 }
             }
