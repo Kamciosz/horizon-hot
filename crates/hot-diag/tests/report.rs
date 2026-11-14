@@ -54,6 +54,7 @@ fn report_has_five_parts_in_order_and_fits_200_kb() -> Result<(), DiagError> {
         versions: vec![("Horizon".into(), "nightly-2026-11-05-66f3981".into())],
         status: format!("engine: running, forwarding secret {SECRET}"),
         logs_dir: dir.clone(),
+        text_logs: Vec::new(),
         config: vec![("hot.toml".into(), "port = 25565\n".into())],
     };
     let report = build_report(&input, &redactor);
@@ -130,6 +131,7 @@ fn the_log_folder_in_headings_is_masked_too() -> Result<(), DiagError> {
     redactor.add(dir.display().to_string());
     let input = ReportInput {
         logs_dir: dir.clone(),
+        text_logs: Vec::new(),
         ..ReportInput::default()
     };
     let report = build_report(&input, &redactor);

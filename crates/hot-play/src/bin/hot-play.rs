@@ -256,6 +256,7 @@ fn report(data: &Path, cfg: &Config) {
             cfg.server, cfg.pack
         ),
         logs_dir: data.join("logs"),
+        text_logs: Vec::new(),
         config: [("config.json", "config.json"), ("state.json", "state.json")]
             .iter()
             .filter_map(|(name, file)| {

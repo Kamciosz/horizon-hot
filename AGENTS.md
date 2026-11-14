@@ -38,7 +38,7 @@ Właściciel: Szymon Sosnowski. Serwer stoi na współdzielonym ThinkCentre z Ub
 
 ```
 crates/hot-abi/    granica C ABI (stabilna, wersjonowana ABI_MAJOR)
-crates/hot-diag/   logi JSONL, kody błędów, panika w logu, szkielet hot report
+crates/hot-diag/   logi JSONL, kody błędów, panika w logu, treść hot report (zbiera go hotd report)
 crates/hot-sdk/    makro hot_mod!, Host<'call>, panika z miejscem w logu
 crates/hot-core/   gospodarz modów gorących: hot load, generacje, powrót po panice
 crates/hot-host/   mod natywny w silniku: ładuje hot-core, przekazuje haki; poza workspace
@@ -46,7 +46,7 @@ crates/hot-host/   mod natywny w silniku: ładuje hot-core, przekazuje haki; poz
 examples/licznik/  przykładowy mod gorący: licznik ticków, stan przez przeładowanie
 examples/sklep/    przykład: komenda /sklep, monety, give, tell poza komendą
 examples/teleport-blok/  przykład: klik w magnetyt, set_block, particles, run_later
-crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; data/ → paczki danych świata; assets/ → sloty i paczka zasobów; hotd status
+crates/hotd/       demon w tle: repo serwera → hot-builds → hot load; data/ → paczki danych świata; assets/ → sloty i paczka zasobów; hotd status, hotd report
 scripts/           server-install.sh (instalator serwera na Ubuntu, D25); hot-build.sh i
                    hot-publish.sh (budowa modów w CI repo serwera, ADR 0008); install.sh
                    i install.ps1 (instalacja hot-play u gracza, ADR 0016)
@@ -114,7 +114,7 @@ Do czego nie jest potrzebny silnik: `cargo test` w tym repo działa bez Horizona
 - Loguj **tylko przez `hot-diag`**. Każdy błąd ma kod `HOT-EXXXX`, pola `what`, `expected`, `context`, `cause`, `fix`, `doc`, `source`, `chain`, `state` — tak, żeby model bez wiedzy o projekcie naprawił błąd z samego wpisu.
 - Nowy błąd = stała `const X: Code = Code::new("HOT-EXXXX")` w module `codes` składnika + plik `docs/bledy/HOT-EXXXX.md` (sekcje jak w `docs/bledy/README.md`). Test `crates/hot-diag/tests/catalog.rs` sprawdza obie strony: kod w `crates/` bez pliku i plik bez kodu dają czerwone CI. Uwaga: skaner widzi też kody w komentarzach, więc w przykładach używaj tylko istniejących kodów.
 - Wpis: `DiagError::new(code, what, fix)` (bez tych trzech pól kod się nie kompiluje), potem `.context()`, `.caused_by()`, `.state()`; zapis: `Logger::error`. Panika: `install_panic_hook` zaraz po otwarciu loggera.
-- Raport do ręcznej diagnozy (do czasu `hotd`): `cargo run -p hot-diag -- report --logs <katalog logów> [--secret-file <plik>]... [--out raport.md]`.
+- `hot report` na serwerze: `sudo -u horizon /srv/horizon/bin/hotd report --home /srv/horizon/server --out /tmp/raport.md` (w kontenerze: `docs/docker.md`). Bez serwera, z samym katalogiem logów: `cargo run -p hot-diag -- report --logs <katalog logów> [--secret-file <plik>]... [--out raport.md]`.
 - Zakazane: `unwrap()`/`expect()` poza testami, komunikaty bez kontekstu („failed”), połykanie błędów.
 - Debugujesz zgłoszenie? Zacznij od `hot report` (serwer) albo raportu z „Napraw” (gracz): mają opis systemu, wersje, błędy z wpisami z katalogu i logi.
 

@@ -117,6 +117,7 @@ fn main() -> ExitCode {
             read_or_note,
         ),
         logs_dir,
+        text_logs: Vec::new(),
         config: args
             .config
             .iter()

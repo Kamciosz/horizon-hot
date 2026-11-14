@@ -21,6 +21,7 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
                  [--engine-dir DIR] [--allowed-signers FILE] [--interval SECONDS]
        hotd once (same options; one step, then exit)
        hotd status [--home DIR]
+       hotd report [--home DIR] [--out FILE]
        hotd serve-pack [--home DIR] [--port 8131]
        hotd slots-source DIR   (then: cd DIR && cargo horizon-mod build)
        hotd engine [--home DIR] [--engine horizon-server] [--reclaim-mb 256]
@@ -36,6 +37,9 @@ Usage: hotd run  --home DIR --repo URL [--branch main] [--engine horizon-server]
 --engine-dir is the horizon-server --dir of the engine (default: --home); mod data packs go
 to the world folder named in its server.toml.
 --allowed-signers defaults to <home>/hot-keys/allowed_signers.
+report writes hot report (D28): one Markdown file under 200 KB with hot status, versions, recent
+errors with their catalog entries, the last log lines (hotd, hot-core, proxy, engine, installer) and
+server.toml; secrets and players' IPv4 addresses are masked. Without --out it prints to stdout.
 engine runs the engine of the active side (the main process of the engine service, instead of
 horizon-server run) and swaps it on request (D11); logs go to <home>/logs/hotd-engine.jsonl.
 It also swaps to the same engine by itself when old mod generations hold more than
@@ -69,6 +73,7 @@ struct Args {
     interval: u64,
     port: u16,
     to: Option<PathBuf>,
+    out: Option<PathBuf>,
     reclaim_mb: u64,
 }
 
@@ -85,6 +90,7 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
         interval: 10,
         port: 8131,
         to: None,
+        out: None,
         reclaim_mb: hotd::reclaim::DEFAULT_MB,
     };
     while let Some(flag) = it.next() {
@@ -96,6 +102,7 @@ fn parse(mut it: impl Iterator<Item = String>) -> Result<Args, String> {
             "--engine" => a.engine = value()?.into(),
             "--engine-dir" => a.engine_dir = Some(value()?.into()),
             "--to" => a.to = Some(value()?.into()),
+            "--out" => a.out = Some(value()?.into()),
             "--allowed-signers" => a.allowed_signers = Some(value()?.into()),
             "--reclaim-mb" => {
                 a.reclaim_mb = value()?.parse().map_err(|e| format!("--reclaim-mb: {e}"))?;
@@ -159,6 +166,26 @@ fn main() -> ExitCode {
     if args.command == "status" {
         print!("{}", hotd::status::render(&home));
         return ExitCode::SUCCESS;
+    }
+    if args.command == "report" {
+        let (input, redactor) = hotd::report::input(&home);
+        let report = hot_diag::report::build_report(&input, &redactor);
+        return match &args.out {
+            None => {
+                print!("{report}");
+                ExitCode::SUCCESS
+            }
+            Some(path) => match std::fs::write(path, &report) {
+                Ok(()) => {
+                    println!("{}", path.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("hotd: cannot write the report to {}: {e}", path.display());
+                    ExitCode::FAILURE
+                }
+            },
+        };
     }
     if args.command == "serve-pack" {
         return serve_pack(&home, args.port);

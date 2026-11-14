@@ -41,8 +41,8 @@ reimplementation of Minecraft Java Edition 26.3. Every player owns the game; not
 the purchase check.
 
 Parts and flow:
-- Engine: the Horizon dedicated server (`horizon-server`). Two folders, engine-a and engine-b, take
-  turns on one shared world; only one runs at a time.
+- Engine: the Horizon dedicated server (`horizon-server`). Two sides take turns on one shared
+  world: side a is the server folder itself, side b is its engine-b/ subfolder; only one runs at a time.
 - hot-proxy: players connect to it on port 25565. It forwards traffic to the running engine and keeps
   players connected while the engine is replaced (the world freezes; target under 1 s, no loading screen).
 - hot-host: a tiny native mod compiled into the engine. It loads hot-core.
@@ -50,10 +50,11 @@ Parts and flow:
   item slots (hot-slots.hmod) and the /hot command.
 - hotd: background daemon. Pulls the server repository from GitHub, downloads mods built by CI,
   builds new engines, updates Horizon, makes backups, slows background work when the game lags.
-- hot-pack: serves the resource pack on port 8131.
+- hotd serve-pack: serves the resource pack and the slot pool (hot_slots.hmod) on port 8131.
 - hot-play: the players' terminal app; installs and starts the game client.
 - hot-diag: logs (JSON Lines, one file per component) and this report.
-Files on the server: /srv/horizon (engines, world, hot-state, hot-data), logs in /srv/horizon/logs.
+Files on the server: /srv/horizon; the server folder /srv/horizon/server holds the world, hot-state,
+hot-data and the logs (logs/*.jsonl, engine: logs/latest.log); the installer logs to /srv/horizon/logs.
 Source code: https://github.com/Kamciosz/horizon-hot (start with AGENTS.md).
 ";
 
@@ -66,6 +67,11 @@ pub struct ReportInput {
     pub status: String,
     /// PL: Katalog z plikami `<składnik>.jsonl`. EN: The folder with `<component>.jsonl` files.
     pub logs_dir: PathBuf,
+    /// PL: Zwykłe logi tekstowe (np. `logs/latest.log` silnika): tylko ostatnie linie, maskowane
+    /// jak reszta. Brakujący plik pomijamy.
+    /// EN: Plain text logs (e.g. the engine's `logs/latest.log`): last lines only, masked like the
+    /// rest. A missing file is skipped.
+    pub text_logs: Vec<PathBuf>,
     /// PL: Pliki konfiguracji: (nazwa, treść). EN: Configuration files: (name, content).
     pub config: Vec<(String, String)>,
 }
@@ -95,9 +101,11 @@ pub fn build_report(input: &ReportInput, redactor: &Redactor) -> String {
         );
     }
 
+    let mut tails = logs.clone();
+    tails.extend(input.text_logs.iter().filter(|p| p.is_file()).cloned());
     let used = head.len() + middle.len() + tail.len() + SAFETY_MARGIN;
-    let per_log = MAX_REPORT_BYTES.saturating_sub(used) / logs.len().max(1);
-    for path in &logs {
+    let per_log = MAX_REPORT_BYTES.saturating_sub(used) / tails.len().max(1);
+    for path in &tails {
         let lines = tail_lines(path, LOG_TAIL_LINES)
             .unwrap_or_else(|e| vec![format!("(cannot read: {e})")]);
         let body = keep_last_bytes(&mask(&lines.join("\n")), per_log.saturating_sub(200));

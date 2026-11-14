@@ -48,6 +48,8 @@ Nowe Nightly Horizona: kontener sprawdza je co godzinę i pokazuje w `hot status
 
 - Stan: `docker compose ps` (kolumna health: status przez proxy, jak lista serwerów w grze).
 - Logi: `docker compose logs server`, błędy w formacie D27: `/srv/horizon/logs/container.jsonl`.
+- Stan po polsku (`hot status`): `docker compose exec -u horizon server /opt/horizon-hot/bin/hotd status --home /srv/horizon/server`.
+- Raport dla modelu AI (`hot report`): `docker compose exec -T -u horizon server /opt/horizon-hot/bin/hotd report --home /srv/horizon/server > raport.md` (`-T`: bez terminala, więc w pliku nie ma znaków `\r`).
 - Komenda konsoli: `docker compose exec -u horizon server /opt/horizon/horizon-server --dir /srv/horizon/server cmd "list"`.
 - Zatrzymanie: `docker compose stop`. Kolejność: `hotd`, silnik (zapisuje świat), proxy, paczka.
 - Aktualizacja horizon-hot: `git pull && docker compose up -d --build`. Świat i klucze zostają w wolumenie. Kontener sam się nie aktualizuje, bo programy są w obrazie; na Ubuntu robi to `hotd upgrade` (ADR 0014).
