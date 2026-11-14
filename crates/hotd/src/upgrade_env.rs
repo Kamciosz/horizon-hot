@@ -42,6 +42,11 @@ const COME_UP: Duration = Duration::from_secs(180);
 /// `Restart=always` are active right after the start even when the program dies a moment later.
 /// Only the same `MainPID` and `NRestarts` after this time means they came up.
 const STABLE: Duration = Duration::from_secs(30);
+/// PL: Czas na odpowiedź `hot-proxy upgrade`: do 10 s na logowania, 10 s na sprawdzenie pliku,
+/// 2 s na zatrzymanie graczy i odtworzenie w nowym programie. EN: The time for the `hot-proxy
+/// upgrade` reply: up to 10 s for logins, 10 s for the file check, 2 s to stop the players and the
+/// rebuild in the new program.
+const PROXY_REPLY: Duration = Duration::from_secs(60);
 
 /// PL: Ustawienia i narzędzia prawdziwego świata. EN: The real world's settings and tools.
 #[derive(Clone)]
@@ -300,9 +305,10 @@ impl Env for Real {
         self.run("git", &["checkout", "-q", "--detach", rev])
             .map_err(|e| check_error(format!("horizon-hot {rev} cannot be checked out"), e))?;
         let mut args = vec!["build", "--release", "-q"];
-        let packages: &[&str] = match mode {
-            Mode::Core => &["hot-core"],
-            Mode::Full => &PACKAGES,
+        let (packages, programs): (&[&str], &[&str]) = match mode {
+            Mode::Core => (&["hot-core"], &[]),
+            Mode::Proxy => (&["hot-proxy"], &["hot-proxy"]),
+            Mode::Full => (&PACKAGES, &PROGRAMS),
         };
         for p in packages {
             args.extend(["-p", p]);
@@ -316,18 +322,18 @@ impl Env for Real {
                 )
             })?;
         let release = self.src.join("target").join("release");
-        let live_core = self.core_dir().join(core_file());
-        self.copy(
-            &release.join(core_file()),
-            &with_suffix(&live_core, ".next"),
-            "0644",
-        )?;
-        if mode == Mode::Full {
-            for p in PROGRAMS {
-                let staged = self.bin.join(NEXT).join(p);
-                self.copy(&release.join(p), &staged, "0755")?;
-                self.smoke(&staged)?;
-            }
+        if mode != Mode::Proxy {
+            let live_core = self.core_dir().join(core_file());
+            self.copy(
+                &release.join(core_file()),
+                &with_suffix(&live_core, ".next"),
+                "0644",
+            )?;
+        }
+        for p in programs {
+            let staged = self.bin.join(NEXT).join(p);
+            self.copy(&release.join(p), &staged, "0755")?;
+            self.smoke(&staged)?;
         }
         self.log.info(
             "hotd upgrade built a version",
@@ -381,6 +387,65 @@ impl Env for Real {
             .state("The previous hot-core runs; this version is skipped"));
         }
         Err(retry(self, format!("reply: {}", reply.trim())))
+    }
+
+    fn load_proxy(&mut self) -> Result<bool, DiagError> {
+        let live = self.bin.join("hot-proxy");
+        let previous = with_suffix(&live, ".previous");
+        let _ = fs::remove_file(&previous);
+        rename(&live, &previous)?;
+        if let Err(e) = rename(&self.bin.join(NEXT).join("hot-proxy"), &live) {
+            rename(&previous, &live)?;
+            return Err(e);
+        }
+        let _ = fs::remove_dir(self.bin.join(NEXT));
+        // PL: Proxy działa jako `horizon` i samo uruchamia nowy plik (`execve`, ten sam PID).
+        // EN: The proxy runs as `horizon` and starts the new file itself (`execve`, the same PID).
+        let mut sent = false;
+        let reply = UnixStream::connect(self.home.join("hot-proxy.sock")).and_then(|mut s| {
+            s.set_read_timeout(Some(PROXY_REPLY))?;
+            writeln!(s, "upgrade {}", live.display())?;
+            sent = true;
+            let mut line = String::new();
+            BufReader::new(s).read_line(&mut line)?;
+            Ok(line)
+        });
+        let answer: Value = reply
+            .as_deref()
+            .ok()
+            .and_then(|l| serde_json::from_str(l).ok())
+            .unwrap_or(Value::Null);
+        if answer["upgraded"] == true {
+            self.log
+                .info("hotd upgrade: hot-proxy took the players over", answer);
+            return Ok(true);
+        }
+        rename(&previous, &live)?;
+        if answer["error"].is_string() || !sent {
+            self.log.info(
+                "hotd upgrade: hot-proxy kept the players; the version waits for an empty server",
+                json!({ "reply": answer, "socket": reply.err().map(|e| e.to_string()) }),
+            );
+            return Ok(false);
+        }
+        // PL: Gniazdo przyjęło polecenie, a odpowiedzi nie ma: nowy program padł po przejęciu.
+        // EN: The socket took the command and no reply came: the new program died after the
+        // takeover.
+        let restarted = self.units.iter().find(|u| u.contains("proxy")).map(|unit| {
+            Command::new("systemctl")
+                .args(["restart", unit])
+                .output()
+                .map(|o| o.status.to_string())
+                .unwrap_or_else(|e| e.to_string())
+        });
+        Err(DiagError::new(
+            codes::UPGRADE_ROLLED_BACK,
+            "the new hot-proxy did not answer after taking the players over",
+            "Read logs/hot-proxy.jsonl (HOT-E0609) and journalctl -u horizon-hot-proxy; fix hot-proxy and push a new commit",
+        )
+        .context("reply", reply.map_or_else(|e| e.to_string(), |l| l.trim().to_owned()))
+        .context("restart", restarted.unwrap_or_else(|| "no --unit with proxy".into()))
+        .state("The previous hot-proxy file is back and the proxy restarted; the players join again; this version is skipped"))
     }
 
     fn players(&mut self) -> usize {

@@ -181,7 +181,7 @@ Kontekst: R21 — silnik wymaga przygotowanych zasobów, a ThinkCentre i tak je 
 - `hot-host` używa tylko nazwanych haków i `[transfer]`, nie łatek na dowolne funkcje (R23 — duży churn); dlatego aktualizacje rzadko będą się zatrzymywać.
 
 **D19. Aktualizacja naszego systemu.**
-`hotd`, `hot-proxy`, `hot-pack`, `hot-core` mają wydania w repo `horizon-hot`; `hotd` sprawdza je raz na dobę. `hot-core` → przeładowanie (D2). `hot-proxy` → przekazanie gniazd i stanu szyfrowania do nowego procesu (`SCM_RIGHTS`); do czasu M13 aktualizacja proxy czeka na moment bez graczy online. Zmiana z M10.1 (ADR 0014): wydanie to głowa gałęzi z `--hot-ref`; od M8.3 restart usługi silnika (`hotd engine`) zatrzymuje grę, więc `hotd` i `hot-pack` też czekają na pusty serwer i wszystkie programy zmieniają się naraz. Zmiana `hot-host`, `hot-abi`, instalatora albo puli slotów czeka na właściciela.
+`hotd`, `hot-proxy`, `hot-pack`, `hot-core` mają wydania w repo `horizon-hot`; `hotd` sprawdza je raz na dobę. `hot-core` → przeładowanie (D2). `hot-proxy` → nowy program przejmuje gniazda i stan szyfrowania w tym samym procesie (`execve`, M13.1, ADR 0033); gdy odmówi, aktualizacja proxy czeka na moment bez graczy online. Zmiana z M10.1 (ADR 0014): wydanie to głowa gałęzi z `--hot-ref`; od M8.3 restart usługi silnika (`hotd engine`) zatrzymuje grę, więc `hotd` i `hot-pack` też czekają na pusty serwer i wszystkie programy zmieniają się naraz. Zmiana `hot-host`, `hot-abi`, instalatora albo puli slotów czeka na właściciela.
 
 **D20. Samonaprawa — tabela.**
 
@@ -527,7 +527,7 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 - Sprawdzenie: `quality-audit` ≥ 120/125; każdy ADR ma kontekst, decyzję, konsekwencje (skrypt w CI sprawdza nagłówki).
 
 ### M13 — Aktualizacja proxy bez rozłączeń (D19)
-- [ ] M13.1 Przekazanie gniazd i stanu szyfrowania (`SCM_RIGHTS`).
+- [x] M13.1 Przekazanie gniazd i stanu szyfrowania (`SCM_RIGHTS`; zrobione przez `execve`, ADR 0033).
   - Projekt (2026-11-14, przed kodem): zamiast drugiego procesu i `SCM_RIGHTS` — `execve` w tym samym procesie (ten sam PID, więc systemd i kontener niczego nie zauważają; zmiana mechanizmu w ADR 0033). `hot-proxy upgrade [PLIK]` przez gniazdo sterujące:
     1. nowy plik sprawdza format stanu (`--check-resume N`); odmowa → nowy kod błędu `HOT-E06xx`, stare proxy działa dalej;
     2. proxy przestaje przyjmować połączenia (gniazdo nasłuchu zostaje otwarte, kolejka czeka w jądrze) i czeka na trwające logowania;
@@ -536,6 +536,11 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
     5. gniazda graczy, nasłuchu i plik stanu tracą `FD_CLOEXEC`, `execve(PLIK, argumenty + --resume-fd N)`;
     6. nowy kod odtwarza szyfrowanie i połączenia graczy, a do silnika loguje ich od nowa tą samą drogą, co po utracie silnika (połączenia z silnikiem zamyka `exec`). Błąd `execve` → wszystko wraca do pracy w starym procesie.
   - Strona gracza ma własny odczyt i zapis (`client_io.rs`), bo `ConnReader` czyta naprzód do prywatnego, już odszyfrowanego bufora. `hotd upgrade`: zmiana tylko w `crates/hot-proxy/` → `hot-proxy upgrade` przy graczach; reszta jak w ADR 0014.
+  - Wynik (2026-11-14): `hot-proxy upgrade [PLIK]` (`crates/hot-proxy/src/upgrade.rs`, `link/handover.rs`), kod `HOT-E0609`, ADR 0033. `hotd upgrade` ma tryb `proxy`: odmowa → stary plik wraca i wersja czeka na pusty serwer, brak odpowiedzi → stary plik, restart usługi proxy, `HOT-E0708`.
+    - Test na prawdziwym programie (`crates/hot-proxy/tests/upgrade.rs`, szyfrowany gracz, udawany silnik i usługa sesji): ten sam PID, bez ponownego logowania i bez `disconnect` po stronie gracza, pół pakietu wysłane przed podmianą dochodzi do silnika po niej, keep-alive nowego połączenia z silnikiem dochodzi do gracza. Plik bez obsługi formatu (`/usr/bin/false`): `HOT-E0609`, gracz gra dalej, drugi gracz wchodzi normalnie.
+    - Przekazanie (zatrzymanie graczy → gotowy nowy program) na Macu: 670 ms w debug, 84 ms w release; do tego ponowne wejście na silnik, mediana 67 ms z M8.2.
+    - Mutacje, które wywracają testy: zły rejestr CFB8, zgubiony odczytany bufor, deskryptor gracza z `FD_CLOEXEC`, wątek, który nie rusza po odmowie; w `hotd`: zmiana w `hot-proxy` liczona jako `full`, odmowa liczona jako awaria (`crates/hotd/tests/upgrade.rs`, `upgrade_proxy.rs`).
+    - Nie sprawdzone: brak maszyny. Prawdziwy klient Minecrafta przez prawdziwe proxy na ThinkCentre, `hotd upgrade` w trybie `proxy` pod systemd i podmiana w kontenerze.
 - Sprawdzenie: nowa wersja proxy w trakcie gry, zero rozłączeń.
 
 ---
@@ -634,6 +639,8 @@ Projekt (2026-11-13, FAKT ze źródeł Horizona 66f3981, licencja MIT):
 **2026-11-13 — M6.3 zrobione (maszyna wirtualna):** `server-install.sh --uninstall [--yes]` usuwa horizon-hot i Horizona, a zostawia świat, kopie, logi i użytkownika `horizon`; przedtem pakuje stan modów do `backups/`. Szczegóły w M6.3. Dalej: M0.19.
 
 **2026-11-13 — M0.20 zrobione na Macu: pula 4096/8192.** Z rozgrzanym silnikiem pula prawie nie zmienia pauzy: 480–549 ms na tym samym silniku, 505–573 ms na nowym pliku silnika z pustym cache; rośnie rozgrzanie (do 4,4 s, przed zamrożeniem) i pamięć czekającego silnika (ok. 515 MB). `hotd::slots` ma 4096/8192, bez slotów z tickiem (`docs/sloty.md`). Mixin `wait_for_world` kończy czekanie po SIGTERM, bo samo `stop` czekało 120 s; `hotd` przerywa podmianę przez `stop` + SIGTERM. Nie sprawdzone: ThinkCentre (M0.11). Dalej: M8.
+
+**2026-11-14 — M13.1 zrobione: nowe proxy przy graczach.** `hot-proxy upgrade` zatrzymuje graczy na granicy pakietu, zapisuje stan szyfrowania i połączeń do pliku i zastępuje swój program nowym przez `execve` (ten sam PID; ADR 0033 zamiast `SCM_RIGHTS`). Nowy program odtwarza graczy i loguje ich do silnika od nowa. Na Macu przekazanie trwa 84 ms (release). `hotd upgrade` wdraża zmianę samego `hot-proxy` tą drogą, a przy odmowie czeka na pusty serwer. Nie sprawdzone: brak maszyny (prawdziwy klient, ThinkCentre, systemd). Dalej: M12.2 czeka na właściciela; reszta otwartych kroków wymaga maszyny właściciela.
 
 **2026-11-14 — M12.3 zrobione: dokumentacja zgodna z kodem.** README i ARCHITECTURE opisują istniejące składniki, zakresy kodów błędów zgadzają się z katalogiem, instalator kieruje graczy do `hot-play`. `hot-core` podzielony na moduły bez zmiany zachowania. `quality-audit` 122/125; B2 i B3 to fałszywe trafienia wyrażeń audytu, B4 (duże pliki) zostaje otwarty z powodem przy M12.3. Przy okazji: test hamulca w CI na Linuksie zielony po poprawce (2b4be3f). Dalej: M13.1, M12.2 czeka na właściciela.
 

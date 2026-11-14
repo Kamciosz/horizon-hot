@@ -19,3 +19,7 @@ pub const CONFIG: Code = Code::new("HOT-E0604");
 /// PL: Gracza nie dało się przenieść na silnik (podmiana albo powrót silnika po awarii).
 /// EN: A player could not be moved to the engine (a swap, or the engine's return after a crash).
 pub const REJOIN: Code = Code::new("HOT-E0605");
+
+/// PL: Programu proxy nie dało się podmienić przy graczach (`hot-proxy upgrade`).
+/// EN: The proxy program could not be swapped with players on (`hot-proxy upgrade`).
+pub const UPGRADE: Code = Code::new("HOT-E0609");

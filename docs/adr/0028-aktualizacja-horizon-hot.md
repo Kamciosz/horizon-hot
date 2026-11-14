@@ -11,8 +11,8 @@ Składniki serwera (`hotd`, `hot-proxy`, `hot-core`, `hotd serve-pack`) mają si
 ## Decyzja
 
 - Wydaniem jest głowa gałęzi podanej w `--hot-ref` repo horizon-hot (tag albo commit wyłącza aktualizacje). `hotd upgrade` sprawdza ją raz na dobę (`--every 86400`), z timera co 10 minut.
-- Poprawka samego `hot-core` (z `hot-sdk`) wchodzi od razu przez przeładowanie, bez przerwy w grze. Reszta (`hotd`, `hot-proxy`, `hot-diag`, `Cargo.lock`) czeka na chwilę bez graczy i zmienia się naraz. Zmiana `hot-host`, `hot-abi`, instalatora albo puli slotów czeka na właściciela. Szczegóły: ADR 0014, `docs/aktualizacje.md`.
-- `PLAN.md` zakładał przekazanie gniazd graczy i stanu szyfrowania do nowego procesu `hot-proxy` (`SCM_RIGHTS`), żeby proxy zmieniało się przy graczach. To nie jest zrobione (M13); do tego czasu proxy zmienia się tylko na pustym serwerze.
+- Poprawka samego `hot-core` (z `hot-sdk`) wchodzi od razu przez przeładowanie, bez przerwy w grze. Poprawka samego `hot-proxy` wchodzi przy graczach przez `hot-proxy upgrade` (ADR 0033). Reszta (`hotd`, `hot-proxy`, `hot-diag`, `Cargo.lock`) czeka na chwilę bez graczy i zmienia się naraz. Zmiana `hot-host`, `hot-abi`, instalatora albo puli slotów czeka na właściciela. Szczegóły: ADR 0014, `docs/aktualizacje.md`.
+- `PLAN.md` zakładał przekazanie gniazd graczy i stanu szyfrowania do nowego procesu `hot-proxy` (`SCM_RIGHTS`). M13.1 zrobiło to inaczej: `execve` w tym samym procesie, z tym samym PID (ADR 0033). Gdy proxy odmówi, wersja czeka na pusty serwer jak reszta.
 
 ## Konsekwencje
 

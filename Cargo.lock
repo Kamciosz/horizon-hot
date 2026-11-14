@@ -263,6 +263,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-protocol",
  "hot-diag",
+ "libc",
  "serde_json",
  "sha2",
  "ureq",

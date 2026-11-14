@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 hot-diag = { path = "../hot-diag" }
 horizon-protocol.workspace = true
+libc.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 ureq.workspace = true

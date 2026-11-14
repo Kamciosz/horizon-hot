@@ -164,12 +164,14 @@ Instalator wpisuje te same `--hot-source` i `--hot-ref`, z których zbudował se
 2. **Podział** po `git diff --name-only <wersja z /srv/horizon/hot-version> <nowa>` (`plan` w `crates/hotd/src/upgrade.rs`):
    - same dokumenty (oprócz `AGENTS.md`, który wbudowuje `hot-diag report`), testy, `spikes/`, `.github/`, `examples/`, `crates/hot-play/` i `scripts/install.*` (aplikacja gracza), pliki kontenera: nowa wersja zapisuje się bez budowy;
    - tylko `crates/hot-core`: tryb `core`;
+   - tylko `crates/hot-proxy`: tryb `proxy`;
    - `crates/hot-host`, `crates/hot-abi`, instalator, `templates/`, `crates/hotd/src/slots.rs`: nic się nie wdraża, `HOT-E0706`;
    - reszta: tryb `full`.
 3. **Budowa** z uid i gid użytkownika `horizon` (ten sam `HOME` i `PATH` co instalator), w tle (`horizon-bg.slice`, `nice`, hamulec MSPT). Nieudana budowa albo sieć: `HOT-E0705`, ponowienie po dobie.
 4. **Tryb `core`:** nowy plik obok starego (`libhot_core.so.next`), `hot core load` w działającym silniku, przy graczach. Po „Rdzeń podmieniony” nowy plik zastępuje stary. Odrzucony rdzeń: `HOT-E0707`, działa poprzedni, wersja na liście `bad`. Brak potwierdzenia (silnik nie odpowiada, trwa podmiana silnika): `HOT-E0705`, ponowienie po dobie. `crates/hot-sdk` liczy się jak `hot-core`.
-5. **Tryb `full`:** programy w `bin/.next/`, każdy musi odpowiedzieć na `--help` (jako `horizon`). Co 10 minut sprawdza liczbę graczy (gniazdo `hot-proxy`, potem `status --json` silnika). Przy zerze: stare pliki dostają końcówkę `.previous`, nowe wchodzą na ich miejsce, usługi restartują się w podanej kolejności, a `hotd upgrade` czeka do 3 minut, aż wszystkie będą aktywne, a silnik w fazie `running`.
-6. **Powrót:** gdy któraś usługa nie wstanie w 3 minuty albo w następnych 30 s zmieni `MainPID` lub `NRestarts` (program pada, a `Restart=always` go podnosi), wracają pliki `.previous`, usługi restartują się jeszcze raz, wersja trafia na listę `bad` (`HOT-E0708`).
+5. **Tryb `proxy`** (ADR 0033): budowa samego `hot-proxy`, próba `--help`, nowy plik w `bin/hot-proxy` (stary jako `bin/hot-proxy.previous`), potem `upgrade bin/hot-proxy` na gnieździe `hot-proxy.sock`, przy graczach. Działające proxy przekazuje graczy nowemu programowi bez rozłączania (ten sam PID, usługa się nie restartuje). Odmowa (`HOT-E0609` w `logs/hot-proxy.jsonl`) albo brak proxy na gnieździe: stary plik wraca, a wersja idzie trybem `full`. Brak odpowiedzi po przyjęciu polecenia: stary plik wraca, usługa proxy się restartuje (gracze łączą się od nowa), wersja na liście `bad` (`HOT-E0708`).
+6. **Tryb `full`:** programy w `bin/.next/`, każdy musi odpowiedzieć na `--help` (jako `horizon`). Co 10 minut sprawdza liczbę graczy (gniazdo `hot-proxy`, potem `status --json` silnika). Przy zerze: stare pliki dostają końcówkę `.previous`, nowe wchodzą na ich miejsce, usługi restartują się w podanej kolejności, a `hotd upgrade` czeka do 3 minut, aż wszystkie będą aktywne, a silnik w fazie `running`.
+7. **Powrót:** gdy któraś usługa nie wstanie w 3 minuty albo w następnych 30 s zmieni `MainPID` lub `NRestarts` (program pada, a `Restart=always` go podnosi), wracają pliki `.previous`, usługi restartują się jeszcze raz, wersja trafia na listę `bad` (`HOT-E0708`).
 
 Ograniczenia, o których trzeba wiedzieć:
 

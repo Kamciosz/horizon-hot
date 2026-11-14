@@ -29,7 +29,7 @@ Numery `D<n>` pochodzą z planu budowy (`PLAN.md`) i stoją w komentarzach w kod
 | D16 | gra ma pierwszeństwo | [0025](0025-gra-ma-pierwszenstwo.md) |
 | D17 | aktualizacja modów | [0026](0026-aktualizacja-modow.md) |
 | D18 | aktualizacja Horizona | [0027](0027-aktualizacja-horizona.md), [0013](0013-osobna-zgoda-na-aktualizacje-horizona.md) |
-| D19 | aktualizacja horizon-hot | [0028](0028-aktualizacja-horizon-hot.md), [0014](0014-samoaktualizacja-horizon-hot.md) |
+| D19 | aktualizacja horizon-hot | [0028](0028-aktualizacja-horizon-hot.md), [0014](0014-samoaktualizacja-horizon-hot.md), [0033](0033-podmiana-proxy-przy-graczach.md) |
 | D20 | samonaprawa | [0023](0023-samonaprawa.md) |
 | D21 | stan i komunikaty | [0029](0029-stan-i-komunikaty.md) |
 | D22 | repo serwera | [0030](0030-repo-serwera-i-workspace.md) |
@@ -77,6 +77,7 @@ Numery `D<n>` pochodzą z planu budowy (`PLAN.md`) i stoją w komentarzach w kod
 | [0030](0030-repo-serwera-i-workspace.md) | układ repo serwera i repo horizon-hot |
 | [0031](0031-instalator-serwera.md) | instalacja serwera jednym poleceniem |
 | [0032](0032-diagnostyka-i-przekazanie.md) | logi, raport i dokumentacja dla osoby spoza projektu |
+| [0033](0033-podmiana-proxy-przy-graczach.md) | nowy program `hot-proxy` przy graczach (`execve`, ten sam PID) |
 
 ## Inne oznaczenia w kodzie i dokumentacji
 

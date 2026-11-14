@@ -81,6 +81,7 @@
 - Decyzje D1–D29 w `docs/adr/` (ADR 0017–0032) z indeksem `docs/adr/README.md`; test `crates/hot-diag/tests/adr.rs` pilnuje części ADR, indeksu i odwołań `D<n>`.
 - `docs/operator.md`: stan serwera, raport, kopie i przywracanie, polecenia w kontenerze.
 - Przewodniki w `docs/przewodniki/`: pierwszy mod gorący, nowy hak w ABI, nowy kod błędu, wydanie.
+- `hot-proxy upgrade [PLIK]` (M13.1, ADR 0033): nowy program proxy przejmuje szyfrowanych graczy bez rozłączania, w tym samym procesie (`execve`, ten sam PID). Kod `HOT-E0609`, zależność `libc` w `hot-proxy`. Testy na prawdziwym programie: gracz zostaje, pół pakietu sprzed podmiany dochodzi do silnika, plik bez obsługi formatu jest odrzucany, a gracze grają dalej. Przekazanie na Macu: 670 ms (debug), 84 ms (release).
 
 ### Zmienione
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
@@ -122,6 +123,7 @@
 - Test hamulca `background_work_waits_while_the_brake_holds` uruchamia proces, który trwa 0,5 s: samo `echo` kończyło się na runnerze CI przed sygnałem zatrzymania (dwa czerwone przebiegi).
 - README i ARCHITECTURE opisują istniejące składniki (`hot-proxy`, `hot-play` bez dopisku „planowany”), tabela zakresów kodów błędów zgadza się z katalogiem, a podsumowanie instalatora kieruje graczy do `hot-play` zamiast ręcznego pobierania `hot_slots.hmod`.
 - `hot-core`: rdzeń podzielony na moduły `core/` (`generations`, `commands`, `restore`, `status`), testy przeładowań na `reload.rs`, `restart.rs` i `status.rs` ze wspólnym warsztatem `tests/common/mod.rs`. Zachowanie bez zmian, te same 24 testy.
+- `hotd upgrade`: wersja, która zmienia tylko `crates/hot-proxy/`, wchodzi trybem `proxy` przy graczach (`hot-proxy upgrade`); przy odmowie czeka na pusty serwer jak tryb `full`, a gdy nowe proxy nie odpowie, wraca stary plik (`HOT-E0708`). Opis w `docs/aktualizacje.md`, ADR 0014 i 0028 odsyłają do ADR 0033. `link.rs` w `hot-proxy` to teraz moduł `link/` z częścią `handover.rs`.
 
 ### Uwagi
 - Test hamulca `background_work_waits_while_the_brake_holds` szuka teraz własnego procesu po poleceniu. Brał pierwszą grupę ze wspólnego rejestru, a równoległy test z `du` (`disk.rs`) też tam trafia; w CI na Linuksie dawało to czerwony przebieg ze stanem cudzego procesu (`D`).

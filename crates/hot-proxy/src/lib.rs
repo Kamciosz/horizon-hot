@@ -22,6 +22,7 @@ pub mod link;
 pub mod ping;
 pub mod remap;
 pub mod session;
+pub mod upgrade;
 
 /// PL: Wersja `hot-proxy` w logach. EN: The `hot-proxy` version in logs.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -17,9 +17,14 @@
 //!
 //! Lock order: `client` → `state` → `engine`. Nobody takes an earlier lock while holding a later one.
 
+mod handover;
+
 use crate::client_io::{ClientCloser, ClientConn, ClientReader, ClientWriter};
 use crate::remap::{self, Swap};
 use crate::session::{EngineLogin, Profile, Proxy};
+use crate::upgrade::Joining;
+pub(crate) use handover::Parked;
+use handover::{Freeze, POLL};
 use horizon_protocol::{
     buf::write_varint,
     connection::{Closer, ConnReader, ConnWriter, Connection},
@@ -132,6 +137,9 @@ pub struct Link {
     ended: AtomicBool,
     /// PL: Kto pierwszy zakończył połączenie i dlaczego. EN: Who ended the connection first and why.
     why: OnceLock<String>,
+    /// PL: Postój odczytu od gracza przy podmianie programu proxy (`upgrade`).
+    /// EN: The player reader's stop during a proxy program upgrade (`upgrade`).
+    freeze: Freeze,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -147,24 +155,26 @@ pub(crate) fn body(id: i32, payload: &[u8]) -> Vec<u8> {
 
 impl Link {
     /// PL: Startuje przekazywanie po logowaniu (obie strony w konfiguracji). Wraca, gdy gracz
-    /// wyjdzie; zwraca powód. EN: Starts relaying after login (both sides in configuration).
-    /// Returns when the player leaves, with the reason.
+    /// wyjdzie; zwraca powód. `joining` liczy logowanie w toku do chwili, gdy proxy zna gracza.
+    /// EN: Starts relaying after login (both sides in configuration). Returns when the player
+    /// leaves, with the reason. `joining` counts a login in progress until the proxy knows the player.
     pub(crate) fn run(
         proxy: &Arc<Proxy>,
         client: ClientConn,
         engine: Connection,
-        profile: Profile,
-        intent: Intention,
-        address: IpAddr,
+        (profile, intent, address): (Profile, Intention, IpAddr),
+        joining: Joining,
     ) -> String {
         let (client_r, client_w) = client.split();
         let (engine_r, engine_w) = engine.split();
         let (Ok(client_closer), Ok(engine_closer)) = (client_r.closer(), engine_r.closer()) else {
             return "the connection could not be set up".into();
         };
-        // PL: Limit z logowania nie dotyczy gry (menu pauzy, pobieranie paczki).
-        // EN: The login limit does not apply in game (pause menu, pack download).
-        let _ = client_r.set_read_timeout(None);
+        // PL: Limit z logowania nie dotyczy gry (menu pauzy, pobieranie paczki). Odczyt od gracza
+        // budzi się co `POLL`, żeby zauważyć prośbę o postój.
+        // EN: The login limit does not apply in game (pause menu, pack download). The player
+        // reader wakes every `POLL` to notice a stop request.
+        let _ = client_r.set_read_timeout(Some(POLL));
         let _ = engine_r.set_read_timeout(None);
         let link = Arc::new(Self {
             name: profile.name.clone(),
@@ -181,11 +191,13 @@ impl Link {
             state: Mutex::new(State::default()),
             ended: AtomicBool::new(false),
             why: OnceLock::new(),
+            freeze: Freeze::default(),
         });
         proxy.register(&link);
+        drop(joining);
         let (l, p) = (Arc::clone(&link), Arc::clone(proxy));
         thread::spawn(move || l.engine_loop(&p, engine_r, 0, true));
-        let why = link.client_loop(client_r);
+        let why = link.client_loop(client_r, true);
         link.end(why);
         link.why.get().cloned().unwrap_or_default()
     }
@@ -255,11 +267,17 @@ impl Link {
         self.end(format!("the proxy disconnected the player: {reason}"));
     }
 
-    fn client_loop(&self, mut r: ClientReader) -> String {
-        let mut config = true;
+    /// PL: Pakiety gracza do silnika. `config`: gracz jest w konfiguracji. Między pakietami
+    /// staje na prośbę `upgrade`. EN: The player's packets to the engine. `config`: the player is
+    /// in configuration. Stops between packets when `upgrade` asks.
+    fn client_loop(&self, mut r: ClientReader, mut config: bool) -> String {
         loop {
-            let (id, mut p) = match r.recv() {
-                Ok(x) => x,
+            if self.freeze.wanted() {
+                Parked { reader: r, config } = self.freeze.park(Parked { reader: r, config });
+            }
+            let (id, mut p) = match r.poll() {
+                Ok(Some(x)) => x,
+                Ok(None) => continue,
                 Err(e) => return format!("the player connection ended: {e}"),
             };
             if config {

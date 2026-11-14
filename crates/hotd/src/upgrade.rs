@@ -1,6 +1,8 @@
 //! PL: Samoaktualizacja horizon-hot (D19, M10.1, ADR 0014). `hotd upgrade` raz na dobę sprawdza
 //! głowę gałęzi z `--hot-ref` i dzieli zmianę według plików ([`plan`]):
 //! - tylko `crates/hot-core`: nowy rdzeń wchodzi od razu przez `hot core load`, przy graczach;
+//! - tylko `crates/hot-proxy`: nowe proxy przejmuje graczy przez `hot-proxy upgrade` (ADR 0033),
+//!   przy graczach; gdy odmówi, zmiana idzie drogą pozostałego kodu;
 //! - pozostały kod: budowa w tle, pliki czekają w `bin/.next/`, a w pierwszej chwili bez graczy
 //!   wszystkie programy zmieniają się naraz i usługi restartują się razem. Gdy któraś nie wstanie,
 //!   wracają poprzednie pliki;
@@ -14,6 +16,8 @@
 //! EN: The horizon-hot self-update (D19, M10.1, ADR 0014). `hotd upgrade` checks the head of the
 //! `--hot-ref` branch once a day and splits the change by files ([`plan`]):
 //! - only `crates/hot-core`: the new core goes in at once through `hot core load`, with players;
+//! - only `crates/hot-proxy`: the new proxy takes the players over through `hot-proxy upgrade`
+//!   (ADR 0033), with players; when it refuses, the change goes the way of other code;
 //! - other code: built in the background, the files wait in `bin/.next/`, and at the first moment
 //!   without players all programs change at once and the services restart together. When one does
 //!   not come up, the previous files come back;
@@ -41,6 +45,9 @@ pub const EVERY: u64 = 24 * 3600;
 pub enum Mode {
     /// PL: Sam `hot-core`, przeładowanie przy graczach. EN: Only `hot-core`, a reload with players.
     Core,
+    /// PL: Sam `hot-proxy`, przejęcie graczy przez nowy program (ADR 0033). EN: Only `hot-proxy`,
+    /// the new program takes the players over (ADR 0033).
+    Proxy,
     /// PL: Wszystkie programy naraz, bez graczy. EN: All programs at once, without players.
     Full,
 }
@@ -104,10 +111,16 @@ pub fn plan(changed: &[String]) -> Plan {
         }
         // PL: `hot-sdk` trafia na serwer tylko w `hot-core` (`hot_mod!`). EN: `hot-sdk` reaches
         // the server only inside `hot-core` (`hot_mod!`).
-        let core_only = file.starts_with("crates/hot-core/") || file.starts_with("crates/hot-sdk/");
-        mode = match (mode, core_only) {
-            (None | Some(Mode::Core), true) => Some(Mode::Core),
-            _ => Some(Mode::Full),
+        let kind = if file.starts_with("crates/hot-core/") || file.starts_with("crates/hot-sdk/") {
+            Mode::Core
+        } else if file.starts_with("crates/hot-proxy/") {
+            Mode::Proxy
+        } else {
+            Mode::Full
+        };
+        mode = match mode {
+            Some(m) if m != kind => Some(Mode::Full),
+            _ => Some(kind),
         };
     }
     mode.map_or(Plan::Nothing, Plan::Deploy)
@@ -142,6 +155,17 @@ pub trait Env {
     /// potwierdził (ponowienie). EN: `HOT-E0707` when the engine rejected the core (the version is
     /// skipped); `HOT-E0705` when it did not confirm (a retry).
     fn load_core(&mut self) -> Result<(), DiagError>;
+    /// PL: Odłożone `hot-proxy` na miejsce i `hot-proxy upgrade` (ADR 0033). `Ok(true)`: nowy
+    /// program przejął graczy. `Ok(false)`: proxy odmówiło albo nie odpowiada na gnieździe; stary
+    /// plik wrócił, gracze grają dalej. EN: The staged `hot-proxy` into place and `hot-proxy
+    /// upgrade` (ADR 0033). `Ok(true)`: the new program took the players over. `Ok(false)`: the
+    /// proxy refused or its socket does not answer; the old file is back, the players play on.
+    ///
+    /// # Errors
+    /// PL: `HOT-E0708`, gdy nowy program nie odpowiedział po przejęciu; stary plik wrócił, a proxy
+    /// się zrestartowało. EN: `HOT-E0708` when the new program did not answer after the takeover;
+    /// the old file is back and the proxy restarted.
+    fn load_proxy(&mut self) -> Result<bool, DiagError>;
     fn players(&mut self) -> usize;
     /// PL: Odłożone pliki na miejsce, stare z końcówką `.previous`. EN: The staged files into
     /// place, the old ones with a `.previous` suffix.
@@ -379,6 +403,7 @@ impl Upgrade {
                 }
                 match mode {
                     Mode::Core => self.core(env, &newest),
+                    Mode::Proxy => self.proxy(env, &newest),
                     Mode::Full => {
                         self.stop(
                             Phase::Staged,
@@ -414,6 +439,42 @@ impl Upgrade {
                     Some(codes::UPGRADE_CORE_FAILED),
                     format!(
                         "hot-core z wersji {} się nie wczytał; działa poprzedni",
+                        short(rev)
+                    ),
+                );
+            }
+        }
+    }
+
+    fn proxy(&mut self, env: &mut dyn Env, rev: &str) {
+        match env.load_proxy() {
+            Ok(true) => self.adopt(env, rev, "nowe hot-proxy przejęło graczy bez rozłączania"),
+            Ok(false) => {
+                if let Err(e) = env.build(rev, Mode::Full) {
+                    return self.fail(
+                        env,
+                        &e,
+                        format!("wersja {} się nie zbudowała; ponowię jutro", short(rev)),
+                    );
+                }
+                self.stop(
+                    Phase::Staged,
+                    None,
+                    format!(
+                        "hot-proxy nie przejęło graczy; wersja {} wejdzie, gdy nikt nie będzie grał",
+                        short(rev)
+                    ),
+                );
+                self.deploy_when_empty(env);
+            }
+            Err(e) => {
+                env.error(&e);
+                self.mark_bad(rev);
+                self.stop(
+                    Phase::RolledBack,
+                    Some(codes::UPGRADE_ROLLED_BACK),
+                    format!(
+                        "nowe hot-proxy z wersji {} nie odpowiedziało po przejęciu graczy; wróciło poprzednie",
                         short(rev)
                     ),
                 );
@@ -542,7 +603,14 @@ mod tests {
         );
         assert_eq!(plan(&files(&["Cargo.lock"])), Plan::Deploy(Mode::Full));
         assert_eq!(
-            plan(&files(&["crates/hot-proxy/src/link.rs"])),
+            plan(&files(&["crates/hot-proxy/src/link/mod.rs", "README.md"])),
+            Plan::Deploy(Mode::Proxy)
+        );
+        assert_eq!(
+            plan(&files(&[
+                "crates/hot-proxy/src/upgrade.rs",
+                "crates/hot-core/src/lib.rs"
+            ])),
             Plan::Deploy(Mode::Full)
         );
         for blocked in [

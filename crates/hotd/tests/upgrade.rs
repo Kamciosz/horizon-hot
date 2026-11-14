@@ -28,6 +28,8 @@ struct Fake {
     core_fails: bool,
     core_unconfirmed: bool,
     restart_fails: bool,
+    proxy_refuses: bool,
+    proxy_dies: bool,
     calls: Vec<String>,
 }
 
@@ -84,6 +86,17 @@ impl Env for Fake {
             return Err(failure());
         }
         Ok(())
+    }
+    fn load_proxy(&mut self) -> Result<bool, DiagError> {
+        self.calls.push("load_proxy".into());
+        if self.proxy_dies {
+            return Err(DiagError::new(
+                codes::UPGRADE_ROLLED_BACK,
+                "fake silence",
+                "nothing",
+            ));
+        }
+        Ok(!self.proxy_refuses)
     }
     fn players(&mut self) -> usize {
         self.players
@@ -182,7 +195,7 @@ fn other_code_waits_for_an_empty_server() {
 
 #[test]
 fn services_that_do_not_come_up_bring_the_old_files_back() {
-    let mut env = Fake::new(&["crates/hot-proxy/src/link.rs"]);
+    let mut env = Fake::new(&["crates/hotd/src/daemon.rs"]);
     env.restart_fails = true;
     let mut u = Upgrade::default();
     u.step(&mut env, DAY, DAY);
@@ -290,4 +303,51 @@ fn a_version_the_installer_already_built_is_not_deployed_again() {
     u.step(&mut env, DAY + 600, DAY);
     assert_eq!(u.phase, Phase::Idle);
     assert!(env.did("discard") && !env.did("install") && !env.did("restart"));
+}
+
+#[test]
+fn a_proxy_change_takes_the_players_over_with_players() {
+    let mut env = Fake::new(&["crates/hot-proxy/src/link/mod.rs"]);
+    env.players = 3;
+    let mut u = Upgrade::default();
+    u.step(&mut env, DAY, DAY);
+    assert_eq!(u.phase, Phase::Done);
+    assert_eq!(env.version.as_deref(), Some(NEW));
+    assert!(env.did("build Proxy") && env.did("load_proxy"));
+    assert!(
+        !env.did("install") && !env.did("restart"),
+        "the proxy hands over in place, nothing restarts"
+    );
+}
+
+#[test]
+fn a_refused_proxy_change_waits_for_an_empty_server() {
+    let mut env = Fake::new(&["crates/hot-proxy/src/upgrade.rs"]);
+    env.players = 2;
+    env.proxy_refuses = true;
+    let mut u = Upgrade::default();
+    u.step(&mut env, DAY, DAY);
+    assert_eq!(u.phase, Phase::Staged);
+    assert!(u.bad.is_empty(), "a refusal is not a broken version");
+    assert!(env.did("load_proxy") && env.did("build Full") && !env.did("install"));
+    env.players = 0;
+    u.step(&mut env, DAY + 600, DAY);
+    assert_eq!(u.phase, Phase::Done);
+    assert!(env.did("install") && env.did("restart"));
+}
+
+#[test]
+fn a_proxy_that_dies_after_the_takeover_is_skipped_for_good() {
+    let mut env = Fake::new(&["crates/hot-proxy/src/session.rs"]);
+    env.proxy_dies = true;
+    let mut u = Upgrade::default();
+    u.step(&mut env, DAY, DAY);
+    assert_eq!(u.phase, Phase::RolledBack);
+    assert_eq!(u.code.as_deref(), Some("HOT-E0708"));
+    assert_eq!(env.version.as_deref(), Some(OLD));
+    assert_eq!(u.bad, vec![NEW.to_owned()]);
+    assert!(
+        !env.did("build Full"),
+        "a broken proxy is not deployed later"
+    );
 }

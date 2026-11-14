@@ -14,6 +14,7 @@ use crate::auth::SessionService;
 use crate::client_io::ClientConn;
 use crate::config::{Config, COMPRESSION};
 use crate::link::{Link, Rejoin};
+use crate::upgrade::{self, Accept, Gate, Joining};
 use crate::{codes, forwarding};
 use horizon_protocol::{
     buf::write_varint,
@@ -30,7 +31,8 @@ use horizon_protocol::{
 use hot_diag::{DiagError, Logger};
 use serde_json::json;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::os::fd::{AsRawFd, RawFd};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -47,7 +49,7 @@ pub(crate) const SWITCH_WAIT: Duration = Duration::from_secs(25);
 /// PL: Tyle gracz czeka, gdy silnik padł: supervisor wznawia go po 5–40 s, a start trwa kilka sekund.
 /// EN: How long a player waits after an engine crash: the supervisor restarts it after 5–40 s, and a
 /// start takes a few seconds.
-const ENGINE_LOST_WAIT: Duration = Duration::from_secs(180);
+pub(crate) const ENGINE_LOST_WAIT: Duration = Duration::from_secs(180);
 
 /// PL: Dlaczego połączenie się skończyło. EN: Why a connection ended.
 enum Failure {
@@ -99,6 +101,12 @@ pub struct Proxy {
     public_der: Vec<u8>,
     sessions: SessionService,
     pub(crate) log: Arc<Logger>,
+    /// PL: Przyjmowanie graczy; zamyka je `upgrade`. EN: Accepting players; `upgrade` closes it.
+    pub(crate) gate: Gate,
+    /// PL: Gniazda dla `upgrade`: nasłuch graczy i gniazdo sterujące.
+    /// EN: Sockets for `upgrade`: the players' listener and the control socket.
+    pub(crate) listener_fd: OnceLock<RawFd>,
+    pub(crate) control_fd: OnceLock<RawFd>,
 }
 
 impl Proxy {
@@ -127,6 +135,9 @@ impl Proxy {
             public_der,
             sessions,
             log,
+            gate: Gate::default(),
+            listener_fd: OnceLock::new(),
+            control_fd: OnceLock::new(),
         })
     }
 
@@ -143,16 +154,35 @@ impl Proxy {
                 thread::sleep(Duration::from_millis(250));
             }
         });
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
+        // PL: Gniazdo nieblokujące i `poll`: `upgrade` może wstrzymać przyjmowanie między
+        // dwoma `accept`. EN: A non-blocking listener and `poll`: `upgrade` can hold accepting
+        // between two `accept` calls.
+        let fd = listener.as_raw_fd();
+        let _ = self.listener_fd.set(fd);
+        if let Err(e) = listener.set_nonblocking(true) {
+            self.log.warn(
+                "hot-proxy cannot make its listener non-blocking",
+                json!({ "error": e.to_string() }),
+            );
+        }
+        loop {
+            match self.gate.accept(listener) {
+                Accept::Got(stream, joining) => {
+                    // PL: Na macOS przyjęte gniazdo dziedziczy brak blokowania.
+                    // EN: On macOS the accepted socket inherits non-blocking mode.
+                    let _ = stream.set_nonblocking(false);
                     let proxy = Arc::clone(self);
-                    thread::spawn(move || proxy.connection(stream));
+                    thread::spawn(move || proxy.connection(stream, joining));
                 }
-                Err(e) => self.log.warn(
-                    "hot-proxy could not accept a connection",
-                    json!({ "error": e.to_string() }),
-                ),
+                Accept::Nothing => upgrade::wait_readable(fd, Duration::from_millis(100)),
+                Accept::Paused => thread::sleep(Duration::from_millis(20)),
+                Accept::Failed(e) => {
+                    self.log.warn(
+                        "hot-proxy could not accept a connection",
+                        json!({ "error": e.to_string() }),
+                    );
+                    thread::sleep(Duration::from_millis(100));
+                }
             }
         }
     }
@@ -168,7 +198,7 @@ impl Proxy {
         links.push(Arc::downgrade(link));
     }
 
-    fn live(&self) -> Vec<Arc<Link>> {
+    pub(crate) fn live(&self) -> Vec<Arc<Link>> {
         lock(&self.links).iter().filter_map(Weak::upgrade).collect()
     }
 
@@ -288,7 +318,7 @@ impl Proxy {
         }
     }
 
-    fn lost(&self, link: &Link, why: &str, target: SocketAddr) {
+    pub(crate) fn lost(&self, link: &Link, why: &str, target: SocketAddr) {
         link.give_up("The server is restarting. Join again in a minute.");
         self.log.error(
             &DiagError::new(
@@ -302,7 +332,7 @@ impl Proxy {
         );
     }
 
-    fn connection(self: &Arc<Self>, stream: TcpStream) {
+    fn connection(self: &Arc<Self>, stream: TcpStream, joining: Joining) {
         let Ok(address) = stream.peer_addr() else {
             return;
         };
@@ -312,7 +342,8 @@ impl Proxy {
                 self.log
                     .info("A player joined through the proxy", who.clone());
                 let started = Instant::now();
-                let why = Link::run(self, client, engine, profile, intent, address.ip());
+                let player = (profile, intent, address.ip());
+                let why = Link::run(self, client, engine, player, joining);
                 let mut left = who;
                 left["reason"] = why.into();
                 left["seconds"] = started.elapsed().as_secs().into();
