@@ -12,8 +12,8 @@ Hak to zdarzenie z silnika, które dostają mody gorące (np. zniszczenie bloku)
 1. **`crates/hot-abi/src/lib.rs`**: nowa stała w module `kind` z następnym wolnym numerem i opisem pól `Event`, których używa. Nowy rodzaj zdarzenia jest zgodny wstecz: stary mod dostaje go jako `Event::Unknown` i go pomija, więc `ABI_MAJOR` zostaje. Podbij `ABI_MAJOR` tylko wtedy, gdy zmieniasz układ `Event`, `ModVTable` albo `HostApi`; wtedy popraw też `crates/hot-abi/tests/layout.rs` i `abi_version.rs`.
 2. **`crates/hot-host/api/src/lib.rs`**: metoda haka w `impl Hooks for HotHost`. Zdarzenia z blokiem i przedmiotem idą przez `world_event`, inne przez `Event::new(kind::…)` i `send` (wzór: `destroy_block`, `player_logged_in`). Gdy hak może anulować akcję, zwróć `Flow` z wyniku.
 3. **`crates/hot-sdk/src/lib.rs`**: wariant w `enum Event` (jest `#[non_exhaustive]`, więc mody muszą mieć gałąź `_`) i jego zamiana z `hot_abi::Event` obok `kind::DESTROY_BLOCK`.
-4. **`crates/hot-core/src/core.rs`**: zwykle nic, bo `hot-core` przekazuje każde zdarzenie wszystkim modom. Zmiana jest potrzebna tylko wtedy, gdy rdzeń ma coś zrobić sam (jak z `PLAYER_TICK`).
-5. **Test** w `crates/hot-core/tests/reload.rs`: mod testowy dostaje nowe zdarzenie, a anulowanie wraca do gospodarza.
+4. **`crates/hot-core/src/core/`** (zdarzenia rozdziela `dispatch` w `generations.rs`): zwykle nic, bo `hot-core` przekazuje każde zdarzenie wszystkim modom. Zmiana jest potrzebna tylko wtedy, gdy rdzeń ma coś zrobić sam (jak z `PLAYER_TICK`).
+5. **Test** w `crates/hot-core/tests/reload.rs` (warsztat z udawanym gospodarzem: `tests/common/mod.rs`): mod testowy dostaje nowe zdarzenie, a anulowanie wraca do gospodarza.
 6. **Dokumentacja**: lista haków w ADR 0019 (nowy ADR, jeśli zmienia decyzję), komentarz w `hot-abi`, wpis w `docs/zmiany/<gałąź>.md`.
 
 ## Sprawdzenie

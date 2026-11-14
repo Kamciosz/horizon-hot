@@ -120,6 +120,7 @@
 - `hot status` pokazuje też stan samoaktualizacji horizon-hot z `hot-state/upgrade.json`.
 - Instalator zatrzymuje samoaktualizację na czas swojej pracy w klonie `src/horizon-hot`.
 - Test hamulca `background_work_waits_while_the_brake_holds` uruchamia proces, który trwa 0,5 s: samo `echo` kończyło się na runnerze CI przed sygnałem zatrzymania (dwa czerwone przebiegi).
+- `hot-core`: rdzeń podzielony na moduły `core/` (`generations`, `commands`, `restore`, `status`), testy przeładowań na `reload.rs`, `restart.rs` i `status.rs` ze wspólnym warsztatem `tests/common/mod.rs`. Zachowanie bez zmian, te same 24 testy.
 
 ### Uwagi
 - Test hamulca `background_work_waits_while_the_brake_holds` szuka teraz własnego procesu po poleceniu. Brał pierwszą grupę ze wspólnego rejestru, a równoległy test z `du` (`disk.rs`) też tam trafia; w CI na Linuksie dawało to czerwony przebieg ze stanem cudzego procesu (`D`).
