@@ -120,6 +120,7 @@
 - `hot status` pokazuje też stan samoaktualizacji horizon-hot z `hot-state/upgrade.json`.
 - Instalator zatrzymuje samoaktualizację na czas swojej pracy w klonie `src/horizon-hot`.
 - Test hamulca `background_work_waits_while_the_brake_holds` uruchamia proces, który trwa 0,5 s: samo `echo` kończyło się na runnerze CI przed sygnałem zatrzymania (dwa czerwone przebiegi).
+- README i ARCHITECTURE opisują istniejące składniki (`hot-proxy`, `hot-play` bez dopisku „planowany”), tabela zakresów kodów błędów zgadza się z katalogiem, a podsumowanie instalatora kieruje graczy do `hot-play` zamiast ręcznego pobierania `hot_slots.hmod`.
 - `hot-core`: rdzeń podzielony na moduły `core/` (`generations`, `commands`, `restore`, `status`), testy przeładowań na `reload.rs`, `restart.rs` i `status.rs` ze wspólnym warsztatem `tests/common/mod.rs`. Zachowanie bez zmian, te same 24 testy.
 
 ### Uwagi

@@ -72,7 +72,10 @@ crates/hot-diag/  — logi JSONL z kodami błędów i hot report
 crates/hot-sdk/   — biblioteka dla autorów modów gorących (hot_mod!)
 crates/hot-core/  — gospodarz modów gorących w silniku (hot load, generacje)
 crates/hot-host/  — mod natywny w silniku, który ładuje hot-core
-crates/hotd/      — demon serwera: repo serwera → podpisane mody z CI → hot load
+crates/hotd/      — demon serwera: mody z CI, podmiana silnika, aktualizacje, hamulec, hotd status/report
+crates/hot-proxy/ — wejście graczy: kontrola zakupu, trzymanie połączeń przy podmianie silnika
+crates/hot-play/  — aplikacja gracza: instalacja, naprawa i start gry
+templates/server-repo/ — wzór repo serwera z modami (README, hot.yml)
 scripts/          — instalator serwera (server-install.sh), budowa i publikacja modów w CI repo serwera
 examples/licznik/, examples/sklep/, examples/teleport-blok/ — przykładowe mody gorące
 docs/             — architektura, decyzje (ADR), standard kodu, katalog błędów
@@ -88,6 +91,8 @@ Zamiast instalatora można użyć kontenera: `compose.yaml` w katalogu głównym
 - `docs/ARCHITECTURE.md` — jak to jest zbudowane i dlaczego
 - `docs/STANDARD_KODU.md` — komentarze, błędy i logi, testy
 - `docs/docker.md` — serwer w kontenerze Docker
+- `docs/operator.md` — instrukcja dla osoby, u której stoi serwer
+- `docs/przewodniki/` — pierwszy mod, nowy hak, nowy kod błędu, wydanie
 - `docs/bledy/` — katalog kodów błędów `HOT-EXXXX`
 - `docs/adr/` — decyzje projektowe
 - `CONTRIBUTING.md` — jak pracujemy (gałęzie, commity, pull requesty)

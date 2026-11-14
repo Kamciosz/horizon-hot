@@ -988,8 +988,8 @@ summary() {
     say "  3. Klucz tylko do odczytu (Settings → Deploy keys, bez zapisu): cat $ROOT/.ssh/deploy.pub"
   fi
   say ""
-  say "Gracze, raz: pobierz http://$ADDRESS:$PACK_PORT/hot_slots.hmod do folderu horizon-mods/ swojej instancji,"
-  say "  dopisz mod.hot_slots:true do horizon-mods.txt obok, a przy wejściu przyjmij paczkę zasobów serwera."
+  say "Gracze, raz: aplikacja hot-play z adresem $ADDRESS (polecenie w README horizon-hot, część Gracze)."
+  say "  Sama pobiera plik bloków serwera; przy wejściu trzeba przyjąć paczkę zasobów serwera."
   say "Stan: sudo -u horizon $BIN/hotd status --home $SRV"
   say "horizon-hot aktualizuje się sam z gałęzi $HOT_REF raz na dobę (tag albo commit w --hot-ref: nigdy)."
 }

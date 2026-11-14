@@ -9,16 +9,15 @@ Cel: osoba albo model bez wiedzy o projekcie naprawia błąd z samego wpisu w lo
 | Zakres | Obszar |
 |---|---|
 | `E00xx` | sama diagnostyka (`hot-diag`): zapis logu, panika |
-| `E01xx` | instalacja serwera |
-| `E02xx` | git i CI repo serwera |
-| `E03xx` | budowa silnika |
-| `E04xx` | mody gorące |
-| `E05xx` | dane i paczka zasobów |
-| `E06xx` | proxy i podmiana silnika |
-| `E07xx` | aktualizacje |
-| `E08xx` | sprzęt i hamulec MSPT |
-| `E09xx` | aplikacja gracza |
-| `E10xx` | świat i kopie zapasowe |
+| `E01xx` | instalator serwera i kontener |
+| `E02xx` | `hotd` i repo serwera: git, CI, podpisy, paczka danych, sloty, paczka zasobów, dysk, świat |
+| `E03xx` | budowa silnika z `hot-host` |
+| `E04xx` | mody gorące, `hot-core`, `hot-host` |
+| `E06xx` | `hot-proxy` i podmiana silnika |
+| `E07xx` | aktualizacje Horizona i horizon-hot |
+| `E09xx` | aplikacja gracza `hot-play` |
+
+Zakresy `E05xx`, `E08xx` i `E10xx` są wolne. Nowy kod dostaje następny numer w zakresie składnika, który go zgłasza (`docs/przewodniki/nowy-kod-bledu.md`).
 
 ## Pola wpisu w logu
 
