@@ -84,6 +84,7 @@
 - `hot-proxy upgrade [PLIK]` (M13.1, ADR 0033): nowy program proxy przejmuje szyfrowanych graczy bez rozłączania, w tym samym procesie (`execve`, ten sam PID). Kod `HOT-E0609`, zależność `libc` w `hot-proxy`. Testy na prawdziwym programie: gracz zostaje, pół pakietu sprzed podmiany dochodzi do silnika, plik bez obsługi formatu jest odrzucany, a gracze grają dalej. Przekazanie na Macu: 670 ms (debug), 84 ms (release).
 
 ### Zmienione
+- `hot-proxy upgrade`: pisarze graczy brani z terminem 0,3 s, a zatrzymanie czytelników trwa najwyżej 0,5 s (było 2 s). Gracz, który przestał odbierać dane, daje odmowę `HOT-E0609` w < 1 s zamiast zatrzymywać podmianę i resztę graczy. Próba w prawdziwej grze: 20 podmian przy 11 graczach, zero rozłączeń.
 - Pula slotów: 4096 bloków i 8192 przedmioty (wersja `4096.8192.0`), bez slotów z tickiem. Z rozgrzanym silnikiem podmiana trwa na Macu 480–573 ms (M0.20, `docs/sloty.md`).
 - Mixin `wait_for_world` przestaje czekać po pierwszym SIGTERM, więc przerwaną podmianę kończy `stop` i SIGTERM do silnika w 0,5 s zamiast 120 s.
 - D11 i `docs/podmiana.md`: nowy silnik startuje przed `stop` starego i czeka na świat; `save-all flush` przed zamrożeniem. D16: czekający silnik zajmuje 363 MB. Wniosek 3 z S12 dotyczy już tylko przerwanej podmiany i silnika bez `hot-host`. Nowy krok M0.20 (rozmiar puli i bloki z tickiem).

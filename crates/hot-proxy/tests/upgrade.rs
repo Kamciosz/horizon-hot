@@ -44,9 +44,13 @@ fn body(id: i32, payload: &[u8]) -> Vec<u8> {
 /// PL: `PlayerCommand` gracza `player` (id encji na początku). EN: A `PlayerCommand` of `player`
 /// (the entity id first).
 fn command(player: i32) -> Vec<u8> {
+    action(player, 1)
+}
+
+fn action(player: i32, action: u8) -> Vec<u8> {
     let mut p = Vec::new();
     write_varint(&mut p, player);
-    p.extend_from_slice(&[1, 0]);
+    p.extend_from_slice(&[action, 0]);
     body(pids::serverbound::PLAYER_COMMAND, &p)
 }
 
@@ -89,7 +93,11 @@ fn session_service() -> String {
 type Got = (usize, i32, Vec<u8>);
 
 /// PL: Atrapa silnika: n-te logowanie ma gracza `PLAYER + n` i keep-alive `KEEP_ALIVE + n`.
+/// `PlayerCommand` z akcją [`FLOOD`] zalewa gracza danymi bez kompresji i po każdym pakiecie
+/// zgłasza id [`FLOODED`].
 /// EN: A stand-in engine: login n has player `PLAYER + n` and keep-alive `KEEP_ALIVE + n`.
+/// A `PlayerCommand` with action [`FLOOD`] floods the player with data that does not compress and
+/// reports id [`FLOODED`] after each packet.
 fn fake_engine() -> (SocketAddr, Receiver<Got>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -103,6 +111,26 @@ fn fake_engine() -> (SocketAddr, Receiver<Got>) {
         }
     });
     (address, got)
+}
+
+const FLOOD: u8 = 9;
+const FLOODED: i32 = -1;
+
+fn flood(n: usize, c: &mut Connection, tx: &Sender<Got>) -> horizon_protocol::Result<()> {
+    let mut x = 0x2545_f491_4f6c_dd1d_u64;
+    let noise: Vec<u8> = (0..64 * 1024)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x.to_le_bytes()[0]
+        })
+        .collect();
+    for _ in 0..1024 {
+        c.send(&body(pids::clientbound::SET_TIME, &noise))?;
+        tx.send((n, FLOODED, Vec::new())).ok();
+    }
+    Ok(())
 }
 
 fn serve_login(n: usize, stream: TcpStream, tx: &Sender<Got>) -> horizon_protocol::Result<()> {
@@ -148,6 +176,9 @@ fn serve_login(n: usize, stream: TcpStream, tx: &Sender<Got>) -> horizon_protoco
     ))?;
     loop {
         let (id, p) = c.recv()?;
+        if id == pids::serverbound::PLAYER_COMMAND && p.ends_with(&[FLOOD, 0]) {
+            flood(n, &mut c, tx)?;
+        }
         tx.send((n, id, p)).ok();
     }
 }
@@ -402,5 +433,48 @@ fn a_file_that_cannot_take_over_is_refused_and_the_player_stays() {
     let (mut second, _raw, player) = join(proxy.listen);
     assert_eq!(player, PLAYER + 1);
     second.send(&command(player)).unwrap();
+    engine_until(&got, 1, pids::serverbound::PLAYER_COMMAND);
+}
+
+#[test]
+fn a_player_who_stopped_reading_is_refused_in_under_a_second() {
+    let discovery = session_service();
+    let (engine, got) = fake_engine();
+    let mut proxy = start(engine, &discovery, "stuck");
+    let (mut stuck, _raw, player) = join(proxy.listen);
+    until_keep_alive(&mut stuck, KEEP_ALIVE);
+    let (mut other, _raw2, other_id) = join(proxy.listen);
+    until_keep_alive(&mut other, KEEP_ALIVE + 1);
+
+    // PL: Gracz przestaje czytać, a silnik go zalewa; czekamy, aż zapis proxy do niego stanie.
+    // EN: The player stops reading and the engine floods him; wait until the proxy's write to him
+    // hangs.
+    stuck.send(&action(player, FLOOD)).unwrap();
+    let mut sent = 0;
+    loop {
+        match got.recv_timeout(Duration::from_secs(1)) {
+            Ok((0, FLOODED, _)) => sent += 1,
+            Ok(_) => {}
+            Err(_) if sent > 0 => break,
+            Err(e) => panic!("the flood did not start: {e}"),
+        }
+    }
+    assert!(sent < 1024, "the flood never hung ({sent} packets)");
+
+    let start = std::time::Instant::now();
+    let (ok, answer) = upgrade(&proxy.home, BIN);
+    let took = start.elapsed();
+    assert!(!ok, "{answer}");
+    assert!(
+        answer["error"].to_string().contains("did not take writes"),
+        "{answer}"
+    );
+    // PL: Sprawdzenie pliku (`--check-resume`) idzie przed zatrzymaniem graczy; sama przerwa dla
+    // graczy to najwyżej 0,5 s + 0,3 s. EN: The file check runs before the players stop; the pause
+    // for the players is at most 0.5 s + 0.3 s.
+    assert!(took < Duration::from_secs(3), "took {took:?}");
+    assert!(proxy.child.try_wait().unwrap().is_none(), "still running");
+
+    other.send(&command(other_id)).unwrap();
     engine_until(&got, 1, pids::serverbound::PLAYER_COMMAND);
 }

@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use std::net::TcpStream;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -107,10 +107,21 @@ impl Link {
         self.freeze.changed.notify_all();
     }
 
-    /// PL: Zapis do gracza; dopóki trzymany, nic do gracza nie idzie.
-    /// EN: Writing to the player; while held, nothing goes to the player.
-    pub(crate) fn writer(&self) -> MutexGuard<'_, ClientWriter> {
-        lock(&self.client)
+    /// PL: Zapis do gracza; dopóki trzymany, nic do gracza nie idzie. `None` po `deadline`: zapis
+    /// może stać w `write` do gracza, który przestał czytać.
+    /// EN: Writing to the player; while held, nothing goes to the player. `None` after `deadline`:
+    /// the writer may hang in `write` to a player who stopped reading.
+    pub(crate) fn writer_until(&self, deadline: Instant) -> Option<MutexGuard<'_, ClientWriter>> {
+        loop {
+            match self.client.try_lock() {
+                Ok(held) => return Some(held),
+                Err(TryLockError::Poisoned(p)) => return Some(p.into_inner()),
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(TryLockError::WouldBlock) => return None,
+            }
+        }
     }
 
     /// PL: Stan gracza dla nowego programu. Wołać z zatrzymanym odczytem i trzymanym zapisem.

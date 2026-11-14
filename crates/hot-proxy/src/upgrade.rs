@@ -58,9 +58,15 @@ pub const FORMAT: u32 = 1;
 /// in progress to finish.
 const SETTLE: Duration = Duration::from_secs(10);
 
-/// PL: Tyle `upgrade` czeka, aż odczyt każdego gracza stanie. EN: How long `upgrade` waits for
-/// every player reader to stop.
-const FREEZE: Duration = Duration::from_secs(2);
+/// PL: Tyle `upgrade` czeka, aż odczyt każdego gracza stanie (odczyt sprawdza co 50 ms). Razem z
+/// [`WRITERS`] to najdłuższa przerwa dla graczy, gdy podmiana się nie uda: poniżej 1 s.
+/// EN: How long `upgrade` waits for every player reader to stop (the reader checks every 50 ms).
+/// With [`WRITERS`] this is the longest pause for the players when the upgrade fails: under 1 s.
+const FREEZE: Duration = Duration::from_millis(500);
+
+/// PL: Tyle `upgrade` czeka na zapis do każdego gracza. EN: How long `upgrade` waits for each
+/// player's writer.
+const WRITERS: Duration = Duration::from_millis(300);
 
 /// PL: Tyle nowy plik ma na odpowiedź na `--check-resume`. EN: How long the new file has to answer
 /// `--check-resume`.
@@ -208,11 +214,24 @@ pub(crate) fn upgrade(proxy: &Arc<Proxy>, home: &Path, binary: &Path, reply: Raw
         return refuse(
             proxy,
             binary,
-            "a player did not stop within 2 s or is in configuration; run upgrade again",
+            "a player did not stop within 0.5 s or is in configuration; run upgrade again",
         );
     }
     let parked: Vec<Parked> = parked.into_iter().flatten().collect();
-    let writers: Vec<_> = links.iter().map(|l| l.writer()).collect();
+    let deadline = Instant::now() + WRITERS;
+    let writers: Vec<_> = links.iter().map(|l| l.writer_until(deadline)).collect();
+    if writers.iter().any(Option::is_none) {
+        drop(writers);
+        for (l, p) in links.iter().zip(parked) {
+            l.thaw(Some(p));
+        }
+        return refuse(
+            proxy,
+            binary,
+            "a player's connection did not take writes within 0.3 s (the player is not reading); run upgrade again",
+        );
+    }
+    let writers: Vec<_> = writers.into_iter().flatten().collect();
     let players: Vec<Value> = links
         .iter()
         .zip(&parked)
