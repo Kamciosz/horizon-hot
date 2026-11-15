@@ -42,7 +42,7 @@ Silnik z `hot-host` to kod natywny bez piaskownicy. Buduje go launcher Horizona 
 2. połóż launcher Horizona dla Linux x86-64 w wolumenie, np. `/srv/horizon/launcher/horizon-launcher`;
 3. odkomentuj `HOT_TRUST_NATIVE_CODE` i `HOT_LAUNCHER` w `compose.yaml`, potem `docker compose up -d`.
 
-Bez tego serwer działa, a w logu jest ostrzeżenie `HOT-E0110`. Ta ścieżka w kontenerze nie była jeszcze sprawdzona. Silnik budowany jest z pełnej rewizji Horizona, więc znikające datowane wydania mu nie przeszkadzają (ADR 0012).
+Bez tego serwer działa, a w logu jest ostrzeżenie `HOT-E0110`. Ta ścieżka w kontenerze nie była jeszcze sprawdzona. Na ARM64 ostrzeżenie `HOT-E0110` pojawia się zawsze, bo launchera Horizona dla Linux ARM64 nie ma (ADR 0034). Silnik budowany jest z pełnej rewizji Horizona, więc znikające datowane wydania mu nie przeszkadzają (ADR 0012).
 
 Nowe Nightly Horizona: kontener sprawdza je co godzinę i pokazuje w `hot status`. Żeby sam je budował, testował na kopii świata i podmieniał, odkomentuj dodatkowo `HOT_AUTO_UPDATE_HORIZON` (ADR 0013, opis kroków w `docs/aktualizacje.md`).
 
