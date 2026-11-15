@@ -43,7 +43,7 @@ Zatrzymaj się i napisz właścicielowi, co ma zrobić, tylko gdy:
 
 - brakuje danej, przy której tabela mówi „stop”;
 - następny krok wymaga zgody, której właściciel nie dał;
-- serwer nie jest x86_64;
+- serwer nie jest ani x86_64, ani aarch64 (ARM64);
 - budowa nie może pobrać przypiętej rewizji Horizona (`66f3981…`), bo zniknęła z GitHuba;
 - problem nie ustąpił po trzech próbach i blokuje dalsze kroki.
 
@@ -56,7 +56,7 @@ Pierwsze trzy sprawdzasz w kroku 1, póki właściciel jest jeszcze przy kompute
 Zanim cokolwiek zainstalujesz, sprawdź wszystko, co może wymagać właściciela: dane z tabeli, dostęp przez SSH i `sudo`, pliki gry na jego komputerze (wyszukiwanie z kroku 4) i serwer:
 
 ```sh
-uname -m                                   # musi być x86_64
+uname -m                                   # x86_64 albo aarch64 (ARM64)
 . /etc/os-release && echo "$PRETTY_NAME"
 nproc && free -h && df -h /
 docker --version; docker compose version; docker buildx version
@@ -65,7 +65,9 @@ ss -ltnp | grep -E ':(25565|8131) ' || echo 'porty wolne'
 
 Braki zgłoś od razu, w jednej wiadomości. Potem właściciel nie jest już potrzebny aż do raportu.
 
-Sprawdzone 15.11.2026: obraz zbudował się na 4 rdzeniach i 8 GiB pamięci, w emulacji x86-64 na Macu, a kontener wystartował na atrapie plików gry (z prawdziwymi plikami w Dockerze nikt go jeszcze nie uruchamiał). Mniejszej pamięci nikt nie sprawdzał; gdy kompilacja pada, pomaga `CARGO_BUILD_JOBS` (tabela objawów). Na dysku potrzeba co najmniej 10 GB wolnego miejsca: przy tej budowie pamięć podręczna Dockera zajęła ok. 7 GB, obraz ok. 0,4 GB, pliki gry zajmują ok. 0,6 GB, a do tego dochodzi świat.
+Na `aarch64` obraz buduje się dla ARM64 (ustawienie w kroku 5), a serwer działa bez modów gorących (krok 10).
+
+Sprawdzone 15.11.2026 na Macu z 4 rdzeniami i 8 GiB pamięci: obraz zbudował się w emulacji x86-64 i natywnie jako ARM64, a kontener wystartował na atrapie plików gry (z prawdziwymi plikami w Dockerze nikt go jeszcze nie uruchamiał). Mniejszej pamięci nikt nie sprawdzał; gdy kompilacja pada, pomaga `CARGO_BUILD_JOBS` (tabela objawów). Na dysku potrzeba co najmniej 10 GB wolnego miejsca: przy tej budowie pamięć podręczna Dockera zajęła ok. 7 GB, obraz ok. 0,4 GB, pliki gry zajmują ok. 0,6 GB, a do tego dochodzi świat.
 
 ### 2. Docker
 
@@ -122,14 +124,16 @@ services:
       HOT_EULA: "true"
       HOT_OP: "<nick operatora>"
 EOF
-docker compose config | grep -E 'HOT_|published'
+# tylko na ARM64: obraz dla tej architektury zamiast domyślnego x86-64
+[ "$(uname -m)" = aarch64 ] && echo '    platform: linux/arm64' >> compose.override.yaml
+docker compose config | grep -E 'HOT_|published|platform'
 ```
 
-Sprawdź w wyniku, czy cztery wartości `HOT_` są wypełnione, a `published` pokazuje tylko 25565 i 8131. `HOT_EULA: "true"` wpisujesz tylko wtedy, gdy właściciel zaakceptował EULA.
+Sprawdź w wyniku, czy cztery wartości `HOT_` są wypełnione, `published` pokazuje tylko 25565 i 8131, a `platform` pasuje do `uname -m` (`x86_64`: `linux/amd64`, `aarch64`: `linux/arm64`). `HOT_EULA: "true"` wpisujesz tylko wtedy, gdy właściciel zaakceptował EULA.
 
 ### 6. Budowa
 
-Budowa kompiluje Horizona ze źródeł, więc trwa długo. Na Macu z 4 rdzeniami, w emulacji x86-64, trwała od 32 minut (15.11.2026) do ponad 2 godzin (13.11.2026). Na serwerze czas zależy od rdzeni i pamięci; tam nikt go jeszcze nie mierzył. Uruchom ją tak, żeby przeżyła rozłączenie SSH:
+Budowa kompiluje Horizona ze źródeł, więc trwa długo. Na Macu z 4 rdzeniami trwała w emulacji x86-64 od 32 minut (15.11.2026) do ponad 2 godzin (13.11.2026), a natywnie, jako ARM64, 12 minut. Na serwerze czas zależy od rdzeni i pamięci; tam nikt go jeszcze nie mierzył. Uruchom ją tak, żeby przeżyła rozłączenie SSH:
 
 ```sh
 tmux new -d -s budowa 'docker compose build > budowa.log 2>&1; echo "koniec: $?" >> budowa.log'
@@ -178,6 +182,8 @@ Sprawdzenie z zewnątrz:
 
 Bez zgody na kod natywny pomijasz ten krok. Serwer działa wtedy jak zwykły serwer Horizona z kontrolą zakupu, a repo serwera czeka na później. Ze zgodą: `docs/docker.md`, sekcja „Mody gorące”, a w repo serwera jednorazowo `hot.yml` i sekret `HOT_SIGNING_KEY` (ścieżki wypisuje log). Tej drogi w kontenerze nikt jeszcze nie sprawdził na prawdziwym serwerze.
 
+Na ARM64 ten krok pomijasz także ze zgodą i piszesz o tym w raporcie: silnik z `hot-host` buduje launcher Horizona, a ten na Linuksa wychodzi tylko dla x86-64.
+
 ### 11. Raport dla właściciela
 
 Krótko i bez sekretów:
@@ -206,7 +212,7 @@ Krótko i bez sekretów:
 | `no space left on device` | pełny dysk | `docker system df`; usuń tylko to, co sam utworzyłeś, inaczej stop |
 | `git fetch` z `66f3981…` kończy się `not our ref` albo `couldn't find remote ref` | rewizji Horizona nie ma na GitHubie | stop: to wymaga zmiany w horizon-hot |
 | `Could not resolve host`, przekroczony czas pobierania | sieć albo DNS serwera | powtórz; sprawdź `curl -sI https://github.com` |
-| `exec format error`, `no matching manifest` | serwer nie jest x86_64 | stop |
+| `exec format error`, `no matching manifest` | obraz dla innej architektury niż serwer | `platform` w `compose.override.yaml` według kroku 5, potem `docker compose build`; serwer ani x86_64, ani aarch64: stop |
 | `Exited (3)` z `HOT-E0115`, `HOT-E0108` albo `HOT-E0112` | brak repo, EULA albo adresu | uzupełnij `compose.override.yaml`, `docker compose up -d` |
 | `HOT-E0107`, „not mounted” | pusty `./game-files` | krok 4 |
 | `HOT-E0107`, „one level too deep” | folder trafił do środka `game-files` | polecenie `mv` z logu |
@@ -237,10 +243,10 @@ Gracze wpisują wtedy `<adres>:25570`, także przy instalacji `hot-play`. `HOT_A
 
 ## Budowa poza serwerem
 
-Za słaby serwer (kompilacja pada mimo `CARGO_BUILD_JOBS=1`): obraz zbuduj na komputerze właściciela, jeśli ma Dockera i tę samą architekturę co serwer (x86_64), a potem przenieś go na serwer:
+Za słaby serwer (kompilacja pada mimo `CARGO_BUILD_JOBS=1`): obraz zbuduj na komputerze właściciela, jeśli jego Docker ma tę samą architekturę co serwer (`docker info --format '{{.Architecture}}'` na obu), a potem przenieś go na serwer:
 
 ```sh
-# na komputerze właściciela, w klonie tego repo
+# na komputerze właściciela, w klonie tego repo, z tym samym compose.override.yaml co na serwerze
 docker compose build
 docker save -o horizon-hot.tar horizon-hot:local
 scp horizon-hot.tar <serwer>:

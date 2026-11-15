@@ -13,7 +13,10 @@ services:
     build:
       context: .
     image: horizon-hot:local
-    # PL: Horizon wydaje serwer tylko na Linux x86-64. EN: Horizon ships the server for Linux x86-64 only.
+    # PL: x86-64, bo silnik z hot-host buduje launcher Horizona, a ten na Linuksa jest tylko dla x86-64.
+    #     Serwer ARM64: platform: linux/arm64 w compose.override.yaml, wtedy bez modów gorących (ADR 0034).
+    # EN: x86-64, because Horizon's launcher builds the hot-host engine and ships for Linux x86-64 only.
+    #     An ARM64 server: platform: linux/arm64 in compose.override.yaml, then without hot mods (ADR 0034).
     platform: linux/amd64
     # PL: tini jako PID 1 zbiera osierocone procesy. EN: tini as PID 1 reaps orphaned processes.
     init: true

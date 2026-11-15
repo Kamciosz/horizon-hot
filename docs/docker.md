@@ -4,7 +4,7 @@ Alternatywa dla instalatora na Ubuntu. Decyzja i ograniczenia: `docs/adr/0011-ko
 
 ## Co jest potrzebne
 
-- Docker z Compose v2 na komputerze x86-64 (Linux). Na Macu z Apple Silicon obraz działa przez emulację Rosetta, wolniej.
+- Docker z Compose v2 na Linuksie, x86-64 albo ARM64. Na ARM64 wpisz `platform: linux/arm64` w `compose.override.yaml` (pod `services.server`); serwer działa wtedy bez modów gorących (ADR 0034). Na Macu z Apple Silicon domyślny obraz x86-64 działa przez emulację Rosetta, wolniej.
 - Repo serwera z modami (jak przy instalatorze: `templates/server-repo/`).
 - Folder 26.3 przygotowany z gry właściciela w launcherze Horizon (`prepare`). Obraz go nie zawiera i nigdy nie zawierał.
 

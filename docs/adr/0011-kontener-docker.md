@@ -1,7 +1,7 @@
 # ADR 0011 — serwer w kontenerze Docker
 
 - **Data:** 2026-11-13
-- **Status:** accepted
+- **Status:** accepted, punkt o platformie zmienia ADR 0034
 - **Autor:** Szymon Sosnowski
 
 ## Kontekst

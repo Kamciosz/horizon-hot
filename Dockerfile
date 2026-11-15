@@ -2,11 +2,13 @@
 # PL: Obraz serwera horizon-hot (M8.1c, ADR 0011). Tylko programy: hotd, hot-proxy, hot-core,
 #     pula slotów oraz horizon-server i horizon-engine zbudowane ze źródeł Horizona w przypiętej
 #     rewizji (jak packaging/server/Dockerfile Horizona; datowane wydania Nightly znikają po kilku
-#     dniach). Pliki gry, świat, klucze i logi są w wolumenach, a nie w obrazie. Tylko linux/amd64.
+#     dniach). Pliki gry, świat, klucze i logi są w wolumenach, a nie w obrazie.
+#     Domyślnie linux/amd64, a linux/arm64 bez modów gorących (ADR 0034).
 # EN: The horizon-hot server image (M8.1c, ADR 0011). Programs only: hotd, hot-proxy, hot-core,
 #     the slot pool, and horizon-server and horizon-engine built from Horizon's source at the pinned
 #     revision (as Horizon's packaging/server/Dockerfile does; dated Nightly releases disappear after
-#     a few days). Game files, the world, keys and logs live in volumes, never in the image. linux/amd64 only.
+#     a few days). Game files, the world, keys and logs live in volumes, never in the image.
+#     linux/amd64 by default, linux/arm64 without hot mods (ADR 0034).
 
 ARG HORIZON_VERSION=nightly-2026-11-05-66f3981
 ARG HORIZON_REV=66f3981f522b24c250b21523a70080965b940424

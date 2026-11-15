@@ -35,7 +35,7 @@ Numery `D<n>` pochodzą z planu budowy (`PLAN.md`) i stoją w komentarzach w kod
 | D22 | repo serwera | [0030](0030-repo-serwera-i-workspace.md) |
 | D23 | repo horizon-hot | [0030](0030-repo-serwera-i-workspace.md), [0001](0001-struktura-projektu.md) |
 | D24 | klasyfikacja zmian | [0026](0026-aktualizacja-modow.md) |
-| D25 | instalator serwera | [0031](0031-instalator-serwera.md), [0011](0011-kontener-docker.md) |
+| D25 | instalator serwera | [0031](0031-instalator-serwera.md), [0011](0011-kontener-docker.md), [0034](0034-obraz-arm64.md) |
 | D26 | aplikacja gracza `hot-play` | [0015](0015-aplikacja-gracza-hot-play.md), [0016](0016-wydanie-i-samoaktualizacja-hot-play.md) |
 | D27 | logi i katalog błędów | [0032](0032-diagnostyka-i-przekazanie.md), [0003](0003-serde-json-w-hot-diag.md) |
 | D28 | `hot report` | [0032](0032-diagnostyka-i-przekazanie.md) |
@@ -78,6 +78,7 @@ Numery `D<n>` pochodzą z planu budowy (`PLAN.md`) i stoją w komentarzach w kod
 | [0031](0031-instalator-serwera.md) | instalacja serwera jednym poleceniem |
 | [0032](0032-diagnostyka-i-przekazanie.md) | logi, raport i dokumentacja dla osoby spoza projektu |
 | [0033](0033-podmiana-proxy-przy-graczach.md) | nowy program `hot-proxy` przy graczach (`execve`, ten sam PID) |
+| [0034](0034-obraz-arm64.md) | obraz Dockera także na ARM64, bez modów gorących |
 
 ## Inne oznaczenia w kodzie i dokumentacji
 
