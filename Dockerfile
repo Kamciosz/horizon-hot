@@ -19,6 +19,12 @@ RUN apt-get update -q \
  && rm -rf /var/lib/apt/lists/*
 ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
+# PL: Ile kompilacji naraz. Gdy przy małej pamięci budowa pada („signal: 9”, rustc zabity),
+#     zmniejsz: `docker compose build --build-arg CARGO_BUILD_JOBS=2`. Pusta wartość psuje cargo.
+# EN: How many compile jobs at once. When the build dies with little memory ("signal: 9", rustc
+#     killed), lower it: `docker compose build --build-arg CARGO_BUILD_JOBS=2`. An empty value breaks cargo.
+ARG CARGO_BUILD_JOBS=default
+ENV CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS
 
 # PL: Horizon ze źródeł, w rewizji sprawdzonej przez git (pełny hash). Kompilacja nie pobiera nic
 #     od Mojanga: pliki gry montuje właściciel przy starcie.

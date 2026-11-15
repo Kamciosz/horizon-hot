@@ -118,11 +118,41 @@ settings() {
     "HOT_ADDRESS holds the IP or name players type" "the game downloads the resource pack from that address; the container does not guess it" \
     "Set HOT_ADDRESS in compose.yaml to the IP or name players type to join, then docker compose up -d" \
     "nothing was started" "setting=HOT_ADDRESS"
-  [ -f "$GAME_FILES/horizon-resources.json" ] || wait_for_operator HOT-E0107 \
-    "The game files prepared from the owner's Minecraft are not mounted at $GAME_FILES" \
-    "$GAME_FILES/horizon-resources.json exists" "a first start: only the owner can prepare them, and the image never holds them" \
-    "On a computer with your Minecraft and the Horizon launcher, prepare 26.3, copy that folder to this machine and mount it read-only at $GAME_FILES (compose.yaml), then docker compose up -d" \
-    "nothing was started" "dir=$GAME_FILES"
+  game_files
+}
+
+# PL: Pliki gry muszą leżeć bezpośrednio w montowaniu i dać się czytać użytkownikowi horizon, który
+#     uruchamia silnik (skrypt działa jako root, więc samo `-f` tego nie sprawdza). Folder skopiowany
+#     o poziom za głęboko albo z prawami tylko dla właściciela daje ten sam kod, ale naprawę z dokładną
+#     przyczyną, zamiast błędu silnika przy każdym wznowieniu.
+# EN: The game files must sit directly in the mount and be readable by the horizon user that runs
+#     the engine (the script runs as root, so `-f` alone does not check that). A folder copied one
+#     level too deep or with owner-only permissions gives the same code, but a fix naming the exact
+#     cause, instead of an engine error at every restart.
+game_files() {
+  local nested rel unreadable
+  if [ ! -f "$GAME_FILES/horizon-resources.json" ]; then
+    nested=$(find "$GAME_FILES" -mindepth 2 -maxdepth 4 -name horizon-resources.json -print -quit 2>/dev/null || true)
+    if [ -n "$nested" ]; then
+      rel=$(dirname "${nested#"$GAME_FILES"/}")
+      wait_for_operator HOT-E0107 "The game files are mounted one level too deep: horizon-resources.json is in $rel inside $GAME_FILES" \
+        "$GAME_FILES/horizon-resources.json exists" "the prepared folder was copied into ./game-files instead of as ./game-files" \
+        "On the host, in the horizon-hot folder: mv ./game-files ./game-files.old && mv ./game-files.old/$rel ./game-files, then docker compose up -d" \
+        "nothing was started" "dir=$GAME_FILES" "found=$nested"
+    fi
+    wait_for_operator HOT-E0107 \
+      "The game files prepared from the owner's Minecraft are not mounted at $GAME_FILES" \
+      "$GAME_FILES/horizon-resources.json exists" "a first start: only the owner can prepare them, and the image never holds them" \
+      "On a computer with your Minecraft and the Horizon launcher, prepare 26.3, copy that folder to this machine and mount it read-only at $GAME_FILES (compose.yaml), then docker compose up -d" \
+      "nothing was started" "dir=$GAME_FILES"
+  fi
+  unreadable=$(as_horizon find "$GAME_FILES" ! -readable -print -quit 2>&1 || true)
+  [ -z "$unreadable" ] || wait_for_operator HOT-E0107 \
+    "The game files in $GAME_FILES are not readable by the horizon user that runs the engine" \
+    "every file and folder in $GAME_FILES is readable by horizon" \
+    "the files were copied with owner-only permissions, or SELinux blocks the mount" \
+    "On the host, in the horizon-hot folder: chmod -R a+rX ./game-files (with SELinux, e.g. Fedora: add :z to the game-files mount in compose.yaml), then docker compose up -d" \
+    "nothing was started" "dir=$GAME_FILES" "first=$(printf '%s\n' "$unreadable" | head -n 1)"
 }
 
 # --- PL: Klucze i pliki do repo serwera (instalator, krok 6). EN: Keys and server repo files (installer step 6). --

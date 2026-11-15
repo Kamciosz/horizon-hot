@@ -20,3 +20,7 @@ spikes/**/target/
 
 # Pliki gry właściciela dla kontenera (compose.yaml); nigdy w repo
 /game-files/
+
+# Ustawienia i notatki z wdrożenia u właściciela (docs/przewodniki/wdrozenie-docker.md)
+/compose.override.yaml
+/LOKALNE-POPRAWKI.md

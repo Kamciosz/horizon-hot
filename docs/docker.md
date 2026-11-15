@@ -13,12 +13,14 @@ Alternatywa dla instalatora na Ubuntu. Decyzja i ograniczenia: `docs/adr/0011-ko
 ```sh
 git clone https://github.com/Kamciosz/horizon-hot.git && cd horizon-hot
 cp -R <przygotowany folder 26.3> ./game-files     # folder jest w .gitignore
-# w compose.yaml uzupełnij HOT_REPO, HOT_ADDRESS, HOT_EULA ("true" po przeczytaniu EULA), HOT_OP
+# uzupełnij HOT_REPO, HOT_ADDRESS, HOT_EULA ("true" po przeczytaniu EULA) i HOT_OP: w compose.yaml albo w compose.override.yaml
 docker compose up -d --build
 docker compose logs -f server
 ```
 
-Pierwsza budowa obrazu kompiluje też Horizona ze źródeł w przypiętej rewizji, więc trwa długo: kilkadziesiąt minut na zwykłym komputerze x86-64, dłużej w emulacji. Kolejne budowy korzystają z pamięci podręcznej. Na końcu logu kontener wypisuje:
+Ustawienia w `compose.override.yaml` (git go pomija, Compose łączy go z `compose.yaml`) nie blokują `git pull` przy aktualizacji. Wdrożenie przez agenta AI krok po kroku, z naprawami typowych problemów: `docs/przewodniki/wdrozenie-docker.md`.
+
+Pierwsza budowa obrazu kompiluje też Horizona ze źródeł w przypiętej rewizji, więc trwa długo: kilkadziesiąt minut na zwykłym komputerze x86-64, dłużej w emulacji. Kolejne budowy korzystają z pamięci podręcznej. Gdy przy małej pamięci kompilacja pada z `signal: 9`, zbuduj z mniejszą liczbą zadań naraz: `docker compose build --build-arg CARGO_BUILD_JOBS=2`. Na końcu logu kontener wypisuje:
 - adres dla graczy i adres paczki zasobów;
 - ścieżkę `hot.yml` i klucza `hot-ci` do repo serwera (raz, jak przy instalatorze);
 - przy repo prywatnym klucz tylko do odczytu do Settings → Deploy keys.

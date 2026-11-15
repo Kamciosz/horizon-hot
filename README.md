@@ -14,11 +14,9 @@ Pracujesz nad projektem (człowiek albo agent AI)? Zacznij od `AGENTS.md`.
 
 Potrzebne: Ubuntu 22.04 albo 24.04 na x86_64, dostęp `sudo`, repo serwera na GitHubie (wzór: `templates/server-repo/`) i własny, kupiony Minecraft Java u właściciela serwera.
 
-Dopóki `spike/m0` nie jest scalone do `main`, instalator bierze się z tej gałęzi:
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/spike/m0/scripts/server-install.sh \
-  | sudo bash -s -- --hot-ref spike/m0 --repo https://github.com/<właściciel>/<repo-serwera> --address <IP-serwera> --eula --op <nick>
+curl -fsSL https://raw.githubusercontent.com/Kamciosz/horizon-hot/main/scripts/server-install.sh \
+  | sudo bash -s -- --repo https://github.com/<właściciel>/<repo-serwera> --address <IP-serwera> --eula --op <nick>
 ```
 
 Skrypt zatrzymuje się kodem 3 w dwóch miejscach i wypisuje polecenie do powtórki:
@@ -55,7 +53,7 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\hot-play-install.ps1 ADRES
 
 Na pulpicie pojawia się skrót „Graj”. Menu ma trzy pozycje: „Graj” (instaluje i naprawia launcher Horizona, wersję gry, plik bloków serwera i listę serwerów, za pierwszym razem prosi o logowanie, potem łączy z serwerem), „Napraw” (sprawdza wszystko od nowa i zapisuje na pulpicie `hot-play-raport.md` do wysłania właścicielowi) i „Wyjdź”. Aplikacja sama się aktualizuje przy starcie (ADR 0016). Bez pliku bloków serwera (`hot_slots.hmod`) serwer nie wpuści gracza („Your mods don't match”), dlatego „Graj” zawsze go sprawdza.
 
-Wydanie `hot-play` na GitHubie powstaje dopiero po pierwszym merge'u na `main`: wcześniej linki wyżej nie działają, a pliki są tylko w artefaktach przebiegów workflow `hot-play`.
+Pliki do linków wyżej są w wydaniu `hot-play` na GitHubie. CI odnawia je po scaleniu do `main` zmian w `hot-play` (`docs/przewodniki/wydanie.md`).
 
 ## Testy
 ```bash
@@ -84,7 +82,7 @@ PLAN.md           — plan budowy i dziennik prac (historia); decyzje są w docs
 
 ## Uruchomienie w Dockerze
 
-Zamiast instalatora można użyć kontenera: `compose.yaml` w katalogu głównym. Uzupełnij w nim `HOT_REPO`, `HOT_ADDRESS`, `HOT_EULA` i `HOT_OP`, skopiuj przygotowany folder 26.3 do `./game-files` i uruchom `docker compose up -d --build`. Na zewnątrz wychodzą tylko porty 25565 (proxy z kontrolą zakupu) i 8131 (paczka zasobów). Obraz nie zawiera plików gry. Szczegóły: `docs/docker.md`.
+Zamiast instalatora można użyć kontenera: `compose.yaml` w katalogu głównym. Uzupełnij w nim `HOT_REPO`, `HOT_ADDRESS`, `HOT_EULA` i `HOT_OP`, skopiuj przygotowany folder 26.3 do `./game-files` i uruchom `docker compose up -d --build`. Na zewnątrz wychodzą tylko porty 25565 (proxy z kontrolą zakupu) i 8131 (paczka zasobów). Obraz nie zawiera plików gry. Szczegóły: `docs/docker.md`. Wdrożenie przez agenta AI na serwerze właściciela, z warunkami stopu i naprawami typowych problemów: `docs/przewodniki/wdrozenie-docker.md`.
 
 ## Dokumentacja
 - `AGENTS.md` — wejście dla nowej osoby i agenta AI: słownik, zasady, typowe zadania
@@ -92,7 +90,7 @@ Zamiast instalatora można użyć kontenera: `compose.yaml` w katalogu głównym
 - `docs/STANDARD_KODU.md` — komentarze, błędy i logi, testy
 - `docs/docker.md` — serwer w kontenerze Docker
 - `docs/operator.md` — instrukcja dla osoby, u której stoi serwer
-- `docs/przewodniki/` — pierwszy mod, nowy hak, nowy kod błędu, wydanie
+- `docs/przewodniki/` — pierwszy mod, nowy hak, nowy kod błędu, wydanie, wdrożenie w Dockerze
 - `docs/bledy/` — katalog kodów błędów `HOT-EXXXX`
 - `docs/adr/` — decyzje projektowe
 - `CONTRIBUTING.md` — jak pracujemy (gałęzie, commity, pull requesty)

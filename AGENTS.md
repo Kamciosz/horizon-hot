@@ -72,6 +72,7 @@ PLAN.md            plan budowy i dziennik prac (historia); decyzje: docs/adr/REA
 - **Nowy błąd:** `docs/przewodniki/nowy-kod-bledu.md` (sekcja 7).
 - **Wydanie:** `docs/przewodniki/wydanie.md`. Scalenie do `main` publikuje `hot-play`, więc decyduje właściciel.
 - **Obsługa serwera** (stan, raport, kopie): `docs/operator.md`.
+- **Wdrożenie u właściciela** (Docker przez SSH, bez kontaktu z autorami): `docs/przewodniki/wdrozenie-docker.md` — kroki, warunki stopu, objawy i naprawy.
 - **Zmiana decyzji architektonicznej:** najpierw nowy ADR w `docs/adr/`, potem kod. Numery `D1`–`D29` w kodzie prowadzą do ADR przez `docs/adr/README.md`.
 - **Nie wiesz, a dokumentacja nie odpowiada:** zapytaj właściciela; w sprawach z sekcji 6 nie zgaduj. Po wyjaśnieniu dopisz odpowiedź do dokumentacji.
 
@@ -90,7 +91,7 @@ Próba `hotd` bez GitHuba: lokalne repo z `mods/<id>/`, `HOT_SIGNING_KEY_FILE=<k
 
 Instalator serwera: `scripts/server-install.sh --repo URL --eula` jako root na Ubuntu x86_64 (kroki i kody `HOT-E0101`–`HOT-E0115` w nagłówku skryptu i w `docs/bledy/`; silnik na `127.0.0.1:25566` za `hot-proxy` na porcie graczy). Kod wyjścia 3 = czeka na właściciela: pliki gry (`--resources DIR`) albo zgoda na kod natywny (`--trust-native-code`; tej zgody agent nie daje). Próba bez Horizona w maszynie wirtualnej: `--test-no-horizon` (pomija pobranie Horizona, świat i silnik). Nie uruchamiaj go na Macu ani na maszynie z grą: zakłada użytkownika, usługi systemd i zaporę.
 
-Kontener (ADR 0011, `docs/docker.md`): `Dockerfile`, `compose.yaml`, `scripts/container-entrypoint.sh`. Skrypt startowy powtarza kroki instalatora dotyczące danych i pilnuje procesów zamiast systemd. Zmieniasz krok w instalatorze, zmień go też tam; `crates/hot-proxy/tests/installer.rs` pilnuje w obu kolejności sekret → `127.0.0.1` → `online_mode = false`, portów i zgody na kod natywny. `HOT_TRUST_NATIVE_CODE` i `HOT_AUTO_UPDATE_HORIZON` w `compose.yaml` zostają zakomentowane, a instalatora nie uruchamiasz z `--auto-update-horizon` (ADR 0013: samodzielne budowanie nowych Nightly to osobna zgoda właściciela). Obrazu nie publikujemy w rejestrze bez zgody właściciela. Plików gry nie montujesz ani nie pobierasz za właściciela.
+Kontener (ADR 0011, `docs/docker.md`): `Dockerfile`, `compose.yaml`, `scripts/container-entrypoint.sh`. Skrypt startowy powtarza kroki instalatora dotyczące danych i pilnuje procesów zamiast systemd. Zmieniasz krok w instalatorze, zmień go też tam; `crates/hot-proxy/tests/installer.rs` pilnuje w obu kolejności sekret → `127.0.0.1` → `online_mode = false`, portów i zgody na kod natywny. `HOT_TRUST_NATIVE_CODE` i `HOT_AUTO_UPDATE_HORIZON` w `compose.yaml` zostają zakomentowane, a instalatora nie uruchamiasz z `--auto-update-horizon` (ADR 0013: samodzielne budowanie nowych Nightly to osobna zgoda właściciela). Obrazu nie publikujemy w rejestrze bez zgody właściciela. Plików gry nie pobierasz ani nie przygotowujesz za właściciela. Wdrażając serwer na jego prośbę, kopiujesz na ten serwer tylko folder, który właściciel sam przygotował w launcherze (`docs/przewodniki/wdrozenie-docker.md`, krok 4).
 
 Gotowe = te trzy przechodzą + test, który by oblał bez Twojej zmiany + zaktualizowana dokumentacja w tym samym commicie.
 
